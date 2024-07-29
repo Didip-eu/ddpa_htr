@@ -12,7 +12,12 @@ TODO:
 Examples:
 	
 ```python	
+
+# Explicit recognition model
 python3 bin/ddp_htr.py -img_paths /home/nicolas/tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*img.jpg -model_path $HOME/tmp/models/htr/Tridis_by_Torres-Aguilar_2024/Tridis_Medieval_EarlyModern.mlmodel
+
+# Using the default model (Tridis)
+python3 bin/ddp_htr.py -img_paths /home/nicolas/tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*img.jpg 
 ```
 
 

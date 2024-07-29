@@ -21,7 +21,6 @@ import seglib
 p = {
 
     "appname": "htr",
-    #"model_path": Path.home().joinpath('tmp','models','htr', 'Tridis_by_Torres-Aguilar_2024', 'Tridis_Medieval_EarlyModern.mlmodel'),
     "model_path": Path( root, 'models', 'htr', 'default.mlmodel' ),
     "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*.jpg")))),
     "segmentation_dir": "", # for testing purpose
