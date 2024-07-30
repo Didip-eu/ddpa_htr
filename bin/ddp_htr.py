@@ -21,10 +21,11 @@ import seglib
 p = {
 
     "appname": "htr",
-    "model_path": Path( root, 'models', 'htr', 'default.mlmodel' ),
+    "model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )),
     "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*.jpg")))),
-    "segmentation_dir": "", # for testing purpose
+    "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
     "segmentation_file_suffix": "lines.pred", # under each image dir, suffix of the subfolder that contains the segmentation data 
+    "no_legacy_polygons": [True, "Enforce newer polygon extraction method, no matter how the model was trained."]
         }
 
 
@@ -73,7 +74,8 @@ if __name__ == "__main__":
         pred_it = rpred.rpred( 
                         network = htr_model, 
                         im = Image.open( path ), 
-                        bounds = segmentation_object )
+                        bounds = segmentation_object,
+                        no_legacy_polygons = args.no_legacy_polygons)
 
         for line, line_id, record in zip(range(1, len(line_ids)+1), line_ids, pred_it):
             print(f'{line}\t{line_id}\t{record}')
