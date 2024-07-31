@@ -1,0 +1,4 @@
+-e git+git@github.com:nicolasrenet/fargv.git@9ed6c466e09a57f8a177ee2cce94f56ea7c4dbb3#egg=fargv
+-e git+git@github.com:nicolasrenet/handwriting_datasets.git@b911a434b212f06066fb964b991604a63d402d88#egg=handwriting_datasets
+-e git+git@github.com:Didip-eu/kraken_didip.git@261cfc5406ecde7d8fee2b281e497af6958f95e4#egg=kraken
+pillow==10.4.0
