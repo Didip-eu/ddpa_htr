@@ -1,22 +1,22 @@
 from os import PathLike
 import torch
 from torch import Tensor
+from torch.utils.data import DataLoader
+
 from typing import Union,Tuple,List
 import warnings
+
 
 
 class HTR_Model:
 
 
-    def __init__(self, alphabet: list):
-        self._utf_2_code = alphabet
+    def __init__(self, alphabet: 'Alphabet'):
+        self.alphabet = alphabet
 
-    @property
-    def alphabet( self ):
-        return self._utf_2_code
 
     def infer( self, img_bcwh: Tensor, widths: Tensor, heights: Tensor, masks: Tensor):
-        pass
+        pass  
 
 
     def save():
@@ -32,6 +32,8 @@ class HTR_Model:
     def __repr__( self ):
         return "HTR_Model()"
 
+class FileDataLoader( DataLoader ):
+    pass
 
 
 class Alphabet:
@@ -177,5 +179,6 @@ class Alphabet:
             lengths = torch.full( (sample_count,), max_length )
         return [ self.decode( s, lgth ) for (s,lgth) in zip( samples_bw, lengths ) ]
         
+
 def dummy():
     return True
