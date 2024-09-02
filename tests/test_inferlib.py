@@ -126,10 +126,11 @@ def test_encode_batch_1():
 def test_decode_batch():
 
     alpha= inferlib.Alphabet('ßa fdb\n\tce\t→') 
-    batch = (torch.tensor( [[2, 3, 4, 1, 5, 6, 7, 1],
-119                         [8, 6, 4, 3, 4, 2, 1, 0]], dtype=torch.int64),
+    samples, lengths = (torch.tensor( [[2, 3, 4, 1, 5, 6, 7, 1],
+                            [8, 6, 4, 3, 4, 2, 1, 0]], dtype=torch.int64),
              torch.tensor( [8, 7]))
-    assert alpha.decode_batch( batch ) == ["abc def ", "ßecbca"]
+    assert alpha.decode_batch( samples, lengths ) == ["abc def ", "ßecbca "]
+    assert alpha.decode_batch( samples, None ) == ["abc def ", "ßecbca ."]
 
 
 def test_dummy( data_path):

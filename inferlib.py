@@ -147,10 +147,35 @@ class Alphabet:
 
 
     def decode(self, sample_t: Tensor, length: int=-1 ) -> str:
+        """ 
+        Decode an integer-encoded sample.
+
+        Input:
+            sample_t (Tensor): a tensor of integers.
+            length (int): sample's length; if -1 (default), all symbols are decoded.
+        Output:
+            str: string of symbols.
+        """
         length = len(sample_t) if length < 0 else length
         return "".join( [self.get_symbol( c ) for c in sample_t.tolist()[:length] ] )
 
 
+    def decode_batch(self, samples_bw: Tensor, lengths: Tensor=None ) -> List[ str ]:
+        """
+        Decode a batch of integer-encoded samples.
+
+        Input:
+            sample_bw (Tensor): each row of integer encodes a string.
+            lengths (int): length to be decoded in each sample; the default
+                           is full-length decoding.
+
+        Output:
+            list: a sequence of strings.
+        """
+        if lengths == None:
+            sample_count, max_length = samples_bw.shape
+            lengths = torch.full( (sample_count,), max_length )
+        return [ self.decode( s, lgth ) for (s,lgth) in zip( samples_bw, lengths ) ]
         
 def dummy():
     return True
