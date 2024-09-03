@@ -32,8 +32,7 @@ class HTR_Model:
     def __repr__( self ):
         return "HTR_Model()"
 
-class FileDataLoader( DataLoader ):
-    pass
+
 
 
 class Alphabet:

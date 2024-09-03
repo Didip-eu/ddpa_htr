@@ -1,8 +1,6 @@
-
-# Build
-
-~~
->>> from handwriting_datasets import monasterium
-
->>> ds = monasterium.MonasteriumDataset(task='htr',shape='polygons', work_folder='/home/nicolas/tmp/data/Monasterium/MonasteriumHandwritingDatasetHTR2_bbox', count=12)
-~~~~
+Task was built with the following options:
+subset=all
+	+ task=htr
+	+ shape=bbox
+	+ count=20
+	+ work_folder=/home/nicolas/graz/htr/ddpa_htr/tests/data/toydataset
