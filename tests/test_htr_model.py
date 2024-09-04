@@ -12,12 +12,13 @@ sys.path.append( str( Path(__file__).parents[1] ) )
 
 import inferlib
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def data_path():
     return Path( __file__ ).parent.joinpath('data')
 
 
-def test_datapath( data_path ):
+def test_dummy( data_path ):
+    assert inferlib.dummy()
     assert isinstance(data_path, Path )
 
 
@@ -26,17 +27,20 @@ def test_model_init():
     assert len( inferlib.HTR_Model( alphabet ).alphabet ) == 5
 
 
-def test_dataloader_file( data_path ):
+@pytest.fixture(scope="session")
+def data_loader( data_path ):
 
-    ds = monasterium.MonasteriumDataset(task='htr', work_folder=data_path.joinpath('toydataset'), build_items=False, transform=partial(monasterium.MonasteriumDataset.size_fit_transform, max_h=300, max_w=2000))
+    ds = monasterium.MonasteriumDataset(task='htr', from_tsv_file=data_path.joinpath('toydataset','monasterium_ds.tsv'), transform=partial(monasterium.MonasteriumDataset.size_fit_transform, max_h=300, max_w=2000))
     # + should keep track of widths and heights for padded images
     dl = DataLoader( list(ds), batch_size=4) 
-    assert len(dl) == 5
+    return dl
 
 
 
-def dtest_infer_input():
+def test_infer_input_batch( data_loader ):
     htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    htr_model.infer( next(iter(data_loader))) == 4
+
 
     # What is possible
     # - a directory contains both *.png and *.gt transcriptions: settle with this for the moment, for ease of testing

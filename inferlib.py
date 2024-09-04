@@ -15,15 +15,14 @@ class HTR_Model:
         self.alphabet = alphabet
 
 
-    def infer( self, img_bcwh: Tensor, widths: Tensor, heights: Tensor, masks: Tensor):
-        pass  
+    def infer( self, img_bchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None):
+        return len(img_bchw)
 
-
-    def save():
+    def save( self ):
         pass
 
 
-    def resume(path: PathLike):
+    def resume( self, path: PathLike):
         pass
 
     def transcribe( self ):
