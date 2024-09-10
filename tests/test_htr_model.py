@@ -5,7 +5,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from pathlib import Path
 from handwriting_datasets import monasterium
-from functools import partial
+from torchvision.transforms import PILToTensor, ToPILImage, Compose
 
 # Append app's root directory to the Python search path
 sys.path.append( str( Path(__file__).parents[1] ) )
@@ -21,6 +21,13 @@ def test_dummy( data_path ):
     assert inferlib.dummy()
     assert isinstance(data_path, Path )
 
+@pytest.fixture(scope="session")
+def bbox_data_set( data_path ):
+    return monasterium.MonasteriumDataset(
+            task='htr', shape='bbox',
+            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
+            transform=Compose([ monasterium.ResizeToMax(300,2000), monasterium.PadToSize(300,2000) ]))
+
 
 def test_model_init():
     alphabet = inferlib.Alphabet("abcd")
@@ -28,19 +35,53 @@ def test_model_init():
 
 
 @pytest.fixture(scope="session")
-def data_loader( data_path ):
+def data_loader( bbox_data_set ):
 
-    ds = monasterium.MonasteriumDataset(task='htr', from_tsv_file=data_path.joinpath('toydataset','monasterium_ds.tsv'), transform=partial(monasterium.MonasteriumDataset.size_fit_transform, max_h=300, max_w=2000))
     # + should keep track of widths and heights for padded images
-    dl = DataLoader( list(ds), batch_size=4) 
+    dl = DataLoader( bbox_data_set, batch_size=4) 
     return dl
 
 
 
-def test_infer_input_batch( data_loader ):
+def test_data_loader_batch_size( data_loader ):
     htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
     htr_model.infer( next(iter(data_loader))) == 4
 
+
+def test_data_loader_batch_structure_img( data_loader ):
+    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    b = next(iter(data_loader))
+
+    assert [ isinstance(i, Tensor) for i in b['img'] ] == [ True ] * 4
+
+def test_data_loader_batch_structure_height_width( data_loader ):
+    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    b = next(iter(data_loader))
+
+    assert isinstance(b['height'], Tensor) and len(b['height'])==4
+    assert isinstance(b['width'], Tensor) and len(b['width'])==4
+
+def test_data_loader_batch_structure_transcription( data_loader ):
+    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    b = next(iter(data_loader))
+
+    assert [ type(t) for t in b['transcription'] ] == [ str ] * 4
+
+def test_data_loader_batch_structure_mask( data_loader ):
+    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    b = next(iter(data_loader))
+
+    assert [ isinstance(i, Tensor) for i in b['mask'] ] == [ True ] * 4
+    assert [ i.dtype for i in b['mask'] ] == [ torch.bool ] * 4
+
+
+def test_infer( data_loader ):
+
+    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    b = next(iter(data_loader))
+    print("test_infer(): b['height']=", b['height'])
+    print("test_infer(): b['img']=", b['img'])
+    assert htr_model.infer( b['img'], b['height'], b['width'], b['mask'] )
 
     # What is possible
     # - a directory contains both *.png and *.gt transcriptions: settle with this for the moment, for ease of testing

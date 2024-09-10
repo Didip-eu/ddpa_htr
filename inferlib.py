@@ -16,7 +16,16 @@ class HTR_Model:
 
 
     def infer( self, img_bchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None):
-        return len(img_bchw)
+        print("infer(): img_bchw=", img_bchw )
+        #print(type (img_bchw ))
+        assert isinstance( img_bchw, Tensor ) #and img_bchw.dim() == 4
+        #assert isinstance( heights, Tensor)
+        #assert isinstance( widths, Tensor)
+        #assert all( [ isinstance( gt, str) for gt in b['transcription'] ] )
+        #assert all( [ isinstance( m, Tensor) for m in masks ] )
+        
+        return True
+
 
     def save( self ):
         pass
