@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from pathlib import Path
-from handwriting_datasets import monasterium
+from didip_handwriting_datasets import monasterium, alphabet
 from torchvision.transforms import PILToTensor, ToPILImage, Compose
 
 # Append app's root directory to the Python search path
@@ -22,6 +22,16 @@ def test_dummy( data_path ):
     assert isinstance(data_path, Path )
 
 @pytest.fixture(scope="session")
+def standalone_alphabet():
+    alpha = alphabet.Alphabet([' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'a', 'ä'],
+                              ['B', 'b'], ['C', 'c'], ['D', 'd'], ['E', 'e', 'é'], ['F', 'f'], ['G', 'g'],
+                              ['H', 'h'], ['I', 'i'], ['J', 'j'], ['K', 'k'], ['L', 'l'], ['M', 'm'],
+                              ['N', 'n'], ['O', 'o', 'Ö', 'ö'], ['P', 'p'], ['Q', 'q'], ['R', 'r', 'ř'],
+                              ['S', 's'], ['T', 't'], ['U', 'u', 'ü'], ['V', 'v'], ['W', 'w'], ['X', 'x'], 
+                              ['Y', 'y', 'ÿ'], ['Z', 'z', 'Ž'], '¬', '…'])
+    return alpha
+
+@pytest.fixture(scope="session")
 def bbox_data_set( data_path ):
     return monasterium.MonasteriumDataset(
             task='htr', shape='bbox',
@@ -29,9 +39,9 @@ def bbox_data_set( data_path ):
             transform=Compose([ monasterium.ResizeToMax(300,2000), monasterium.PadToSize(300,2000) ]))
 
 
-def test_model_init():
-    alphabet = inferlib.Alphabet("abcd")
-    assert len( inferlib.HTR_Model( alphabet ).alphabet ) == 5
+def test_model_alphabet_initialization( standalone_alphabet ):
+
+    assert len( inferlib.HTR_Model( standalone_alphabet ).alphabet ) == 42
 
 
 @pytest.fixture(scope="session")
@@ -43,41 +53,41 @@ def data_loader( bbox_data_set ):
 
 
 
-def test_data_loader_batch_size( data_loader ):
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+def test_data_loader_batch_size( data_loader, standalone_alphabet ):
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     htr_model.infer( next(iter(data_loader))) == 4
 
 
-def test_data_loader_batch_structure_img( data_loader ):
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+def test_data_loader_batch_structure_img( data_loader, standalone_alphabet ):
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ isinstance(i, Tensor) for i in b['img'] ] == [ True ] * 4
 
-def test_data_loader_batch_structure_height_width( data_loader ):
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+def test_data_loader_batch_structure_height_width( data_loader, standalone_alphabet ):
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert isinstance(b['height'], Tensor) and len(b['height'])==4
     assert isinstance(b['width'], Tensor) and len(b['width'])==4
 
-def test_data_loader_batch_structure_transcription( data_loader ):
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+def test_data_loader_batch_structure_transcription( data_loader, standalone_alphabet ):
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ type(t) for t in b['transcription'] ] == [ str ] * 4
 
-def test_data_loader_batch_structure_mask( data_loader ):
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+def test_data_loader_batch_structure_mask( data_loader, standalone_alphabet ):
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ isinstance(i, Tensor) for i in b['mask'] ] == [ True ] * 4
     assert [ i.dtype for i in b['mask'] ] == [ torch.bool ] * 4
 
 
-def test_infer( data_loader ):
+def test_infer( data_loader, standalone_alphabet ):
 
-    htr_model = inferlib.HTR_Model( inferlib.Alphabet('abcd') )
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
     print("test_infer(): b['height']=", b['height'])
     print("test_infer(): b['img']=", b['img'])
