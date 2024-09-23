@@ -15,16 +15,15 @@ class HTR_Model:
         self.alphabet = alphabet
 
 
-    def infer( self, img_bchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None):
-        print("infer(): img_bchw=", img_bchw )
-        #print(type (img_bchw ))
+    def infer( self, img_bchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None, gts: Tensor=None):
+       
         assert isinstance( img_bchw, Tensor ) #and img_bchw.dim() == 4
-        #assert isinstance( heights, Tensor)
-        #assert isinstance( widths, Tensor)
-        #assert all( [ isinstance( gt, str) for gt in b['transcription'] ] )
-        #assert all( [ isinstance( m, Tensor) for m in masks ] )
+        assert isinstance( heights, Tensor)
+        assert isinstance( widths, Tensor)
+        assert isinstance( masks, Tensor)
+        assert all(isinstance( gt, str) for gt in gts)
         
-        return True
+        return img_bchw.size()
 
 
     def save( self ):

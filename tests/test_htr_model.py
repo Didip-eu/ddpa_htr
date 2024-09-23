@@ -53,9 +53,11 @@ def data_loader( bbox_data_set ):
 
 
 
-def test_data_loader_batch_size( data_loader, standalone_alphabet ):
+def test_inference_batch_breakup( data_loader, standalone_alphabet ):
     htr_model = inferlib.HTR_Model( standalone_alphabet )
-    htr_model.infer( next(iter(data_loader))) == 4
+
+    b = next(iter(data_loader))
+    assert htr_model.infer( b['img'], b['height'], b['width'], b['mask'], b['transcription']) == torch.Size([4,3,300,2000])
 
 
 def test_data_loader_batch_structure_img( data_loader, standalone_alphabet ):
