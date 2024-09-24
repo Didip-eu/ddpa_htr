@@ -39,6 +39,14 @@ def bbox_data_set( data_path ):
             transform=Compose([ monasterium.ResizeToMax(300,2000), monasterium.PadToSize(300,2000) ]))
 
 
+@pytest.fixture(scope="function")
+def serialized_model_path( data_path ):
+    """ To be used for checking that a file has indeed been created. """
+    model_path = data_path.joinpath( "model.mlmodel")
+    model_path.unlink( missing_ok=True)
+    yield model_path
+    #model_path.unlink( missing_ok=True )
+
 def test_model_alphabet_initialization( standalone_alphabet ):
 
     assert len( inferlib.HTR_Model( standalone_alphabet ).alphabet ) == 42
@@ -85,6 +93,28 @@ def test_data_loader_batch_structure_mask( data_loader, standalone_alphabet ):
 
     assert [ isinstance(i, Tensor) for i in b['mask'] ] == [ True ] * 4
     assert [ i.dtype for i in b['mask'] ] == [ torch.bool ] * 4
+
+
+def test_model_init_nn_type( standalone_alphabet):
+    """
+    Model initialization constructs a torch Module
+    """
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
+
+    assert isinstance(htr_model.nn, torch.nn.Module)
+
+
+
+def test_model_save( standalone_alphabet, serialized_model_path):
+    """
+    Model initialization constructs a torch Module
+    """
+    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    htr_model.save( str( serialized_model_path ))
+
+    assert serialized_model_path.exists()
+
+
 
 
 def test_infer( data_loader, standalone_alphabet ):
