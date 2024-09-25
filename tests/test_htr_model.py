@@ -10,7 +10,7 @@ from torchvision.transforms import PILToTensor, ToPILImage, Compose
 # Append app's root directory to the Python search path
 sys.path.append( str( Path(__file__).parents[1] ) )
 
-import inferlib
+import model_htr
 
 @pytest.fixture(scope="session")
 def data_path():
@@ -18,7 +18,7 @@ def data_path():
 
 
 def test_dummy( data_path ):
-    assert inferlib.dummy()
+    assert model_htr.dummy()
     assert isinstance(data_path, Path )
 
 @pytest.fixture(scope="session")
@@ -49,7 +49,7 @@ def serialized_model_path( data_path ):
 
 def test_model_alphabet_initialization( standalone_alphabet ):
 
-    assert len( inferlib.HTR_Model( standalone_alphabet ).alphabet ) == 42
+    assert len( model_htr.HTR_Model( standalone_alphabet ).alphabet ) == 42
 
 
 @pytest.fixture(scope="session")
@@ -62,33 +62,33 @@ def data_loader( bbox_data_set ):
 
 
 def test_inference_batch_breakup( data_loader, standalone_alphabet ):
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
 
     b = next(iter(data_loader))
-    assert htr_model.infer( b['img'], b['height'], b['width'], b['mask'], b['transcription']) == torch.Size([4,3,300,2000])
+    assert model.infer( b['img'], b['height'], b['width'], b['mask'], b['transcription']) == torch.Size([4,3,300,2000])
 
 
 def test_data_loader_batch_structure_img( data_loader, standalone_alphabet ):
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ isinstance(i, Tensor) for i in b['img'] ] == [ True ] * 4
 
 def test_data_loader_batch_structure_height_width( data_loader, standalone_alphabet ):
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert isinstance(b['height'], Tensor) and len(b['height'])==4
     assert isinstance(b['width'], Tensor) and len(b['width'])==4
 
 def test_data_loader_batch_structure_transcription( data_loader, standalone_alphabet ):
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ type(t) for t in b['transcription'] ] == [ str ] * 4
 
 def test_data_loader_batch_structure_mask( data_loader, standalone_alphabet ):
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
 
     assert [ isinstance(i, Tensor) for i in b['mask'] ] == [ True ] * 4
@@ -99,31 +99,30 @@ def test_model_init_nn_type( standalone_alphabet):
     """
     Model initialization constructs a torch Module
     """
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model_spec = '[4,256,1440,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    vgsl_model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec ).nn
 
-    assert isinstance(htr_model.nn, torch.nn.Module)
-
+    assert isinstance(vgsl_model.nn, torch.nn.Module)
+    assert vgsl_model.input == (4,3,256,1440)
 
 
 def test_model_save( standalone_alphabet, serialized_model_path):
     """
     Model initialization constructs a torch Module
     """
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
-    htr_model.save( str( serialized_model_path ))
+    model = model_htr.HTR_Model( standalone_alphabet )
+    model_htr.save( str( serialized_model_path ))
 
     assert serialized_model_path.exists()
 
 
+def test_inference_task( data_loader, standalone_alphabet ):
 
-
-def test_infer( data_loader, standalone_alphabet ):
-
-    htr_model = inferlib.HTR_Model( standalone_alphabet )
+    model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter(data_loader))
     print("test_infer(): b['height']=", b['height'])
     print("test_infer(): b['img']=", b['img'])
-    assert htr_model.infer( b['img'], b['height'], b['width'], b['mask'] )
+    assert model_htr.inference_task( b['img'], b['height'], b['width'], b['mask'] )
 
     # What is possible
     # - a directory contains both *.png and *.gt transcriptions: settle with this for the moment, for ease of testing
@@ -138,7 +137,7 @@ def test_infer( data_loader, standalone_alphabet ):
 
     #img_bchw, widths, heights, masks = dataset.to_tensors()
 
-    #htr_model.infer( img_bchw, widths, heights, masks ) 
+    #model_htr.inference_task( img_bchw, widths, heights, masks ) 
 
 
 
