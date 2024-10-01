@@ -46,7 +46,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,256,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec):
+    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None):
 
         # initialize self.nn = torch Module
         if not model:
@@ -65,37 +65,52 @@ class HTR_Model():
 
         # encoder
         self.alphabet = alphabet
+        # decoder
+        self.decoder = decoder if decoder else self.decode
 
     def forward(self, img_nchw: Tensor, widths: Tensor=None):
+        """
+        The internal logics is entirely delegated to the layers wrapped 
+        into the VGSL-defined module: by defaut, an instance of 
+        `kraken.lib.layers.MultiParamSequential`
+
+        Args:
+            img_nchw (Tensor): a batch of line images
+            widths (Tensor): sequence of image lengths
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: Tuple with (N,C,W) array and
+            final output sequence lengths.
+        """
         if self.device:
             img_nchw = img_nchw.to( self.device )
         # note the dereferencing: the actual NN is a property of the TorchVGSL object
         o, owidths = self.nn.nn(img_nchw, widths)
-        print("owidths=", owidths)
-        self.outputs = o.detach().squeeze(2).float().cpu().numpy()
+        outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
         if owidths is not None:
             owidths = owidths.cpu().numpy()
-        return (self.outputs, owidths)
+        return (outputs_ncw, owidths)
 
 
         
-    def train_task( self, img_nchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None, transcriptions: Tensor=None):
+    def train_task( self, img_nchw: Tensor, widths: Tensor=None, masks: Tensor=None, transcriptions: Tensor=None):
         pass
 
 
 
+    def decode( self, outputs_ncw: np.ndarray ):
 
 
-    def inference_task( self, img_nchw: Tensor, heights: Tensor=None, widths: Tensor=None, masks: Tensor=None):
+
+    def inference_task( self, img_nchw: Tensor, widths: Tensor=None, masks: Tensor=None):
        
         assert isinstance( img_nchw, Tensor ) #and img_nchw.dim() == 4
-        assert isinstance( heights, Tensor)
         assert isinstance( widths, Tensor)
 
-        
-        
+        output_seq = []
+        outputs_ncw, output_widths = self.forward( img_nchw, widths) 
+        output_seq.append( )
 
-        return img_nchw.shape
     
     def save(self, file_path: str):
         self.nn.save_model( file_path )
@@ -104,7 +119,7 @@ class HTR_Model():
     def resume( self, path: PathLike):
         pass
 
-    def transcribe( self ):
+    def ( self ):
         pass
 
     def __repr__( self ):
