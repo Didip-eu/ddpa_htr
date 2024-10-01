@@ -73,7 +73,7 @@ def test_inference_batch_breakup( data_loader_4_size, standalone_alphabet ):
     model = model_htr.HTR_Model( standalone_alphabet )
 
     b = next(iter(data_loader_4_size))
-    assert model.inference_task( b['img'], b['height'], b['width'], b['mask'], b['transcription']) == torch.Size([4,3,128,2048])
+    assert model.inference_task( b['img'], b['height'], b['width'], b['mask']) == torch.Size([4,3,128,2048])
 
 
 def test_data_loader_4_size_batch_structure_img( data_loader_4_size, standalone_alphabet ):
@@ -105,36 +105,60 @@ def test_data_loader_4_size_batch_structure_mask( data_loader_4_size, standalone
 
 def test_model_init_nn_type( standalone_alphabet):
     """
-    Model initialization constructs a torch Module
+    Model initialization constructs a basic torch Module
     """
-    model_spec = '[4,128,2048,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[4,128,2048,3 Cr3,13,32]'
     vgsl_model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec ).nn
 
     assert isinstance(vgsl_model.nn, torch.nn.Module)
-    assert vgsl_model.input == (4,3,128,1440)
+    #                           N C   H    W
+    assert vgsl_model.input == (4,3,128,2048)
 
-def test_model_forward_default_length( data_loader_1_size, standalone_alphabet ):
-
+def test_model_forward_default_length_convolutions( data_loader_1_size, standalone_alphabet ):
+    """
+    Sanity testing on a few layers of convolution + maxpool
+    """
     # testing with 2048-wide images
-    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2] S1(1x0)1,3] Lbx200 Do0.1,2] Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2]'
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
     
     # shape: [1,3,128,2048]
     b = next(iter(data_loader_1_size))
-
-    def nchw_to_nhwc( s ):
-        if len(s) > 3:
-                   #  N     H     W     C
-            return (s[0], s[2], s[3], s[1])
-                # N    W    C
-        return (s[0],s[2],s[1])
-
-    #print(nchw_to_nhwc( b['img'].shape ))
     outputs = model.forward( b['img'] )
-
-    assert outputs.shape == (1,400,256)
+    #                        N  C  H   W
+    assert outputs.shape == (1,64,16,256)
 
     
+def test_model_forward_default_length_lstm( data_loader_1_size, standalone_alphabet ):
+    """
+    Sanity testing on a layers of convolutions/maxpool + LSTMs
+    """
+
+    # input 3 x 128 x 2048 line images
+    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
+    
+    b = next(iter(data_loader_1_size))
+    outputs = model.forward( b['img'] )
+    #                        N   C   W
+    assert outputs.shape == (1,400,256) # the 1-H dimension produced by the reshaping has been squeezed
+
+    
+
+def atest_model_forward_with_lengths( data_loader_1_size, standalone_alphabet ):
+    """
+    Sanity testing on a layers of convolutions/maxpool + LSTMs, with widths as an extra parameter
+    """
+
+    # input 3 x 128 x 2048 line images
+    model_spec = '[4,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
+    
+    b = next(iter(data_loader_1_size))
+    outputs, lengths = model.forward( b['img'] )
+    #                        N   C   W
+    assert outputs.shape == (1,400,256) # the 1-H dimension produced by the reshaping has been squeezed
+    #assert lengths == torch.Tensor([1958, 1944, 1921, 1921])
 
 
 def test_model_save( standalone_alphabet, serialized_model_path):
@@ -153,7 +177,7 @@ def test_inference_task( data_loader_4_size, standalone_alphabet ):
     b = next(iter(data_loader_4_size))
     print("test_infer(): b['height']=", b['height'])
     print("test_infer(): b['img']=", b['img'])
-    assert model.inference_task( b['img'], b['height'], b['width'], b['mask'] )
+    assert model.inference_task( b['img'], b['height'], b['width'], b['mask'] ) == (4,3,128,2048)
 
     # What is possible
     # - a directory contains both *.png and *.gt transcriptions: settle with this for the moment, for ease of testing
