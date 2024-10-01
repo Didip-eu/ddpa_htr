@@ -33,7 +33,7 @@ def standalone_alphabet():
     return alpha
 
 @pytest.fixture(scope="session")
-def bbox_data_set( data_path ):
+def bbox_data_set_padded( data_path ):
     return monasterium.MonasteriumDataset(
             task='htr', shape='bbox',
             from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
@@ -54,17 +54,17 @@ def test_model_alphabet_initialization( standalone_alphabet ):
 
 
 @pytest.fixture(scope="session")
-def data_loader_1_size( bbox_data_set ):
+def data_loader_1_size( bbox_data_set_padded ):
 
     # + should keep track of widths and heights for padded images
-    dl = DataLoader( bbox_data_set, batch_size=1) 
+    dl = DataLoader( bbox_data_set_padded, batch_size=1) 
     return dl
 
 @pytest.fixture(scope="session")
-def data_loader_4_size( bbox_data_set ):
+def data_loader_4_size( bbox_data_set_padded ):
 
     # + should keep track of widths and heights for padded images
-    dl = DataLoader( bbox_data_set, batch_size=4) 
+    dl = DataLoader( bbox_data_set_padded, batch_size=4) 
     return dl
 
 
@@ -124,7 +124,7 @@ def test_model_forward_default_length_convolutions( data_loader_1_size, standalo
     
     # shape: [1,3,128,2048]
     b = next(iter(data_loader_1_size))
-    outputs = model.forward( b['img'] )
+    outputs, _ = model.forward( b['img'] )
     #                        N  C  H   W
     assert outputs.shape == (1,64,16,256)
 
@@ -139,26 +139,26 @@ def test_model_forward_default_length_lstm( data_loader_1_size, standalone_alpha
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
     
     b = next(iter(data_loader_1_size))
-    outputs = model.forward( b['img'] )
+    outputs, _ = model.forward( b['img'] )
     #                        N   C   W
     assert outputs.shape == (1,400,256) # the 1-H dimension produced by the reshaping has been squeezed
 
     
 
-def atest_model_forward_with_lengths( data_loader_1_size, standalone_alphabet ):
+def test_model_forward_with_lengths( data_loader_4_size, standalone_alphabet ):
     """
     Sanity testing on a layers of convolutions/maxpool + LSTMs, with widths as an extra parameter
     """
-
     # input 3 x 128 x 2048 line images
     model_spec = '[4,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
     
-    b = next(iter(data_loader_1_size))
-    outputs, lengths = model.forward( b['img'] )
+    b = next(iter(data_loader_4_size))
+    #print("In test: seq_len=", b['width'])
+    outputs, lengths = model.forward( b['img'], b['width'] )
     #                        N   C   W
-    assert outputs.shape == (1,400,256) # the 1-H dimension produced by the reshaping has been squeezed
-    #assert lengths == torch.Tensor([1958, 1944, 1921, 1921])
+    assert outputs.shape == (4,400,256) # the 1-H dimension produced by the reshaping has been squeezed
+    assert np.array_equal(lengths, np.array([244.0, 243.0, 240.0, 240.0]))
 
 
 def test_model_save( standalone_alphabet, serialized_model_path):

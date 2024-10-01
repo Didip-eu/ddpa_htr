@@ -70,9 +70,12 @@ class HTR_Model():
         if self.device:
             img_nchw = img_nchw.to( self.device )
         # note the dereferencing: the actual NN is a property of the TorchVGSL object
-        o, _ = self.nn.nn(img_nchw, widths)
+        o, owidths = self.nn.nn(img_nchw, widths)
+        print("owidths=", owidths)
         self.outputs = o.detach().squeeze(2).float().cpu().numpy()
-        return self.outputs
+        if owidths is not None:
+            owidths = owidths.cpu().numpy()
+        return (self.outputs, owidths)
 
 
         
