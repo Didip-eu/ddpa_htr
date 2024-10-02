@@ -3,6 +3,8 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from kraken.lib.vgsl import TorchVGSLModel
+import numpy as np
+import re
 
 from typing import Union,Tuple,List
 import warnings
@@ -44,9 +46,9 @@ class HTR_Model():
     +-------------+------------------------------------------+---------------------------------------------+
 
     """
-    default_model_spec = '[4,256,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    default_model_spec = '[4,128,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None):
+    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
 
         # initialize self.nn = torch Module
         if not model:
@@ -58,6 +60,11 @@ class HTR_Model():
             # + model modification (append)
             # + handling hyper-parameters
             # +  train(), eval() switches
+
+            # insert output layer if not already defined
+            if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
+                model_spec = '[{} O1c{}]'.format( model_spec[1:-1], alphabet.maxcode + 1)
+
             self.nn = TorchVGSLModel( model_spec )
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -99,17 +106,18 @@ class HTR_Model():
 
 
     def decode( self, outputs_ncw: np.ndarray ):
+        pass
 
 
 
     def inference_task( self, img_nchw: Tensor, widths: Tensor=None, masks: Tensor=None):
        
-        assert isinstance( img_nchw, Tensor ) #and img_nchw.dim() == 4
+        assert isinstance( img_nchw, Tensor )
         assert isinstance( widths, Tensor)
 
-        output_seq = []
-        outputs_ncw, output_widths = self.forward( img_nchw, widths) 
-        output_seq.append( )
+        outputs_ncw, output_widths = self.forward( img_nchw, widths ) 
+
+        return outputs_ncw
 
     
     def save(self, file_path: str):
@@ -119,8 +127,6 @@ class HTR_Model():
     def resume( self, path: PathLike):
         pass
 
-    def ( self ):
-        pass
 
     def __repr__( self ):
         return "HTR_Model()"
