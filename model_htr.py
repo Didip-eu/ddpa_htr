@@ -113,7 +113,7 @@ class HTR_Model():
             outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
                     matches the number of character classes.
         Returns:
-                logits 
+            np.ndarray: 
         """
         return self.decoder( outputs_cw )
 
