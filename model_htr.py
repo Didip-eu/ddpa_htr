@@ -90,7 +90,8 @@ class HTR_Model():
 
         Returns:
             Tuple[np.ndarray, np.ndarray]: Tuple with (N,C,W) array and
-            final output sequence lengths.
+            final output sequence lengths; C should match the number of 
+            character classes.
         """
         if self.device:
             img_nchw = img_nchw.to( self.device )
@@ -106,8 +107,17 @@ class HTR_Model():
         pass
 
 
-    def decode(self, outputs_cw: np.ndarray ):
+    def decode(self, outputs_cw: np.ndarray):
+        """
+        Args:
+            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
+                    matches the number of character classes.
+        Returns:
+                logits 
+        """
         return self.decoder( outputs_cw )
+
+
 
 
 
