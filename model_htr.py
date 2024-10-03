@@ -3,6 +3,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from kraken.lib.vgsl import TorchVGSLModel
+from kraken.lib.ctc_decoder import greedy_decoder
 import numpy as np
 import re
 
@@ -48,7 +49,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,128,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
+    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=greedy_decoder, add_output_layer=True):
 
         # initialize self.nn = torch Module
         if not model:
@@ -73,7 +74,9 @@ class HTR_Model():
         # encoder
         self.alphabet = alphabet
         # decoder
-        self.decoder = decoder if decoder else self.decode
+        self.decoder = decoder 
+
+
 
     def forward(self, img_nchw: Tensor, widths: Tensor=None):
         """
@@ -98,15 +101,13 @@ class HTR_Model():
             owidths = owidths.cpu().numpy()
         return (outputs_ncw, owidths)
 
-
         
     def train_task( self, img_nchw: Tensor, widths: Tensor=None, masks: Tensor=None, transcriptions: Tensor=None):
         pass
 
 
-
-    def decode( self, outputs_ncw: np.ndarray ):
-        pass
+    def decode(self, outputs_cw: np.ndarray ):
+        return self.decoder( outputs_cw )
 
 
 
