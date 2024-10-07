@@ -49,7 +49,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,128,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=greedy_decoder, add_output_layer=True):
+    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
 
         # initialize self.nn = torch Module
         if not model:
@@ -74,7 +74,7 @@ class HTR_Model():
         # encoder
         self.alphabet = alphabet
         # decoder
-        self.decoder = decoder 
+        self.decoder = self.decode_greedy if decoder is None else decoder
 
 
 
@@ -107,17 +107,38 @@ class HTR_Model():
         pass
 
 
-    def decode(self, outputs_cw: np.ndarray):
+
+    def decode_batch(self, outputs_ncw: np.ndarray, lengths: np.ndarray=None):
         """
         Args:
-            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
+            outputs_ncw (np.ndarray): a output batch (N,C,W) of length W where C
                     matches the number of character classes.
         Returns:
             np.ndarray: 
         """
-        return self.decoder( outputs_cw )
+        decoded = []
+        for o_cw in outputs_ncw:
+                decoded.append( self.decoder( o_cw ))
+        if lengths is not None:
+            for o_cw, lgth in zip( o_ncw, lenghts):
+                decoded.append( self.decoder( o_cw[:,:lgth])) 
+        return decoded
 
 
+    @staticmethod
+    def decode_greedy(outputs_cw: np.ndarray):
+        """
+        Decode a single output frame (C,W); model-independent
+
+        Args:
+            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
+                    matches the number of character classes.
+        Returns:
+            list: a list of tuples (label, score)  
+        """
+        labels = np.argmax( outputs_cw, 0 )
+        scores = np.max( outputs_cw, 0 )
+        return list(zip(labels, scores))
 
 
 
@@ -132,7 +153,7 @@ class HTR_Model():
 
     
     def save(self, file_path: str):
-        self.nn.save_model( file_path )
+        pass
 
 
     def resume( self, path: PathLike):
