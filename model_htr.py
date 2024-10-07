@@ -138,6 +138,7 @@ class HTR_Model():
         """
         labels = np.argmax( outputs_cw, 0 )
         scores = np.max( outputs_cw, 0 )
+        #symbols = self.alphabet 
         return list(zip(labels, scores))
 
 

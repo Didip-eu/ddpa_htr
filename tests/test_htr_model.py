@@ -39,6 +39,13 @@ def bbox_data_set_padded( data_path ):
             from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
             transform=Compose([ monasterium.ResizeToMax(128,2048), monasterium.PadToSize(128,2048) ]))
 
+@pytest.fixture(scope="session")
+def bbox_data_set_unpadded( data_path ):
+    return monasterium.MonasteriumDataset(
+            task='htr', shape='bbox',
+            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
+            transform=Compose([ monasterium.ResizeToMax(128,2048), monasterium.PadToHeight(128,) ]))
+
 
 @pytest.fixture(scope="function")
 def serialized_model_path( data_path ):
@@ -59,6 +66,7 @@ def data_loader_1_size( bbox_data_set_padded ):
     # + should keep track of widths and heights for padded images
     dl = DataLoader( bbox_data_set_padded, batch_size=1) 
     return dl
+
 
 @pytest.fixture(scope="session")
 def data_loader_4_size( bbox_data_set_padded ):
@@ -191,7 +199,8 @@ def test_model_forward_with_lengths_and_output_layers( data_loader_4_size, stand
 
 
 def test_model_decode_greedy_no_lengths():
-    network_output = array([[2.1577506, 2.4033802, 3.1110797, 1.9402646, 2.0998254, 2.63057  ,
+
+    network_outputs = np.array([[2.1577506, 2.4033802, 3.1110797, 1.9402646, 2.0998254, 2.63057  ,
         2.2995133, 3.003648 , 2.8692765, 2.5694218],
        [2.5967445, 3.49689  , 2.9399962, 3.1172242, 2.7738907, 3.9912455,
         3.5913873, 3.3765142, 2.2684784, 3.2620287],
@@ -210,20 +219,17 @@ def test_model_decode_greedy_no_lengths():
        [2.542821 , 1.7844386, 2.5300303, 2.026345 , 2.4741833, 1.8136001,
         2.2097301, 2.4627254, 1.7341547, 2.1094844],
        [1.9897654, 2.2448957, 2.6281688, 1.256404 , 2.5597622, 1.676508 ,
-        2.3310556, 1.6996291, 2.1247885, 2.3254204]], dtype=float32)
+        2.3310556, 1.6996291, 2.1247885, 2.3254204]], dtype='float32')
 
 
-    assert model_htr.HTR_Model.decode_greedy( network_outputs ) == [(2, 3.4117193),
- (1, 3.49689),
- (2, 4.0848),
- (7, 3.5710936),
- (2, 3.2172518),
- (1, 3.9912455),
- (1, 3.5913873),
- (1, 3.3765142),
- (7, 4.17768),
- (1, 3.2620287)]
+    expected  = [(2, 3.4117193), (1, 3.49689), 
+                 (2, 4.0848), (7, 3.5710936),
+                 (2, 3.2172518), (1, 3.9912455),
+                 (1, 3.5913873), (1, 3.3765142),
+                 (7, 4.17768), (1, 3.2620287)]
 
+    assert all( list(tuple_expect[0]-tuple_actual[0]==0 for (tuple_expect, tuple_actual) in zip(expected, model_htr.HTR_Model.decode_greedy( network_outputs )) ))
+    assert all( list(tuple_expect[1]-tuple_actual[1]<10**(-6) for (tuple_expect, tuple_actual) in zip(expected, model_htr.HTR_Model.decode_greedy( network_outputs )) ))
 
 def test_model_save( standalone_alphabet, serialized_model_path):
     """
