@@ -6,6 +6,8 @@ from kraken.lib.vgsl import TorchVGSLModel
 from kraken.lib.ctc_decoder import greedy_decoder
 import numpy as np
 import re
+from didip_handwriting_datasets.alphabet import Alphabet
+
 
 from typing import Union,Tuple,List
 import warnings
@@ -49,10 +51,16 @@ class HTR_Model():
     """
     default_model_spec = '[4,128,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet:'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
+    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
+
+        # encoder 
+        # during save/resume cycles, alphabet may be serialized into a list
+        self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet
+        
 
         # initialize self.nn = torch Module
         if not model:
+
             # In kraken, TorchVGSLModel is does not work as model factory (parse() method)
             # but as a wrapper-class for a 'nn:Module' property, to which a number
             # of module-specific method calls (to()...) are forwarded. 
@@ -64,7 +72,7 @@ class HTR_Model():
 
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
-                model_spec = '[{} O1c{}]'.format( model_spec[1:-1], alphabet.maxcode + 1)
+                model_spec = '[{} O1c{}]'.format( model_spec[1:-1], self.alphabet.maxcode + 1)
 
             self.net = TorchVGSLModel( model_spec ).nn
         else:
@@ -75,16 +83,15 @@ class HTR_Model():
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.net.to( self.device )
 
-        # encoder
-        self.alphabet = alphabet
         # decoder
         self.decoder = self.decode_greedy if decoder is None else decoder
 
-        self.validation_epochs = 0
-        self.train_epochs = 0
+        self.validation_epochs = {}
+        self.train_epochs = []
 
         self.constructor_params = {
-                'alphabet': alphabet,
+                # serialize the alphabet 
+                'alphabet': self.alphabet.to_list(),
                 'model': model,
                 'model_spec': model_spec,
                 'decoder': decoder,
@@ -168,10 +175,12 @@ class HTR_Model():
 
         # decoding labels and scores
         # [[(l1,s1), ...],[(l1,s1), ... ], ...]
-        decoded_msgs = decode_batch( outputs_ncw, output_widths )
+        decoded_msgs = self.decode_batch( outputs_ncw, output_widths )
         
         # decoding symbols from labels
-        [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
+        msg_strings = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
+
+        return msg_strings
 
     
     def save(self, file_name: str):
@@ -182,10 +191,26 @@ class HTR_Model():
         torch.save( state_dict, file_name ) 
 
 
+    @staticmethod
+    def resume( file_name: str, **kwargs):
+        try:
+            state_dict = torch.load(file_name, map_location="cpu")
+            constructor_params = state_dict['constructor_params']
+            del state_dict['constructor_params']
+            validation_epochs = state_dict["validation_epochs"]
+            del state_dict["validation_epochs"]
+            train_epochs = state_dict["train_epochs"]
+            del state_dict["train_epochs"]
+        
+            model = HTR_Model( **constructor_params )
+            model.net.load_state_dict( state_dict )
+            model.validation_epochs = validation_epochs
+            model.train_epochs = train_epochs
+            return model
+        except FileNotFoundError:
+            return HTR_Model( **kwargs )
 
-    def resume( self, path: PathLike):
-        pass
-
+            
 
     def __repr__( self ):
         return "HTR_Model()"

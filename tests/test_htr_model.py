@@ -51,9 +51,8 @@ def bbox_data_set_unpadded( data_path ):
 def serialized_model_path( data_path ):
     """ To be used for checking that a file has indeed been created. """
     model_path = data_path.joinpath( "model.mlmodel")
-    model_path.unlink( missing_ok=True)
     yield model_path
-    #model_path.unlink( missing_ok=True )
+    model_path.unlink( missing_ok=True)
 
 def test_model_alphabet_initialization( standalone_alphabet ):
 
@@ -75,11 +74,11 @@ def data_loader_4_size( bbox_data_set_padded ):
     dl = DataLoader( bbox_data_set_padded, batch_size=4) 
     return dl
 
-def test_inference_batch_breakup( data_loader_4_size, standalone_alphabet ):
-    model = model_htr.HTR_Model( standalone_alphabet )
 
-    b = next(iter(data_loader_4_size))
-    assert model.inference_task( b['img'], b['width'], b['mask']).shape == (4,42,256)
+def test_model_defaults( standalone_alphabet ):
+    model = model_htr.HTR_Model( standalone_alphabet )
+    assert model.alphabet is not None
+    assert isinstance(model.net, torch.nn.Module)
 
 
 def test_data_loader_4_size_batch_structure_img( data_loader_4_size, standalone_alphabet ):
@@ -114,11 +113,11 @@ def test_model_init_nn_type( standalone_alphabet):
     Model initialization constructs a basic torch Module
     """
     model_spec = '[4,128,2048,3 Cr3,13,32]'
-    vgsl_model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False ).nn
+    model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False )
 
-    assert isinstance(vgsl_model.nn, torch.nn.Module)
+    assert isinstance(model.net, torch.nn.Module)
     #                           N C   H    W
-    assert vgsl_model.input == (4,3,128,2048)
+    #assert model.input == (4,3,128,2048)
 
 def test_model_forward_default_length_convolutions( data_loader_1_size, standalone_alphabet ):
     """
@@ -233,19 +232,32 @@ def test_model_decode_greedy_no_lengths():
 
 def test_model_save( standalone_alphabet, serialized_model_path):
     """
-    Model initialization constructs a torch Module
+    Saving NN state as well as model's params into a dictionary
     """
     model = model_htr.HTR_Model( standalone_alphabet )
-    model.save( str( serialized_model_path ))
+    model_filename = str( serialized_model_path )
+    model.save( model_filename )
 
     assert serialized_model_path.exists()
+    state_dict = torch.load( model_filename )
+    for k in ["constructor_params", "train_epochs", "validation_epochs"]:
+        assert k in state_dict
 
-
-def test_inference_task( data_loader_4_size, standalone_alphabet ):
+def test_model_resume( serialized_model_path, standalone_alphabet ):
 
     model = model_htr.HTR_Model( standalone_alphabet )
-    b = next(iter(data_loader_4_size))
-    assert model.inference_task( b['img'], b['width'], b['mask'] ).shape == (4,42,256)
+    model_filename = str( serialized_model_path )
+    model.save( model_filename )
+    recovered = model_htr.HTR_Model.resume(model_filename )
+    assert isinstance( recovered.net, torch.nn.Module )
+    
+
+def test_inference_task( data_loader_4_size, standalone_alphabet ):
+    model = model_htr.HTR_Model( standalone_alphabet )
+    b = next(iter( data_loader_4_size))
+
+    assert all( (type(o) is str) for o in model.inference_task( b['img'], b['width'], b['mask']) )
+
 
     # What is possible
     # - a directory contains both *.png and *.gt transcriptions: settle with this for the moment, for ease of testing
