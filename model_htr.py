@@ -49,7 +49,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,128,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet: 'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
+    def __init__(self, alphabet:'Alphabet', model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
 
         # initialize self.nn = torch Module
         if not model:
@@ -66,15 +66,30 @@ class HTR_Model():
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
                 model_spec = '[{} O1c{}]'.format( model_spec[1:-1], alphabet.maxcode + 1)
 
-            self.nn = TorchVGSLModel( model_spec )
+            self.net = TorchVGSLModel( model_spec ).nn
+        else:
+            self.net = model
+
+        self.net.eval()
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.nn.to( self.device )
+        self.net.to( self.device )
 
         # encoder
         self.alphabet = alphabet
         # decoder
         self.decoder = self.decode_greedy if decoder is None else decoder
+
+        self.validation_epochs = 0
+        self.train_epochs = 0
+
+        self.constructor_params = {
+                'alphabet': alphabet,
+                'model': model,
+                'model_spec': model_spec,
+                'decoder': decoder,
+                'add_output_layer': add_output_layer,
+        }
 
 
 
@@ -82,7 +97,7 @@ class HTR_Model():
         """
         The internal logics is entirely delegated to the layers wrapped 
         into the VGSL-defined module: by defaut, an instance of 
-        `kraken.lib.layers.MultiParamSequential`
+        `kraken.lib.layers.MultiParamSequential`.
 
         Args:
             img_nchw (Tensor): a batch of line images
@@ -96,7 +111,7 @@ class HTR_Model():
         if self.device:
             img_nchw = img_nchw.to( self.device )
         # note the dereferencing: the actual NN is a property of the TorchVGSL object
-        o, owidths = self.nn.nn(img_nchw, widths)
+        o, owidths = self.net(img_nchw, widths)
         outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
         if owidths is not None:
             owidths = owidths.cpu().numpy()
@@ -114,13 +129,13 @@ class HTR_Model():
             outputs_ncw (np.ndarray): a output batch (N,C,W) of length W where C
                     matches the number of character classes.
         Returns:
-            np.ndarray: 
+            List[List[Tuple[int,float]]]: a list of list of tuples (label, scores)
         """
         decoded = []
         for o_cw in outputs_ncw:
                 decoded.append( self.decoder( o_cw ))
         if lengths is not None:
-            for o_cw, lgth in zip( o_ncw, lenghts):
+            for o_cw, lgth in zip( outputs_ncw, lengths):
                 decoded.append( self.decoder( o_cw[:,:lgth])) 
         return decoded
 
@@ -128,13 +143,13 @@ class HTR_Model():
     @staticmethod
     def decode_greedy(outputs_cw: np.ndarray):
         """
-        Decode a single output frame (C,W); model-independent
+        Decode a single output frame (C,W); model-independent.
 
         Args:
             outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
                     matches the number of character classes.
         Returns:
-            list: a list of tuples (label, score)  
+            List[Tuple[int,float]]: a list of tuples (label, score)  
         """
         labels = np.argmax( outputs_cw, 0 )
         scores = np.max( outputs_cw, 0 )
@@ -148,13 +163,24 @@ class HTR_Model():
         assert isinstance( img_nchw, Tensor )
         assert isinstance( widths, Tensor)
 
+        # raw outputs
         outputs_ncw, output_widths = self.forward( img_nchw, widths ) 
 
-        return outputs_ncw
+        # decoding labels and scores
+        # [[(l1,s1), ...],[(l1,s1), ... ], ...]
+        decoded_msgs = decode_batch( outputs_ncw, output_widths )
+        
+        # decoding symbols from labels
+        [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
 
     
-    def save(self, file_path: str):
-        pass
+    def save(self, file_name: str):
+        state_dict = self.net.state_dict()
+        state_dict['constructor_params'] = self.constructor_params
+        state_dict['validation_epochs'] = self.validation_epochs
+        state_dict['train_epochs'] = self.train_epochs
+        torch.save( state_dict, file_name ) 
+
 
 
     def resume( self, path: PathLike):
