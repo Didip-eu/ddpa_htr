@@ -17,7 +17,7 @@ import warnings
 class HTR_Model():
     """
     Note: by convention, VGSL specifies the dimensions in NHWC order, while Torch uses NCHW. The example
-    below uses a NHWC = (1, 128, 2048, 3) image as an input.
+    below uses a NHWC = (1, 64, 2048, 3) image as an input.
 
     +-------------+------------------------------------------+---------------------------------------------+
     | VGSL        | DESCRIPTION                              | Output size (NHWC)     | Output size (NCHW) |
@@ -61,14 +61,15 @@ class HTR_Model():
         # initialize self.nn = torch Module
         if not model:
 
-            # In kraken, TorchVGSLModel is does not work as model factory (parse() method)
-            # but as a wrapper-class for a 'nn:Module' property, to which a number
-            # of module-specific method calls (to()...) are forwarded. 
+            # In kraken, TorchVGSLModel is used both for constructing a NN 
+            # (parse(), build*(), ... methods) and for hiding it: it is
+            # a wrapper-class for a 'nn:Module' property, to which a number
+            # of NN-specific method calls (to()...) are forwarded, including
+            #  + train(), eval()
             # what is the added value of this complexity?
-            # + model save() functionality
-            # + model modification (append)
-            # + handling hyper-parameters
-            # +  train(), eval() switches
+            # + model modifications (append)
+            # + more abstraction when handling hyper-parameters
+            # Otherwise, better to manipulate the NN directly.
 
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
@@ -81,6 +82,7 @@ class HTR_Model():
         self.net.eval()
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.criterion = torch.nn
         self.net.to( self.device )
 
         # decoder
@@ -117,6 +119,7 @@ class HTR_Model():
         """
         if self.device:
             img_nchw = img_nchw.to( self.device )
+
         # note the dereferencing: the actual NN is a property of the TorchVGSL object
         o, owidths = self.net(img_nchw, widths_n)
         outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
@@ -125,8 +128,33 @@ class HTR_Model():
         return (outputs_ncw, owidths)
 
         
-    def train_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, transcriptions: Tensor=None):
+    def train_task( self ):
+
+        # From Retsinas, 'HTR Best Practices'
+        ctc_loss = lambda y, t, ly, lt: nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) /batch_size
+
+        optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005)
+
         self.net.train()
+        
+        ds = monasterium.MonasteriumDataset(
+            task='htr', shape='bbox',
+            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
+            transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
+
+        train_loader = DataLoader( ds, batch_size=4, suffle=True) 
+
+        for iter_idx, batch in enumerate( data_loader ):
+            img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
+            labels = self.alphabet.get_code(s) for s in 
+
+            optimizer.zero_grad()
+
+            output = net( img )
+
+            loss_val = ctc_loss( output.cpu(), 
+
+
 
 
 
