@@ -13,6 +13,9 @@ sys.path.append( str( Path(__file__).parents[1] ) )
 
 import model_htr
 
+MAX_HEIGHT=64
+MAX_WIDTH=2048
+
 @pytest.fixture(scope="session")
 def data_path():
     return Path( __file__ ).parent.joinpath('data')
@@ -37,14 +40,14 @@ def bbox_data_set_padded( data_path ):
     return monasterium.MonasteriumDataset(
             task='htr', shape='bbox',
             from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
-            transform=Compose([ monasterium.ResizeToMax(128,2048), monasterium.PadToSize(128,2048) ]))
+            transform=Compose([ monasterium.ResizeToHeight(MAX_HEIGHT, MAX_WIDTH), monasterium.PadToWidth(MAX_WIDTH) ]))
 
-@pytest.fixture(scope="session")
-def bbox_data_set_unpadded( data_path ):
-    return monasterium.MonasteriumDataset(
-            task='htr', shape='bbox',
-            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
-            transform=Compose([ monasterium.ResizeToMax(128,2048), monasterium.PadToHeight(128,) ]))
+#@pytest.fixture(scope="session")
+#def bbox_data_set_unpadded( data_path ):
+#    return monasterium.MonasteriumDataset(
+#            task='htr', shape='bbox',
+#            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
+#            transform=Compose([ monasterium.ResizeToMax(128,2048), monasterium.PadToHeight(128,) ]))
 
 
 @pytest.fixture(scope="function")
@@ -112,7 +115,7 @@ def test_model_init_nn_type( standalone_alphabet):
     """
     Model initialization constructs a basic torch Module
     """
-    model_spec = '[4,128,2048,3 Cr3,13,32]'
+    model_spec = '[4,{},0,3 Cr3,13,32]'.format( MAX_HEIGHT )
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False )
 
     assert isinstance(model.net, torch.nn.Module)
@@ -124,14 +127,14 @@ def test_model_forward_default_length_convolutions( data_loader_1_size, standalo
     Sanity testing on a few layers of convolution + maxpool
     """
     # testing with 2048-wide images
-    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2]'
+    model_spec = '[1,{},0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2]'.format( MAX_HEIGHT )
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False )
     
     # shape: [1,3,128,2048]
     b = next(iter(data_loader_1_size))
     outputs, _ = model.forward( b['img'] )
     #                        N  C  H   W
-    assert outputs.shape == (1,64,16,256)
+    assert outputs.shape == (1, 64, MAX_HEIGHT/8, MAX_WIDTH/8)
 
     
 def test_model_forward_default_length_lstm( data_loader_1_size, standalone_alphabet ):
@@ -140,13 +143,13 @@ def test_model_forward_default_length_lstm( data_loader_1_size, standalone_alpha
     """
 
     # input 3 x 128 x 2048 line images
-    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[1,{},0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'.format(MAX_HEIGHT)
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False )
     
     b = next(iter(data_loader_1_size))
     outputs, _ = model.forward( b['img'] )
     #                        N   C   W
-    assert outputs.shape == (1,400,256) # the 1-H dimension produced by the reshaping has been squeezed
+    assert outputs.shape == (1,400,MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
 
 
 def test_model_forward_default_length_output_layer( data_loader_1_size, standalone_alphabet ):
@@ -155,14 +158,14 @@ def test_model_forward_default_length_output_layer( data_loader_1_size, standalo
     """
 
     # input 3 x 128 x 2048 line images
-    model_spec = '[1,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[1,{},0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'.format(MAX_HEIGHT)
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
     
     b = next(iter(data_loader_1_size))
     outputs, _ = model.forward( b['img'] )
     #                        N   C   W
-    print(outputs)
-    assert outputs.shape == (1,standalone_alphabet.maxcode+1,256) # the 1-H dimension produced by the reshaping has been squeezed
+    #print(outputs)
+    assert outputs.shape == (1,standalone_alphabet.maxcode+1, MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
 
 
 def test_model_forward_with_lengths( data_loader_4_size, standalone_alphabet ):
@@ -170,15 +173,15 @@ def test_model_forward_with_lengths( data_loader_4_size, standalone_alphabet ):
     Sanity testing on a layers of convolutions/maxpool + LSTMs, with widths as an extra parameter
     """
     # input 3 x 128 x 2048 line images
-    model_spec = '[4,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[4,{},0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'.format(MAX_HEIGHT)
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec, add_output_layer=False )
     
     b = next(iter(data_loader_4_size))
     #print("In test: seq_len=", b['width'])
     outputs, lengths = model.forward( b['img'], b['width'] )
     #                        N   C   W
-    assert outputs.shape == (4,400,256) # the 1-H dimension produced by the reshaping has been squeezed
-    assert np.array_equal(lengths, np.array([244.0, 243.0, 240.0, 240.0]))
+    assert outputs.shape == (4,400,MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
+    assert np.array_equal(lengths, np.array([161.0, 256.0, 256.0, 256.0]))
 
 
 def test_model_forward_with_lengths_and_output_layers( data_loader_4_size, standalone_alphabet ):
@@ -186,15 +189,15 @@ def test_model_forward_with_lengths_and_output_layers( data_loader_4_size, stand
     Sanity testing on a layers of convolutions/maxpool + LSTMs + output layer, with widths as an extra parameter
     """
     # input 3 x 128 x 2048 line images
-    model_spec = '[4,128,0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    model_spec = '[4,{},0,3 Cr3,13,32 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'.format(MAX_HEIGHT)
     model = model_htr.HTR_Model( standalone_alphabet, model_spec=model_spec )
     
     b = next(iter(data_loader_4_size))
     #print("In test: seq_len=", b['width'])
     outputs, lengths = model.forward( b['img'], b['width'] )
     #                        N                             C   W
-    assert outputs.shape == (4,standalone_alphabet.maxcode+1,256) # the 1-H dimension produced by the reshaping has been squeezed
-    assert np.array_equal(lengths, np.array([244.0, 243.0, 240.0, 240.0]))
+    assert outputs.shape == (4,standalone_alphabet.maxcode+1,MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
+    assert np.array_equal(lengths, np.array([161.0, 256.0, 256.0, 256.0]))
 
 
 def test_model_decode_greedy_no_lengths():
@@ -253,6 +256,9 @@ def test_model_resume( serialized_model_path, standalone_alphabet ):
     
 
 def test_inference_task( data_loader_4_size, standalone_alphabet ):
+    """
+    Sanity check on inference task
+    """
     model = model_htr.HTR_Model( standalone_alphabet )
     b = next(iter( data_loader_4_size))
 
@@ -272,7 +278,6 @@ def test_inference_task( data_loader_4_size, standalone_alphabet ):
 
     #img_bchw, widths, heights, masks = dataset.to_tensors()
 
-    #model_htr.inference_task( img_bchw, widths, heights, masks ) 
 
 
 
