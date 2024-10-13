@@ -82,7 +82,7 @@ class HTR_Model():
         self.net.eval()
 
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.criterion = torch.nn
+        #self.criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / batch_size
         self.net.to( self.device )
 
         # decoder
@@ -107,6 +107,8 @@ class HTR_Model():
         The internal logics is entirely delegated to the layers wrapped 
         into the VGSL-defined module: by defaut, an instance of 
         `kraken.lib.layers.MultiParamSequential`.
+        Note: in spite of its name, this method is different from a torch.nn.Module.forward()
+        function; it is meant to be called explicitly, not as a callback.
 
         Args:
             img_nchw (Tensor): a batch of line images
@@ -128,36 +130,6 @@ class HTR_Model():
         return (outputs_ncw, owidths)
 
         
-    def train_task( self ):
-
-        # From Retsinas, 'HTR Best Practices'
-        ctc_loss = lambda y, t, ly, lt: nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) /batch_size
-
-        optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005)
-
-        self.net.train()
-        
-        ds = monasterium.MonasteriumDataset(
-            task='htr', shape='bbox',
-            from_tsv_file=data_path.joinpath('bbox', 'monasterium_ds_train.tsv'),
-            transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
-
-        train_loader = DataLoader( ds, batch_size=4, suffle=True) 
-
-        for iter_idx, batch in enumerate( data_loader ):
-            img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
-            labels = self.alphabet.get_code(s) for s in 
-
-            optimizer.zero_grad()
-
-            output = net( img )
-
-            loss_val = ctc_loss( output.cpu(), 
-
-
-
-
-
     def decode_batch(self, outputs_ncw: np.ndarray, lengths: np.ndarray=None):
         """
         Decode a batch of network logits into labels.
