@@ -13,6 +13,11 @@ from typing import Union,Tuple,List
 import warnings
 
 
+import logging
+logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logger = logging.getLogger(__name__)
+
+
 
 class HTR_Model():
     """
@@ -51,7 +56,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,64,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True):
+    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True, train=False):
 
         # encoder 
         # during save/resume cycles, alphabet may be serialized into a list
@@ -78,9 +83,7 @@ class HTR_Model():
             self.net = TorchVGSLModel( model_spec ).nn
         else:
             self.net = model
-
-        self.net.eval()
-
+        
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         #self.criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / batch_size
         self.net.to( self.device )
@@ -91,6 +94,8 @@ class HTR_Model():
         self.validation_epochs = {}
         self.train_epochs = []
 
+        self.train=train
+        
         self.constructor_params = {
                 # serialize the alphabet 
                 'alphabet': self.alphabet.to_list(),
@@ -98,8 +103,22 @@ class HTR_Model():
                 'model_spec': model_spec,
                 'decoder': decoder,
                 'add_output_layer': add_output_layer,
+                'train': train
         }
 
+
+    @property
+    def train(self):
+        return self._train
+    
+    @train.setter
+    def train(self, on:bool):
+        if on:
+            self.net.train()
+            self._train = True
+        else:
+            self.net.eval()
+            self._train = False
 
 
     def forward(self, img_nchw: Tensor, widths_n: Tensor=None):
@@ -108,7 +127,8 @@ class HTR_Model():
         into the VGSL-defined module: by defaut, an instance of 
         `kraken.lib.layers.MultiParamSequential`.
         Note: in spite of its name, this method is different from a torch.nn.Module.forward()
-        function; it is meant to be called explicitly, not as a callback.
+        function; it is just a convenience function, that is meant to be called explicitly,
+        prior to the decoding stage (i.e. outside a training step), not as a callback.
 
         Args:
             img_nchw (Tensor): a batch of line images
@@ -124,7 +144,9 @@ class HTR_Model():
 
         # note the dereferencing: the actual NN is a property of the TorchVGSL object
         o, owidths = self.net(img_nchw, widths_n)
+        logger.debug("Network outputs have shape {} (lengths={}.".format(o.shape, widths_n ))
         outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
+        logger.debug("-> distilled into Numpy array with shape {}.".format(outputs_ncw.shape))
         if owidths is not None:
             owidths = owidths.cpu().numpy()
         return (outputs_ncw, owidths)
@@ -195,6 +217,7 @@ class HTR_Model():
     
     def save(self, file_name: str):
         state_dict = self.net.state_dict()
+        state_dict['train_mode'] = self._train
         state_dict['constructor_params'] = self.constructor_params
         state_dict['validation_epochs'] = self.validation_epochs
         state_dict['train_epochs'] = self.train_epochs
@@ -211,11 +234,18 @@ class HTR_Model():
             del state_dict["validation_epochs"]
             train_epochs = state_dict["train_epochs"]
             del state_dict["train_epochs"]
+            train_mode = state_dict["train_mode"]
+            del state_dict["train_mode"]
+            
         
             model = HTR_Model( **constructor_params )
             model.net.load_state_dict( state_dict )
             model.validation_epochs = validation_epochs
             model.train_epochs = train_epochs
+
+            # switch net to train/eval mode
+            model.train = train_mode
+
             return model
         except FileNotFoundError:
             return HTR_Model( **kwargs )
