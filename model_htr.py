@@ -91,8 +91,10 @@ class HTR_Model():
         # decoder
         self.decoder = self.decode_greedy if decoder is None else decoder
 
-        self.validation_epochs = {}
+
+        # a list of dictionaries = for each epoch: { CER, loss, duration }
         self.train_epochs = []
+        self.validation_epochs = []
 
         self.net.train( mode=train )
         
@@ -129,14 +131,16 @@ class HTR_Model():
         if self.device:
             img_nchw = img_nchw.to( self.device )
 
-        # note the dereferencing: the actual NN is a property of the TorchVGSL object
-        o, owidths = self.net(img_nchw, widths_n)
-        logger.debug("Network outputs have shape {} (lengths={}.".format(o.shape, widths_n ))
-        outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
-        logger.debug("-> distilled into Numpy array with shape {}.".format(outputs_ncw.shape))
-        if owidths is not None:
-            owidths = owidths.cpu().numpy()
-        return (outputs_ncw, owidths)
+        with torch.no_grad():
+
+            o, owidths = self.net(img_nchw, widths_n)
+            logger.debug("Network outputs have shape {} (lengths={}.".format(o.shape, widths_n ))
+            outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
+            logger.debug("-> distilled into Numpy array with shape {}.".format(outputs_ncw.shape))
+            if owidths is not None:
+                owidths = owidths.cpu().numpy()
+
+            return (outputs_ncw, owidths)
 
         
     def decode_batch(self, outputs_ncw: np.ndarray, lengths: np.ndarray=None):
@@ -144,7 +148,7 @@ class HTR_Model():
         Decode a batch of network logits into labels.
 
         Args:
-            outputs_ncw (np.ndarray): a output batch (N,C,W) of length W where C
+            outputs_ncw (np.ndarray): a network output batch (N,C,W) of length W where C
                     matches the number of character classes.
         Returns:
             List[List[Tuple[int,float]]]: a list of N lists of W tuples `(label, score)` where
@@ -158,11 +162,12 @@ class HTR_Model():
             ```
         """
         decoded = []
-        for o_cw in outputs_ncw:
-                decoded.append( self.decoder( o_cw ))
         if lengths is not None:
             for o_cw, lgth in zip( outputs_ncw, lengths):
                 decoded.append( self.decoder( o_cw[:,:lgth])) 
+        else:
+            for o_cw in outputs_ncw:
+                decoded.append( self.decoder( o_cw ))
         # batch 1, 10-classes, full-length
         return decoded
 
@@ -206,8 +211,8 @@ class HTR_Model():
         state_dict = self.net.state_dict()
         state_dict['train_mode'] = self.net.training
         state_dict['constructor_params'] = self.constructor_params
-        state_dict['validation_epochs'] = self.validation_epochs
         state_dict['train_epochs'] = self.train_epochs
+        state_dict['validation_epochs'] = self.validation_epochs
         torch.save( state_dict, file_name ) 
 
 
@@ -217,18 +222,18 @@ class HTR_Model():
             state_dict = torch.load(file_name, map_location="cpu")
             constructor_params = state_dict['constructor_params']
             del state_dict['constructor_params']
-            validation_epochs = state_dict["validation_epochs"]
-            del state_dict["validation_epochs"]
             train_epochs = state_dict["train_epochs"]
             del state_dict["train_epochs"]
+            validation_epochs = state_dict["validation_epochs"]
+            del state_dict["validation_epochs"]
             train_mode = state_dict["train_mode"]
             del state_dict["train_mode"]
             
         
             model = HTR_Model( **constructor_params )
             model.net.load_state_dict( state_dict )
-            model.validation_epochs = validation_epochs
             model.train_epochs = train_epochs
+            model.validation_epochs = validation_epochs
 
             # switch net to train/eval mode
             model.net.train( mode=train_mode )
