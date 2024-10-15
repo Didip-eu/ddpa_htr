@@ -80,8 +80,6 @@ if __name__ == "__main__":
     def train_epoch(epoch ):
 
         epoch_losses = []
-        t = time.time()
-
         for iter_idx, batch in enumerate( train_loader ):
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             labels, target_lengths = ds_train.alphabet.encode_batch( transcriptions, padded=False ) 
@@ -123,7 +121,7 @@ if __name__ == "__main__":
                 model.net.train()
 
             if epoch % args.save_freq == 0 or epoch == args.epoch-1:
-                model.net.save( args.resume_fname )
+                model.save( args.resume_fname )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
