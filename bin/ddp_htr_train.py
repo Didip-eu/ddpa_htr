@@ -122,7 +122,7 @@ if __name__ == "__main__":
 
                 model.net.train()
 
-            if epoch % args.save_freq == 0 or epoch == args.epoch-1:
+            if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
                 model.save( args.resume_fname )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
