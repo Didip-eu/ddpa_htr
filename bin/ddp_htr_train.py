@@ -27,8 +27,8 @@ p = {
     "appname": "htr_train",
     "batch_size": 2,
     "max_epoch": 200,
-    "dataset_path_train": [root.joinpath('tests','data','bbox', 'monasterium_ds_train.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
-    "dataset_path_validate": [root.joinpath('tests','data','bbox', 'monasterium_ds_validate.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
+    "dataset_path_train": [root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
+    "dataset_path_validate": [root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
@@ -56,13 +56,13 @@ if __name__ == "__main__":
 
     # Alphabet is to be found in the same directory as the TSV file:
     # the two datasets below share the same directory, and consequently, their alphabet
-    ds_train = monasterium.MonasteriumDataset( task='htr', shape='bbox',
+    ds_train = monasterium.MonasteriumDataset( task='htr', shape='polygons',
         from_tsv_file=args.dataset_path_train,
         transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
 
     logger.debug( str(ds_train) )
 
-    ds_val = monasterium.MonasteriumDataset( task='htr', shape='bbox',
+    ds_val = monasterium.MonasteriumDataset( task='htr', shape='polygons',
         from_tsv_file=args.dataset_path_validate,
         transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
 
