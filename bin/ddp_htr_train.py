@@ -110,20 +110,22 @@ if __name__ == "__main__":
 
             optimizer.step()
 
-            if iter_idx % args.validation_freq == args.validation_freq-1 or epoch % args.validation_freq == 0:
+            #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
+            if iter_idx == len(train_loader)-1: #epoch % args.validation_freq == 0:
 
                 model.net.eval()
 
                 b = next(iter(eval_loader))
                 msg_strings = model.inference_task( b['img'], b['width'] )
                 gt_strings = b['transcription']
+                logger.info('epoch {}, iteration {}'.format( epoch, iter_idx ))
                 print( gt_strings )
                 print( msg_strings )
 
                 model.net.train()
 
-            if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-                model.save( args.resume_fname )
+        if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
+            model.save( args.resume_fname )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
@@ -133,7 +135,7 @@ if __name__ == "__main__":
 
     if args.mode == 'train':
     
-        for epoch in range( 0 if args.dry_run else args.max_epoch ):
+        for epoch in range(1, 0 if args.dry_run else args.max_epoch ):
             train_epoch( epoch )
 
 
