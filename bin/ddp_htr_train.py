@@ -31,7 +31,9 @@ p = {
     "dataset_path_validate": [root.joinpath('tests','data','bbox', 'monasterium_ds_validate.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
-    "eval_period": 20,
+    "validation_freq": 100,
+    "save_ffreq": 100,
+    "resume_fname": 'model_save.ml',
     "mode": 'train',
 }
 
@@ -69,7 +71,7 @@ if __name__ == "__main__":
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
-    model = HTR_Model( ds_train.alphabet )
+    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet )
 
     model.net.train()
 
@@ -108,7 +110,7 @@ if __name__ == "__main__":
 
             optimizer.step()
 
-            if iter_idx % args.eval_period == args.eval_period-1:
+            if iter_idx % args.validation_freq == args.validation_freq-1 or epoch % args.validation_freq == 0:
 
                 model.net.eval()
 
@@ -119,6 +121,9 @@ if __name__ == "__main__":
                 print( msg_strings )
 
                 model.net.train()
+
+            if epoch % args.save_freq == 0 or epoch == args.epoch-1:
+                model.net.save( args.resume_fname )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })

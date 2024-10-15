@@ -1,4 +1,4 @@
-from os import PathLike
+from pathlib import Path
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
@@ -218,7 +218,7 @@ class HTR_Model():
 
     @staticmethod
     def resume( file_name: str, **kwargs):
-        try:
+        if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
             constructor_params = state_dict['constructor_params']
             del state_dict['constructor_params']
@@ -239,8 +239,7 @@ class HTR_Model():
             model.net.train( mode=train_mode )
 
             return model
-        except FileNotFoundError:
-            return HTR_Model( **kwargs )
+        return HTR_Model( **kwargs )
 
             
 
