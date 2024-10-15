@@ -76,6 +76,8 @@ if __name__ == "__main__":
     model.net.train()
 
     optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
+
+    t = time.time()
     
     def train_epoch(epoch ):
 
