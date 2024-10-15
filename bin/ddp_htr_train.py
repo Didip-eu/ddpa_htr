@@ -32,7 +32,7 @@ p = {
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
-    "save_ffreq": 100,
+    "save_freq": 100,
     "resume_fname": 'model_save.ml',
     "mode": 'train',
 }
