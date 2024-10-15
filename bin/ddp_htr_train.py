@@ -29,7 +29,7 @@ p = {
     "dataset_path": [root.joinpath('tests','data','bbox', 'monasterium_ds_train.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain the alphabet (alphabet.tsv)."],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
-
+    "eval_period": 20,
 }
 
         
@@ -89,10 +89,14 @@ if __name__ == "__main__":
             closs += [ loss_val.item() ]
 
 
-
             loss_val.backward()
 
             optimizer.step()
+
+            if iter_idx % arg.eval_period == arg.eval_period-1:
+
+                model.net.eval()
+
 
         if len(closs) > 0:
             logger.info('Epoch {}, iteration {}: {}'.format( epoch, iter_idx+1, sum(closs)/len(closs) ))

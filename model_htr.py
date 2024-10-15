@@ -94,7 +94,7 @@ class HTR_Model():
         self.validation_epochs = {}
         self.train_epochs = []
 
-        self.train=train
+        self.net.train( mode=train )
         
         self.constructor_params = {
                 # serialize the alphabet 
@@ -107,20 +107,7 @@ class HTR_Model():
         }
 
 
-    @property
-    def train(self):
-        return self._train
     
-    @train.setter
-    def train(self, on:bool):
-        if on:
-            self.net.train()
-            self._train = True
-        else:
-            self.net.eval()
-            self._train = False
-
-
     def forward(self, img_nchw: Tensor, widths_n: Tensor=None):
         """
         The internal logics is entirely delegated to the layers wrapped 
@@ -217,7 +204,7 @@ class HTR_Model():
     
     def save(self, file_name: str):
         state_dict = self.net.state_dict()
-        state_dict['train_mode'] = self._train
+        state_dict['train_mode'] = self.net.training
         state_dict['constructor_params'] = self.constructor_params
         state_dict['validation_epochs'] = self.validation_epochs
         state_dict['train_epochs'] = self.train_epochs
@@ -244,7 +231,7 @@ class HTR_Model():
             model.train_epochs = train_epochs
 
             # switch net to train/eval mode
-            model.train = train_mode
+            model.net.train( mode=train_mode )
 
             return model
         except FileNotFoundError:
