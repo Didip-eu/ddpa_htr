@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from pathlib import Path
 import time
+from tqdm import tqdm
 
 
 root = Path(__file__).parents[1] 
@@ -23,6 +24,7 @@ import logging
 logging.basicConfig(stream=sys.stdout, level='INFO', format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
+from torch.utils.tensorboard import SummaryWriter
 
 p = {
     "appname": "htr_train",
@@ -49,9 +51,10 @@ if __name__ == "__main__":
 
 
 
+
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already compute the softmax )
-    ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
+    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
 
     #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
 
@@ -82,10 +85,16 @@ if __name__ == "__main__":
 
     t = time.time()
     
+    # TensorBoard writer
+    writer = SummaryWriter()
+    
+    
     def train_epoch(epoch ):
 
         epoch_losses = []
-        for iter_idx, batch in enumerate( train_loader ):
+        batches = iter( train_loader )
+        for batch_index in tqdm ( range(len( batches ))):
+            batch = next( batches )
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             labels, target_lengths = ds_train.alphabet.encode_batch( transcriptions, padded=False ) 
             img, labels = img.cuda(), labels.cuda()
@@ -106,35 +115,39 @@ if __name__ == "__main__":
             # Loss is a scalar
             # transposing inputs: (N, C, W) -> (W, N, C)
 
-            loss = ctc_loss( outputs_wnc.cpu(), labels, output_lengths_n, target_lengths )
-            epoch_losses.append( loss.detach())
+            loss = criterion( outputs_wnc.cpu(), labels, output_lengths_n, target_lengths )
+            epoch_losses.append( loss.detach()) 
+
+            # visualization
+            writer.add_scalar("Loss/train", loss, epoch)
 
             loss.backward()
 
             optimizer.step()
 
             #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
-            if iter_idx == len(train_loader)-1: #epoch % args.validation_freq == 0:
+            if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
 
                 model.net.eval()
 
                 b = next(iter(eval_loader))
                 msg_strings = model.inference_task( b['img'], b['width'] )
                 gt_strings = b['transcription']
-                logger.info('epoch {}, iteration {}'.format( epoch, iter_idx ))
+                logger.info('epoch {}, iteration {}'.format( epoch, batch_index+1 ))
                 for (img_name, gt_string, decoded_string ) in zip(  b['id'], b['transcription'], msg_strings ):
                         print("{}: [{}] {}".format(img_name, decoded_string, gt_string ))
 
                 model.net.train()
 
-        if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-            model.save( args.resume_fname )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
-        if len(epoch_losses) > 0:
-            logger.info('Epoch {}, iteration {}, mean loss={}'.format( epoch, iter_idx+1, mean_loss ) )
+        # save model every time epoch completes
+        if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
+            model.save( args.resume_fname )
+
+        logger.info('Epoch {}, iteration {}, mean loss={}'.format( epoch, batch_index+1, mean_loss ) )
 
     if args.mode == 'train':
     
@@ -146,3 +159,5 @@ if __name__ == "__main__":
         pass
 
 
+    writer.flush()
+    writer.close()
