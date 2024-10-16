@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import torch
 import fargv
 import sys
@@ -26,6 +27,8 @@ logger = logging.getLogger(__name__)
 p = {
     "appname": "htr_train",
     "batch_size": 2,
+    "img_height": 128,
+    "img_width": 2048,
     "max_epoch": 200,
     "dataset_path_train": [root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
     "dataset_path_validate": [root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv'), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
@@ -58,20 +61,20 @@ if __name__ == "__main__":
     # the two datasets below share the same directory, and consequently, their alphabet
     ds_train = monasterium.MonasteriumDataset( task='htr', shape='polygons',
         from_tsv_file=args.dataset_path_train,
-        transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
+        transform=Compose([ monasterium.ResizeToHeight( args.img_height, args.img_width ), monasterium.PadToWidth( args.img_width ) ]))
 
     logger.debug( str(ds_train) )
 
     ds_val = monasterium.MonasteriumDataset( task='htr', shape='polygons',
         from_tsv_file=args.dataset_path_validate,
-        transform=Compose([ monasterium.ResizeToHeight(64, 2048), monasterium.PadToWidth(2048) ]))
+        transform=Compose([ monasterium.ResizeToHeight( args.img_height, args.img_width ), monasterium.PadToWidth( args.img_width ) ]))
 
     logger.debug( str(ds_val) )
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
-    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet )
+    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet, height=args.img_height )
 
     model.net.train()
 
@@ -119,8 +122,8 @@ if __name__ == "__main__":
                 msg_strings = model.inference_task( b['img'], b['width'] )
                 gt_strings = b['transcription']
                 logger.info('epoch {}, iteration {}'.format( epoch, iter_idx ))
-                print( gt_strings )
-                print( msg_strings )
+                for (img_name, gt_string, decoded_string ) in zip(  b['id'], b['transcription'], msg_strings ):
+                        print("{}: [{}] {}".format(img_name, decoded_string, gt_string ))
 
                 model.net.train()
 

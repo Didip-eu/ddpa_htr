@@ -56,7 +56,7 @@ class HTR_Model():
     """
     default_model_spec = '[4,64,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True, train=False):
+    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), height=64, model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True, train=False):
 
         # encoder 
         # during save/resume cycles, alphabet may be serialized into a list
@@ -79,6 +79,8 @@ class HTR_Model():
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
                 model_spec = '[{} O1c{}]'.format( model_spec[1:-1], self.alphabet.maxcode + 1)
+            model_spec = re.sub(r'\[(\d+),\d+', '[\\1,{}'.format(height), model_spec )
+
 
             self.net = TorchVGSLModel( model_spec ).nn
         else:
