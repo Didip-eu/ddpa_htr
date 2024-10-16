@@ -12,10 +12,12 @@ import time
 from tqdm import tqdm
 
 
+
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
 
+import logging_utils
 from model_htr import HTR_Model
 
 # local logger
@@ -42,7 +44,7 @@ p = {
     "mode": 'train',
 }
 
-        
+
 
 if __name__ == "__main__":
 
@@ -135,7 +137,7 @@ if __name__ == "__main__":
                 gt_strings = b['transcription']
                 logger.info('epoch {}, iteration {}'.format( epoch, batch_index+1 ))
                 for (img_name, gt_string, decoded_string ) in zip(  b['id'], b['transcription'], msg_strings ):
-                        print("{}: [{}] {}".format(img_name, decoded_string, gt_string ))
+                        logger.info("{}: [{}] {}".format(img_name, decoded_string, gt_string ))
 
                 model.net.train()
 
@@ -147,7 +149,11 @@ if __name__ == "__main__":
         if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
             model.save( args.resume_fname )
 
-        logger.info('Epoch {}, iteration {}, mean loss={}'.format( epoch, batch_index+1, mean_loss ) )
+        logger.info('Epoch {}, iteration {}, mean loss={}. Estimated time until completion: {}'.format( 
+                epoch, 
+                batch_index+1, 
+                mean_loss,
+                logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
 
     if args.mode == 'train':
     
