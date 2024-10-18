@@ -1,4 +1,18 @@
--e git+git@github.com:nicolasrenet/fargv.git@9ed6c466e09a57f8a177ee2cce94f56ea7c4dbb3#egg=fargv
--e git+git@github.com:nicolasrenet/handwriting_datasets.git@b911a434b212f06066fb964b991604a63d402d88#egg=handwriting_datasets
--e git+git@github.com:Didip-eu/kraken_didip.git@261cfc5406ecde7d8fee2b281e497af6958f95e4#egg=kraken
-pillow==10.4.0
+
+# VGSL parsing, (de)serialization
+protobuf>=3.20.3
+coremltools>=6.3.0
+
+# Image datasets
+didip_handwriting_datasets>=1.0
+fargv>=2.0.1
+numpy>=1.23.5
+Pillow>=11.0.0
+pytest>=8.3.3
+setuptools>=75.1.0
+skimage>=0.0
+torch>=2.1.2
+torchvision>=0.16.2
+tqdm>=4.66.5
+
+# Generated from 'pipreqs ./'

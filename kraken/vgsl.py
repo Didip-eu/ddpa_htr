@@ -12,7 +12,7 @@ import torch
 from google.protobuf.message import DecodeError
 from torch import nn
 
-import layers
+from . import layers
 
 root_logger = logging.getLogger()
 level = root_logger.getEffectiveLevel()
@@ -152,7 +152,7 @@ class TorchVGSLModel(object):
                     self.build_groupnorm, self.build_series,
                     self.build_parallel,
                     self.build_resnet_block,
-                    self.build_ro,] # has to be last (does not accept output_shape arg.)
+                    self.build_ro,] # has to be last (does not accept 'output_shape' 3rd arg.)
         
         self.criterion: Any = None
         self.nn = layers.MultiParamSequential()
@@ -217,16 +217,19 @@ class TorchVGSLModel(object):
             channels = 0
         idx = 0
 
+        oshape = None
         # for each block spec in the sequence
         while idx < len(blocks):
             oshape = None
             layer = None
 
-            # Runs through all block constructors, until there is a regexp match
-            for op in self.ops:
+            # Runs through all block constructors, until there is a regexp match (recursive)
+            for op in self.ops[:-1]:
                 oshape, name, layer = op(input, blocks, idx, target_output_shape=target_output_shape if parallel or idx == len(blocks) - 1 else None)
                 if oshape:
                     break
+            if oshape is None:
+                oshape, name, layer = self.ops[-1](input, blocks, idx)
             # constructor has been found (the 'layer' variable stores the module)
             if oshape:
                 if not parallel:
@@ -333,7 +336,7 @@ class TorchVGSLModel(object):
 
         def _deserialize_layers(name, layer):
             logger.debug(f'Deserializing layer {name} with type {type(layer)}')
-            if type(layer) in (layers.MultiParamParallel, layers.MultiParamSequential):
+            if type(layer) in (layers.MultiParamParallel, layers.MultiParamSequential, layers.ResNetBasicBlock):
                 for name, l in layer.named_children():
                     _deserialize_layers(name, l)
             else:
@@ -433,7 +436,7 @@ class TorchVGSLModel(object):
             def _serialize_layer(net, input, net_builder):
                 for name, l in net.named_children():
                     logger.debug(f'Serializing layer {name} with type {type(l)}')
-                    if type(l) in (layers.MultiParamParallel, layers.MultiParamSequential):
+                    if type(l) in (layers.MultiParamParallel, layers.MultiParamSequential, layers.ResNetBasicBlock, ):
                         _serialize_layer(l, input, net_builder)
                     else:
                         l.serialize(name, input, net_builder)
@@ -645,8 +648,8 @@ class TorchVGSLModel(object):
             return None, None, None
         feature_size = int(m.group('feature_size'))
         hidden_size = int(m.group('hidden_size'))
-        from kraken.lib import ro
-        fn = ro.layers.MLP(feature_size, hidden_size)
+        from . import ro
+        fn = ro.MLP(feature_size, hidden_size)
         self.idx += 1
         logger.debug(f'{self.idx}\t\tro\tfeatures {feature_size}, hidden_size {hidden_size}')
         return fn.get_shape(input), [VGSLBlock(blocks[idx], m.group('type'), m.group('name'), self.idx)], fn

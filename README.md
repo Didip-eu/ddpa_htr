@@ -1,34 +1,44 @@
 # HTR app
 
-Embryo of a Kraken-based, HTR-only app: the current draft runs inference on a set of chart images, each provided with an existing (PageXML) segmentation file, whose default path is ``<input_image_stem>.lines.pred.xml``.
+Embryo of a Kraken-based, HTR-only app. The current draft contains:
+
+- a small model wrapper `model_htr.py`, that runs inference on batches of line images
+- a trainer script `ddp_htr_train.py`, that uses the (provisory) Monasterium handwriting dataset
+- (deprecated) a Kraken-based, high-level script `ddp_htr.py` that runs inference on page images, each provided with an existing (PageXML) segmentation file, whose default path is ``<input_image_stem>.lines.pred.xml``.
 
 TODO: 
 
-+ better output
-+ passing set of line images
++ better output (implement ResNet-based model)
 + decoding options
 + performance measure when GT file exists
++ replace `ddp_htr.py`
 
 Examples:
 	
 ```python	
-
-# Explicit recognition model
-python3 bin/ddp_htr.py -img_paths /home/nicolas/tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*img.jpg -model_path $HOME/tmp/models/htr/Tridis_by_Torres-Aguilar_2024/Tridis_Medieval_EarlyModern.mlmodel
-
-# Using the default model (Tridis)
-python3 bin/ddp_htr.py -img_paths /home/nicolas/tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*img.jpg 
+python3 ./bin/ddp_htr_train.py -batch_size=4 -img_height=128 -img_width=3200 -max_epoch=10 -learning_rate=1e-2
 ```
 
 
 ## Syntax
 
-+ appname=<class 'str'>  Default 'htr' . Passed 'htr'
-+ model_path=<class 'pathlib.PosixPath'>  Default PosixPath('/home/nicolas/tmp/models/htr/Tridis_by_Torres-Aguilar_2024/Tridis_Medieval_EarlyModern.mlmodel') . 
-+ img_paths=<class 'set'>  Default {'/home/nicolas/tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*.img.jpg' }
-+ segmentation_dir=<class 'str'>  Default '' . 
-+ segmentation_file_suffix=<class 'str'>  Default 'lines.pred' . 
-+ help=<class 'bool'> Print help and exit. Default False . 
-+ h=<class 'bool'> Print help and exit Default False . Passed True
-+ v=<class 'int'> Set verbosity level. Default 1 . Passed 1
+Syntax:
+
+   -appname=<class 'str'>  Default 'htr_train' . Passed 'htr_train'
+   -batch_size=<class 'int'>  Default 2 . Passed 2
+   -img_height=<class 'int'>  Default 128 . Passed 128
+   -img_width=<class 'int'>  Default 2048 . Passed 2048
+   -max_epoch=<class 'int'>  Default 200 . Passed 200
+   -dataset_path_train=<class 'pathlib.PosixPath'> TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv). Default PosixPath('tests/data/polygons/monasterium_ds_train.tsv') . Passed PosixPath('tests/data/polygons/monasterium_ds_train.tsv')
+   -dataset_path_validate=<class 'pathlib.PosixPath'> TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv). Default PosixPath('tests/data/polygons/monasterium_ds_validate.tsv') . Passed PosixPath('tests/data/polygons/monasterium_ds_validate.tsv')
+   -learning_rate=<class 'float'>  Default 0.001 . Passed 0.001
+   -dry_run=<class 'bool'> Iterate over the batches once, but do not run the network. Default False . Passed False
+   -validation_freq=<class 'int'>  Default 100 . Passed 100
+   -save_freq=<class 'int'>  Default 100 . Passed 100
+   -resume_fname=<class 'str'>  Default 'model_save.ml' . Passed 'model_save.ml'
+   -mode=<class 'str'>  Default 'train' . Passed 'train'
+   -help=<class 'bool'> Print help and exit. Default False . Passed False
+   -bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False . Passed False
+   -h=<class 'bool'> Print help and exit Default False . Passed True
+   -v=<class 'int'> Set verbosity level. Default 1 . Passed 1
 

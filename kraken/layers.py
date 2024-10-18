@@ -1031,18 +1031,19 @@ class ResNetBasicBlock(MultiParamSequential):
     def __init__(self, in_channels: int, out_channels: int):
         
         super().__init__()
-        
+
+        self.in_channels = in_channels 
         self.out_channels = out_channels
 
-        conv1 = ActConv2D(in_channels, out_channels, (3,3), stride=1, nl='r')
+        conv1 = ActConv2D(in_channels, out_channels, (3,3), stride=(1,1), nl='r')
         bn1 = GroupNorm( out_channels, out_channels ) 
-        conv2 = ActConv2D(out_channels, out_channels, (3,3), stride=1)
+        conv2 = ActConv2D(out_channels, out_channels, (3,3), stride=(1,1))
         bn2 = GroupNorm( out_channels, out_channels ) 
         identity = Identity()
         bn3 = GroupNorm( out_channels, out_channels ) 
-        expander = ActConv2D(in_channels, out_channels, (1,1), stride=1) if in_channels != out_channels else Identity()
+        expander = ActConv2D(in_channels, out_channels, (1,1), stride=(1,1)) if in_channels != out_channels else Identity()
         # just for reLUing the sum
-        relu = ActConv2D(out_channels, out_channels, (1,1), stride=1, nl='r') 
+        relu = ActConv2D(out_channels, out_channels, (1,1), stride=(1,1), nl='r') 
 
         # sum = half1 + half2 of channels, where halves 
         # result from 2 equal channel chunks
@@ -1069,4 +1070,31 @@ class ResNetBasicBlock(MultiParamSequential):
         self.output_shape = (input[0], self.out_channels, input[2], input[3] )
         return self.output_shape
 
+
+    def serialize( self, name: str, input: str, builder) -> str:
+        """
+        Serializes the module using a NeuralNetworkBuilder.
+
+        Recurrent submodule serialization for this layer is ensured by `vgsl.save_model()`
+        """
+        params = NeuralNetwork_pb2.CustomLayerParams()
+        params.className = 'resnetblock'
+        params.description = 'ResNet Basic Block Layer'
+        params.parameters['in_channels'].intValue = self.in_channels
+        params.parameters['out_channels'].intValue = self.out_channels
+
+        builder.add_custom( name,
+                            input_names=[input],
+                            output_names=[name],
+                            custom_proto_spec=params)
+        return name
+
+
+    def deserialize( self, name: str, spec ) -> None:
+        """ 
+        Noop for ResNetBasicBlock deserialization.
+
+        Recurrent submodule deserialization for this layer is ensured by `vgsl.load_model()`
+        """
+        pass
 
