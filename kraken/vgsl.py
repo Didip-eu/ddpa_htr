@@ -56,6 +56,30 @@ class VGSLBlock(object):
     def layer(self):
         return self._layer
 
+def build_spec_from_chunks( pairs, **kw: dict ) -> Callable[[dict], str]: 
+    """
+    Build a network spec out of label/block pairs, that can reference keyword parameters.
+
+    Args:
+        pairs (List[Tuple[str, str])): pairs `(<description>, <VGSL block spec>)`. Eg.
+            ```python
+            [('Input','0,0,0,3'), ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64), ... ('Column Maxpool', 'Mp{height/8},1') ]
+            ``̀`
+        kw (dict): keywords parameters passed to the formatted string.
+    
+    Returns:
+        str: a VGSL spec string for a sequential network.
+
+    Example:
+        ```python
+        >>> vgsl.build_spec_from_chunks( [ ('Input','0,0,0,3'), ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64'),
+           ('Column Maxpool', 'Mp{height//8},1'), ('Recurrent head', 'Lbx256') ],  
+           height=128 )
+        [0,0,0,3 Cr7,7,32 Mp2,2 Rn64 Mp16,1 Lbx256]
+        ```
+    """
+    return eval('f\"[' + (' '.join([ spec for (_, spec) in pairs ])) + ']\"', None, kw)
+
 
 class TorchVGSLModel(object):
     """

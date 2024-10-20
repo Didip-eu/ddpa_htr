@@ -46,16 +46,22 @@ p = {
 
 
 
+model = vgsl.build_spec_from_chunks(
+        [ ('Input','[0,0,0,3'),
+          ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
+          ('Column Maxpool', f'Mp{args.img_height/8},1'),
+          ('Recurrent head', 'Lbx256') ],
+        height = 128 )
+
+
 if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
     logger.debug("CLI arguments: {}".format( args ))
 
 
-
-
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
-    # (our model already compute the softmax )
+    # (our model already computes the softmax )
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
 
     #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
@@ -79,7 +85,7 @@ if __name__ == "__main__":
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
-    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet, height=args.img_height )
+    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet, height=args.img_height, model_spec= )
 
     model.net.train()
 
