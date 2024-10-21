@@ -6,6 +6,7 @@ from kraken.vgsl import TorchVGSLModel
 from kraken.ctc_decoder import greedy_decoder
 import numpy as np
 import re
+import Levenshtein
 from didip_handwriting_datasets.alphabet import Alphabet
 
 
@@ -159,21 +160,16 @@ class HTR_Model():
                 ]
             
         """
-        decoded = []
         if lengths is not None:
-            for o_cw, lgth in zip( outputs_ncw, lengths):
-                decoded.append( self.decoder( o_cw[:,:lgth])) 
+            return [ self.decoder(o_cw[:,:lgth]) for o_cw, lgth in zip( outputs_ncw, lengths) ]
         else:
-            for o_cw in outputs_ncw:
-                decoded.append( self.decoder( o_cw ))
-        # batch 1, 10-classes, full-length
-        return decoded
+            return [ self.decoder( o_cw ) for o_cw in output_ncw ]
 
 
     @staticmethod
     def decode_greedy(outputs_cw: np.ndarray):
         """
-        Decode a single output frame (C,W); model-independent.
+        Decode a single output frame (C,W) by choosing the class C with max. logit; model-independent.
 
         Args:
             outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C matches the number of character classes.
@@ -187,7 +183,17 @@ class HTR_Model():
         return list(zip(labels, scores))
 
 
-    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None):
+    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None) -> List[str]:
+        """
+        Make predictions on a batch of images.
+
+        Args:
+            img_nchw (Tensor): a batch of images.
+            widths_n (Tensor): a 1D tensor of lengths.
+
+        Returns:
+            List[str]: a list of human-readable strings.
+        """
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
         assert isinstance( widths_n, Tensor) and len(widths_n) == img_nchw.shape[0]
@@ -200,9 +206,32 @@ class HTR_Model():
         decoded_msgs = self.decode_batch( outputs_ncw, output_widths )
         
         # decoding symbols from labels
-        msg_strings = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
+        return [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
 
-        return msg_strings
+
+
+    @staticmethod
+    def metrics( predicted_mesg: List[str], target_mesg: List[str]) -> Tuple[float, float]:
+        """
+        Compute CER and LER for a batch.
+
+        Args:
+            predicated_mesg (List[str]): list of predicted strings.
+            predicated_mesg (List[str]): list of predicted strings.
+
+        Returns:
+            Tuple(float, float): a pair with the CER and LER (line error rate).
+        """
+
+        if len(predicted_mesg) != len(target_mesg):
+            raise ValueError("Input lists must have the same lengths!")
+        char_errors = [ Levenshtein.distance(pred, target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
+        cer = sum(char_errors) / len( predicted_mesg )
+        line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
+
+        return (cer, line_error)
+
+
 
     
     def save(self, file_name: str):

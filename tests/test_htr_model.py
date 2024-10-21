@@ -181,7 +181,7 @@ def test_model_forward_with_lengths( data_loader_4_size, standalone_alphabet ):
     outputs, lengths = model.forward( b['img'], b['width'] )
     #                        N   C   W
     assert outputs.shape == (4,400,MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
-    assert np.array_equal(lengths, np.array([161.0, 256.0, 256.0, 256.0]))
+    assert np.array_equal(lengths, np.array([222.0, 256.0, 256.0, 170.0]))
 
 
 def test_model_forward_with_lengths_and_output_layers( data_loader_4_size, standalone_alphabet ):
@@ -197,7 +197,7 @@ def test_model_forward_with_lengths_and_output_layers( data_loader_4_size, stand
     outputs, lengths = model.forward( b['img'], b['width'] )
     #                        N                             C   W
     assert outputs.shape == (4,standalone_alphabet.maxcode+1,MAX_WIDTH/8) # the 1-H dimension produced by the reshaping has been squeezed
-    assert np.array_equal(lengths, np.array([161.0, 256.0, 256.0, 256.0]))
+    assert np.array_equal(lengths, np.array([222.0, 256.0, 256.0, 170.0]))
 
 
 def test_model_decode_greedy_no_lengths():
@@ -279,5 +279,11 @@ def test_inference_task( data_loader_4_size, standalone_alphabet ):
     #img_bchw, widths, heights, masks = dataset.to_tensors()
 
 
+def test_cer_wer():
+    predicted = ['abcdef', 'abefg', 'abccdefg']
+    target = ['abcdef', 'abcdef', 'abcdef']
 
+    cer, ler = model_htr.HTR_Model.metrics( predicted, target )
 
+    assert cer == (3+2)/3
+    assert ler == 2/3

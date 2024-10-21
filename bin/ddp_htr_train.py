@@ -11,6 +11,12 @@ from pathlib import Path
 import time
 from tqdm import tqdm
 
+"""
+Todo:
+
++ multistep optimizer
++ CER/WER for evaluation
+"""
 
 
 root = Path(__file__).parents[1] 
@@ -42,7 +48,7 @@ p = {
     "save_freq": 100,
     "resume_fname": 'model_save.ml',
     "mode": 'train',
-    "auxhead": [True, 'Combine output with CTC shortcut'],
+    "auxhead": [False, 'Combine output with CTC shortcut'],
 }
 
 
@@ -82,22 +88,24 @@ if __name__ == "__main__":
           height = args.img_height, classes=n_classes)
 
     model_spec_rnn_and_shortcut = vgsl.build_spec_from_chunks(
-            [ ('Input','[0,0,0,3'),
+            [ ('Input','0,0,0,3'),
               ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
           ('Column Maxpool', 'Mp{height//8},1'),
-          ('Recurrent head and shortcut', '([Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}] [Do Cr1,3,{classes}])]' ) ],
+          ('Recurrent head and shortcut', '([Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}] [Do Cr1,3,{classes}])' ) ],
           height = args.img_height, classes=n_classes)
 
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
 
+    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
     if args.auxhead: 
-        def criterion(y, t, ly, lt):
-            """ Assume that y the (N,2*<n classes>,1,W)-concatenation of the two tensors we want to combine"""
-            y1, y2 = y[:,:n_classes], y[:,nclasses]
-            return (torch.nn.CTCLoss(zero_infinity=True)(y1, t, ly, lt) + 0.1 * zero_infinity=True)(y2, t, ly, lt))/batch_size
-    else:
-        criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
+        def combined_ctc_loss(y, t, ly, lt):
+            """ Assume that y the (W,N,2*<n classes>)-concatenation of the two tensors we want to combine"""
+            y1, y2 = y[:,:,:n_classes], y[:,:,n_classes:]
+            loss = torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y1, t, ly, lt)
+            loss +=  0.1 * torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y2, t, ly, lt)
+            return loss/args.batch_size
+        criterion = combined_ctc_loss
 
    
 
@@ -111,7 +119,7 @@ if __name__ == "__main__":
     model = HTR_Model.resume( args.resume_fname, 
                               alphabet=ds_train.alphabet, 
                              height=args.img_height, 
-                             model_spec=model_spec_rnn_top, 
+                             model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              add_output_layer=False )
 
     model.net.train()
@@ -123,7 +131,29 @@ if __name__ == "__main__":
     # TensorBoard writer
     writer = SummaryWriter()
     
-    
+    best_cer = 1.0
+
+    def validate(epoch):
+
+        model.net.eval()
+        
+        batches = iter( eval_loader )
+        cer = 0.0
+        ler = 0.0
+        for batch_index in tqdm( range(len(batches))):
+            batch = next(batches)
+            img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
+            predictions = model.inference_task( img, lengths )
+            batch_cer, batch_ler = model.metrics( predictions, transcriptions )
+            cer += batch_cer
+            ler += batch_cer
+
+        writer.add_scalar("CER/validate", cer/len(batches), epoch)
+        writer.add_scalar("LER/validate", ler/len(batches), epoch)
+
+        model.net.train()
+        return cer, ler
+
     def train_epoch(epoch ):
 
         epoch_losses = []
@@ -149,7 +179,6 @@ if __name__ == "__main__":
 
             # Loss is a scalar
             # transposing inputs: (N, C, W) -> (W, N, C)
-
             loss = criterion( outputs_wnc.cpu(), labels, output_lengths_n, target_lengths )
             epoch_losses.append( loss.detach()) 
 
@@ -178,14 +207,19 @@ if __name__ == "__main__":
         mean_loss = torch.stack(epoch_losses).mean().item()       
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
-        # save model every time epoch completes
+        # save model every time epoch completes and best CER has improved
         if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-            model.save( args.resume_fname )
+            cer, ler = validate( epoch )
+            if cer <= best_cer:
+                best_cer = cer
+                model.save( args.resume_fname )
+            
 
-        logger.info('Epoch {}, iteration {}, mean loss={}. Estimated time until completion: {}'.format( 
+        logger.info('Epoch {}, iteration {}, mean loss={}; CER={}, LER={}. Estimated time until completion: {}'.format( 
                 epoch, 
                 batch_index+1, 
                 mean_loss,
+                cer, ler,
                 logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
 
     if args.mode == 'train':
