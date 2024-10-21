@@ -2,8 +2,8 @@ from pathlib import Path
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
-from kraken.lib.vgsl import TorchVGSLModel
-from kraken.lib.ctc_decoder import greedy_decoder
+from kraken.vgsl import TorchVGSLModel
+from kraken.ctc_decoder import greedy_decoder
 import numpy as np
 import re
 from didip_handwriting_datasets.alphabet import Alphabet

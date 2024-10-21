@@ -30,9 +30,11 @@ logger = logging.getLogger(__name__)
 
 
 class InvalidModelException(Exception):
+    """ """
     pass
 
 class VGSLBlock(object):
+    """ """
     def __init__(self, block: str, layer: str, name: str, idx: int):
         if name:
             name = name[1:-1]
@@ -50,62 +52,50 @@ class VGSLBlock(object):
 
     @property
     def name(self):
+        """ """
         return self._name
 
     @property
     def layer(self):
+        """ """
         return self._layer
 
-def build_spec_from_chunks( pairs, **kw: dict ) -> Callable[[dict], str]: 
-    """
-    Build a network spec out of label/block pairs, that can reference keyword parameters.
+def build_spec_from_chunks( pairs: List[Tuple[str,str]], **kw: dict ) -> Callable[[dict], str]: 
+    """Build a network spec out of label/block pairs, that can reference keyword parameters.
 
-    Args:
-        pairs (List[Tuple[str, str])): pairs `(<description>, <VGSL block spec>)`. Eg.
-            ```python
-            [('Input','0,0,0,3'), ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64), ... ('Column Maxpool', 'Mp{height/8},1') ]
-            ``̀`
-        kw (dict): keywords parameters passed to the formatted string.
-    
-    Returns:
-        str: a VGSL spec string for a sequential network.
+    :param pairs: pairs `(<description>, <VGSL block spec>)`.
+    :type pairs: List[Tuple[str,str]]
+    :param **kw: keywords parameters passed to the formatted string.
+    :type **kw: dict
 
-    Example:
-        ```python
-        >>> vgsl.build_spec_from_chunks( [ ('Input','0,0,0,3'), ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64'),
-           ('Column Maxpool', 'Mp{height//8},1'), ('Recurrent head', 'Lbx256') ],  
-           height=128 )
-        [0,0,0,3 Cr7,7,32 Mp2,2 Rn64 Mp16,1 Lbx256]
-        ```
+    :returns: a VGSL spec string for a sequential network.
+    :rtype: Callable[[dict],str]
+
+    >>> vgsl.build_spec_from_chunks( [ ('Input','0,0,0,3'), ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64'),
+                ('Column Maxpool', 'Mp{height//8},1'), ('Recurrent head', 'Lbx256') ],  height=128 )
+            [0,0,0,3 Cr7,7,32 Mp2,2 Rn64 Mp16,1 Lbx256]
     """
     return eval('f\"[' + (' '.join([ spec for (_, spec) in pairs ])) + ']\"', None, kw)
 
 
 class TorchVGSLModel(object):
-    """
-    Class building a torch module from a VSGL spec.
-
+    """Class building a torch module from a VSGL spec.
+    
     The initialized class will contain a variable number of layers and a loss
     function. Inputs and outputs are always 4D tensors in order (batch,
     channels, height, width) with channels always being the feature dimension.
-
+    
     Importantly this means that a recurrent network will be fed the channel
     vector at each step along its time axis, i.e. either put the non-time-axis
     dimension into the channels dimension or use a summarizing RNN squashing
     the time axis to 1 and putting the output into the channels dimension
     respectively.
 
-    Attributes:
-        input: Expected input tensor as a 4-tuple.
-        nn: Stack of layers parsed from the spec.
-        criterion: Fully parametrized loss function.
-        user_metadata: dict with user defined metadata. Is flushed into
-                             model file during saving/overwritten by loading
-                             operations.
-        one_channel_mode: Field indicating the image type used during
-                                training of one-channel images. Is '1' for
-                                models trained on binarized images, 'L' for
-                                grayscale, and None otherwise.
+    Todo:
+
+    + A VGSL layer extension that allows for two (parallel) outputs
+
+
     """
 
     def __init__(self, spec: str) -> None:
@@ -226,8 +216,17 @@ class TorchVGSLModel(object):
                input: Tuple[int, int, int, int],
                blocks: Sequence[str], parallel=False,
                target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> None:
-        """
-        Parses VGSL spec and appends layers to nn
+        """Parses VGSL spec and appends layers to nn
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: Sequence[str]
+        :param parallel:  (Default value = False)
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: None
+
         """
         logger.debug('layer\t\ttype\tparams')
         named_spec = []
@@ -276,15 +275,17 @@ class TorchVGSLModel(object):
             return named_spec, nn, oshape
 
     def append(self, idx: int, spec: str) -> None:
-        """
-        Splits a model at layer `idx` and append layers `spec`.
-
+        """Splits a model at layer `idx` and append layers `spec`.
+        
         New layers are initialized using the init_weights method.
 
-        Args:
-            idx (int): Index of layer to append spec to starting with 1.  To
+        :param idx: Index of layer to append spec to starting with 1.  To
                        select the whole layer stack set idx to None.
-            spec (str): VGSL spec without input block to append to model.
+        :type idx: int
+        :param spec: VGSL spec without input block to append to model.
+        :type spec: str
+        :rtype: None
+
         """
         self.nn = self.nn[:idx]
         self.idx = idx - 1
@@ -299,22 +300,35 @@ class TorchVGSLModel(object):
         self.init_weights(slice(idx, -1))
 
     def to(self, device: Union[str, torch.device]) -> None:
+        """
+
+        :param device: 
+        :type device: Union[str, torch.device]
+        :rtype: None
+
+        """
         self.nn = self.nn.to(device)
         if self.criterion:
             self.criterion = self.criterion.to(device)
 
     def eval(self) -> None:
-        """
-        Sets the model to evaluation/inference mode, disabling dropout and
+        """Sets the model to evaluation/inference mode, disabling dropout and
         gradient calculation.
+
+
+        :rtype: None
+
         """
         self.nn.eval()
         torch.set_grad_enabled(False)
 
     def train(self) -> None:
-        """
-        Sets the model to training mode (enables dropout layers and disables
+        """Sets the model to training mode (enables dropout layers and disables
         softmax on CTC layers).
+
+
+        :rtype: None
+
         """
         self.nn.train()
         # set last layer back to eval mode if not CTC output layer
@@ -324,26 +338,26 @@ class TorchVGSLModel(object):
         torch.set_grad_enabled(True)
 
     def set_num_threads(self, num: int) -> None:
-        """
-        Sets number of OpenMP threads to use.
+        """Sets number of OpenMP threads to use.
+
+        :param num: 
+        :type num: int
+        :rtype: None
+
         """
         torch.set_num_threads(num)
 
     @classmethod
     def load_model(cls, path: Union[str, PathLike]):
-        """
-        Deserializes a VGSL model from a CoreML file.
+        """Deserializes a VGSL model from a CoreML file.
 
-        Args:
-            path: CoreML file
-
-        Returns:
-            A TorchVGSLModel instance.
-
-        Raises:
-            InvalidModelException if the model data is invalid (not a
+        :param path: CoreML file
+        :type path: Union[str, PathLike]
+        :returns: A TorchVGSLModel instance.
+        :raises InvalidModelException if the model data is invalid (not a
             string, protobuf file, or without appropriate metadata).
             FileNotFoundError if the path doesn't point to a file.
+
         """
         if isinstance(path, PathLike):
             path = path.as_posix()
@@ -359,6 +373,12 @@ class TorchVGSLModel(object):
         nn = cls(vgsl_spec)
 
         def _deserialize_layers(name, layer):
+            """
+
+            :param name: 
+            :param layer: 
+
+            """
             logger.debug(f'Deserializing layer {name} with type {type(layer)}')
             if type(layer) in (layers.MultiParamParallel, layers.MultiParamSequential, layers.ResNetBasicBlock):
                 for name, l in layer.named_children():
@@ -390,64 +410,114 @@ class TorchVGSLModel(object):
 
     @property
     def one_channel_mode(self):
+        """ """
         return self.user_metadata['one_channel_mode']
 
     @one_channel_mode.setter
     def one_channel_mode(self, val: str):
+        """
+
+        :param val: 
+        :type val: str
+
+        """
         if val not in ['1', 'L', None]:
             raise ValueError('one_channel_mode {} is not one of [1, L, None]'.format(val))
         self.user_metadata['one_channel_mode'] = val
 
     @property
     def model_type(self):
+        """ """
         return self.user_metadata['model_type']
 
     @model_type.setter
     def model_type(self, val: str):
+        """
+
+        :param val: 
+        :type val: str
+
+        """
         if val not in ['recognition', 'segmentation']:
             raise ValueError('model_type {} is not one of [recognition, segmentation]'.format(val))
         self.user_metadata['model_type'] = val
 
     @property
     def seg_type(self):
+        """ """
         return self.user_metadata['seg_type']
 
     @seg_type.setter
     def seg_type(self, val: str):
+        """
+
+        :param val: 
+        :type val: str
+
+        """
         if val not in ['bbox', 'baselines', None]:
             raise ValueError('segmentation type {} is not one of [bbox, baselines, None]'.format(val))
         self.user_metadata['seg_type'] = val
 
     @property
     def hyper_params(self, **kwargs):
+        """
+
+        :param **kwargs: 
+
+        """
         return self.user_metadata['hyper_params']
 
     @hyper_params.setter
     def hyper_params(self, val: Dict[str, Any]):
+        """
+
+        :param val: 
+        :type val: Dict[str, Any]
+
+        """
         self.user_metadata['hyper_params'].update(val)
 
     @property
     def aux_layers(self, **kwargs):
+        """
+
+        :param **kwargs: 
+
+        """
         return self._aux_layers
 
     @aux_layers.setter
     def aux_layers(self, val: Dict[str, torch.nn.Module]):
+        """
+
+        :param val: 
+        :type val: Dict[str, torch.nn.Module]
+
+        """
         self._aux_layers.update(val)
 
     @property
     def use_legacy_polygons(self):
+        """ """
         return self.user_metadata.get('legacy_polygons', True)
 
     @use_legacy_polygons.setter
     def use_legacy_polygons(self, val: bool):
+        """
+
+        :param val: 
+        :type val: bool
+
+        """
         self.user_metadata['legacy_polygons'] = val
 
     def save_model(self, path: str):
-        """
-        Serializes the model into path.
+        """Serializes the model into path.
 
-        Args:
-            path: Target destination
+        :param path: Target destination
+        :type path: str
+
         """
         inputs = [('input', datatypes.Array(*self.input))]
         outputs = [('output', datatypes.Array(*self.output))]
@@ -458,6 +528,14 @@ class TorchVGSLModel(object):
             self.nn.to('cpu')
 
             def _serialize_layer(net, input, net_builder):
+                """
+
+                :param net: network, as wrapped into a kraken.layers object
+                :param input: 
+                :param net_builder: 
+
+                """
+                print('_serialize_layer: input=', input)
                 for name, l in net.named_children():
                     logger.debug(f'Serializing layer {name} with type {type(l)}')
                     if type(l) in (layers.MultiParamParallel, layers.MultiParamSequential, layers.ResNetBasicBlock, ):
@@ -487,17 +565,23 @@ class TorchVGSLModel(object):
 
 
     def init_weights(self, idx: slice = slice(0, None)) -> None:
-        """
-        Initializes weights for all or a subset of layers in the graph.
-
+        """Initializes weights for all or a subset of layers in the graph.
+        
         LSTM/GRU layers are orthogonally initialized, convolutional layers
         uniformly from (-0.1,0.1).
 
-        Args:
-            idx (slice): A slice object representing the indices of layers to
-                         initialize.
+        :param idx: A slice object representing the indices of layers to
+                         initialize. (Default value = slice(0, None))
+        :type idx: slice
+        :rtype: None
+
         """
         def _wi(m):
+            """
+
+            :param m: 
+
+            """
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.xavier_uniform_(m.weight.data)
                 torch.nn.init.constant_(m.bias.data, 0)
@@ -518,12 +602,14 @@ class TorchVGSLModel(object):
         self.nn[idx].apply(_wi)
 
     def resize_output(self, output_size: int, del_indices: Optional[Iterable] = None) -> None:
-        """
-        Resizes an output layer.
+        """Resizes an output layer.
 
-        Args:
-            output_size (int): New size/output channels of last layer
-            del_indices (list): list of outputs to delete from layer
+        :param output_size: New size/output channels of last layer
+        :type output_size: int
+        :param del_indices: list of outputs to delete from layer (Default value = None)
+        :type del_indices: Optional[Iterable]
+        :rtype: None
+
         """
         if type(self.nn[-1]) not in [layers.ActConv2D, layers.LinSoftmax]:
             raise ValueError('last layer is neither linear nor convolutional layer')
@@ -543,8 +629,18 @@ class TorchVGSLModel(object):
                   idx: int,
                   target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                             Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds an LSTM/GRU layer returning number of outputs and layer.
+        """Builds an LSTM/GRU layer returning number of outputs and layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>L|G)(?P<dir>f|r|b)(?P<dim>x|y)(?P<sum>s)?(?P<legacy>c|o)?(?P<name>{\w+})?(?P<out>\d+)')
         m = pattern.match(blocks[idx])
@@ -572,6 +668,19 @@ class TorchVGSLModel(object):
                       idx: int,
                       target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                 Tuple[Tuple[int, int, int, int], str, Callable]]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
+        """
         pattern = re.compile(r'(?P<type>Do)(?P<name>{\w+})?(?P<p>(\d+(\.\d*)?|\.\d+))?(,(?P<dim>\d+))?')
         m = pattern.match(blocks[idx])
         if not m:
@@ -589,6 +698,19 @@ class TorchVGSLModel(object):
                        idx: int,
                        target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                  Tuple[Tuple[int, int, int, int], str, Callable]]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
+        """
         pattern = re.compile(r'(?P<type>A)(?P<name>{\w+})?(?P<dim>\d+),(?P<chunk_size>\d+)')
         m = pattern.match(blocks[idx])
         if not m:
@@ -610,6 +732,19 @@ class TorchVGSLModel(object):
                        idx: int,
                        target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                  Tuple[Tuple[int, int, int, int], str, Callable]]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
+        """
         pattern = re.compile(r'(?P<type>I)(?P<name>{\w+})?')
         m = pattern.match(blocks[idx])
         if not m:
@@ -625,6 +760,19 @@ class TorchVGSLModel(object):
                         idx: int,
                         target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                   Tuple[Tuple[int, int, int, int], str, Callable]]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
+        """
         pattern = re.compile(r'(?P<type>Gn)(?P<name>{\w+})?(?P<groups>\d+)')
         m = pattern.match(blocks[idx])
         if not m:
@@ -641,8 +789,18 @@ class TorchVGSLModel(object):
                        idx: int,
                        target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                  Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a Wav2Vec2 masking layer.
+        """Builds a Wav2Vec2 masking layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>W)(?P<name>{\w+})(?P<final_dim>\d+),(?P<mask_width>\d+),(?P<mask_prob>(\d+(\.\d*)?|\.\d+)),(?P<num_negatives>\d+)')
         m = pattern.match(blocks[idx])
@@ -663,8 +821,16 @@ class TorchVGSLModel(object):
                  input: Tuple[int, int, int, int],
                  blocks: List[str],
                  idx: int) -> Union[Tuple[None, None, None], Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a RO determination layer.
+        """Builds a RO determination layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>RO)(?P<name>{\w+})(?P<feature_size>\d+),(?P<hidden_size>\d+)')
         m = pattern.match(blocks[idx])
@@ -684,8 +850,18 @@ class TorchVGSLModel(object):
                    idx: int,
                    target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                              Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a 2D convolution layer.
+        """Builds a 2D convolution layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>C)(?P<trans>T)?(?P<nl>s|t|r|l|lr|m)(?P<name>{\w+})?(\d+),'
                              r'(\d+),(?P<out>\d+)(,(?P<stride_y>\d+),(?P<stride_x>\d+))?(,(?P<dilation_y>\d+),(?P<dilation_x>\d+))?')
@@ -711,8 +887,18 @@ class TorchVGSLModel(object):
                            idx: int,
                            target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                      Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a basic ResNet block (prototype)
+        """Builds a basic ResNet block (prototype)
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>Rn)(?P<name>{\w+})?(?P<out>\d+)')
         m = pattern.match(blocks[idx])
@@ -736,8 +922,18 @@ class TorchVGSLModel(object):
                       idx: int,
                       target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                 Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a maxpool layer.
+        """Builds a maxpool layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>Mp)(?P<name>{\w+})?(\d+),(\d+)(?:,(\d+),(\d+))?')
         m = pattern.match(blocks[idx])
@@ -757,8 +953,18 @@ class TorchVGSLModel(object):
                       idx: int,
                       target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                 Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a reshape layer
+        """Builds a reshape layer
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(?P<type>S)(?P<name>{\w+})?(?P<dim>\d+)\((?P<part_a>\d+)x'
                              r'(?P<part_b>\d+)\)(?P<high>\d+),(?P<low>\d+)')
@@ -797,8 +1003,18 @@ class TorchVGSLModel(object):
                      idx: int,
                      target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds an output layer.
+        """Builds an output layer.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         pattern = re.compile(r'(O)(?P<name>{\w+})?(?P<dim>2|1|0)(?P<type>l|s|c)(?P<aug>a)?(?P<out>\d+)')
         m = pattern.match(blocks[idx])
@@ -833,6 +1049,13 @@ class TorchVGSLModel(object):
             return lin.get_shape(input), [VGSLBlock(blocks[idx], m.group(1), m.group('name'), self.idx)], lin
 
     def _bracket_count(self, block: str) -> int:
+        """
+
+        :param block: 
+        :type block: str
+        :rtype: int
+
+        """
         rst = 0
         for c in block:
             if c == "[":
@@ -847,6 +1070,13 @@ class TorchVGSLModel(object):
         return rst
 
     def _parenthesis_count(self, block: str) -> int:
+        """
+
+        :param block: 
+        :type block: str
+        :rtype: int
+
+        """
         rst = 0
         for c in block:
             if c == "(":
@@ -866,8 +1096,18 @@ class TorchVGSLModel(object):
                      idx: int,
                      target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a serial block of layers.
+        """Builds a serial block of layers.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         if not blocks[idx] or blocks[idx][0] != '[':
             return None, None, None
@@ -896,8 +1136,18 @@ class TorchVGSLModel(object):
                        idx: int,
                        target_output_shape: Optional[Tuple[int, int, int, int]] = None) -> Union[Tuple[None, None, None],
                                                                                                  Tuple[Tuple[int, int, int, int], str, Callable]]:
-        """
-        Builds a block of parallel layers.
+        """Builds a block of parallel layers.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param blocks: 
+        :type blocks: List[str]
+        :param idx: 
+        :type idx: int
+        :param target_output_shape:  (Default value = None)
+        :type target_output_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Union[Tuple[None,None,None],Tuple[Tuple[int,int,int,int],str,Callable]]
+
         """
         if not blocks[idx] or blocks[idx][0] != '(':
             return None, None, None

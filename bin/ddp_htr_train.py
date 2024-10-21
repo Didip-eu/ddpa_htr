@@ -42,16 +42,10 @@ p = {
     "save_freq": 100,
     "resume_fname": 'model_save.ml',
     "mode": 'train',
+    "auxhead": [True, 'Combine output with CTC shortcut'],
 }
 
 
-
-model = vgsl.build_spec_from_chunks(
-        [ ('Input','[0,0,0,3'),
-          ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
-          ('Column Maxpool', f'Mp{args.img_height/8},1'),
-          ('Recurrent head', 'Lbx256') ],
-        height = 128 )
 
 
 if __name__ == "__main__":
@@ -60,14 +54,7 @@ if __name__ == "__main__":
     logger.debug("CLI arguments: {}".format( args ))
 
 
-    #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
-    # (our model already computes the softmax )
-    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
-
-    #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
-
-    #self.net.train()
-
+    #-------------- Dataset ---------------
     # Alphabet is to be found in the same directory as the TSV file:
     # the two datasets below share the same directory, and consequently, their alphabet
     ds_train = monasterium.MonasteriumDataset( task='htr', shape='polygons',
@@ -82,10 +69,50 @@ if __name__ == "__main__":
 
     logger.debug( str(ds_val) )
 
+    n_classes = len( ds_train.alphabet )
+
+    #------------- Models ------------
+    from kraken import vgsl
+
+    model_spec_rnn_top = vgsl.build_spec_from_chunks(
+            [ ('Input','0,0,0,3'),
+              ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
+          ('Column Maxpool', 'Mp{height//8},1'),
+          ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}' ) ],
+          height = args.img_height, classes=n_classes)
+
+    model_spec_rnn_and_shortcut = vgsl.build_spec_from_chunks(
+            [ ('Input','[0,0,0,3'),
+              ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
+          ('Column Maxpool', 'Mp{height//8},1'),
+          ('Recurrent head and shortcut', '([Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}] [Do Cr1,3,{classes}])]' ) ],
+          height = args.img_height, classes=n_classes)
+
+    #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
+    # (our model already computes the softmax )
+
+    if args.auxhead: 
+        def criterion(y, t, ly, lt):
+            """ Assume that y the (N,2*<n classes>,1,W)-concatenation of the two tensors we want to combine"""
+            y1, y2 = y[:,:n_classes], y[:,nclasses]
+            return (torch.nn.CTCLoss(zero_infinity=True)(y1, t, ly, lt) + 0.1 * zero_infinity=True)(y2, t, ly, lt))/batch_size
+    else:
+        criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
+
+   
+
+    #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
+
+    #self.net.train()
+
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
-    model = HTR_Model.resume( args.resume_fname, alphabet=ds_train.alphabet, height=args.img_height, model_spec= )
+    model = HTR_Model.resume( args.resume_fname, 
+                              alphabet=ds_train.alphabet, 
+                             height=args.img_height, 
+                             model_spec=model_spec_rnn_top, 
+                             add_output_layer=False )
 
     model.net.train()
 

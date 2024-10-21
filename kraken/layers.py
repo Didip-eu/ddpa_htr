@@ -25,11 +25,16 @@ __all__ = ['Addition', 'MaxPool', 'Reshape', 'Dropout', 'TransposedSummarizingRN
 
 
 class MultiParamSequential(Sequential):
-    """
-    Sequential variant accepting multiple arguments.
-    """
+    """Sequential variant accepting multiple arguments."""
 
     def forward(self, *inputs, output_shape: Optional[Tuple[int, int]] = None):
+        """
+
+        :param *inputs: 
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+
+        """
         modules = self._modules.values()
         i = 0
         for module in modules:
@@ -42,10 +47,16 @@ class MultiParamSequential(Sequential):
 
 
 class MultiParamParallel(Module):
-    """
-    Parallel module.
-    """
+    """Parallel module."""
+
     def forward(self, *inputs, output_shape: Optional[Tuple[int, int]] = None):
+        """
+
+        :param *inputs: 
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+
+        """
         outputs = []
         seq_lens = None
         for module in self._modules.values():
@@ -67,10 +78,26 @@ def PeepholeLSTMCell(input: torch.Tensor,
                      w_ip: torch.Tensor,
                      w_fp: torch.Tensor,
                      w_op: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    An LSTM cell with peephole connections without biases.
-
+    """An LSTM cell with peephole connections without biases.
+    
     Mostly ripped from the pytorch autograd lstm implementation.
+
+    :param input: 
+    :type input: torch.Tensor
+    :param hidden: 
+    :type hidden: Tuple[torch.Tensor, torch.Tensor]
+    :param w_ih: 
+    :type w_ih: torch.Tensor
+    :param w_hh: 
+    :type w_hh: torch.Tensor
+    :param w_ip: 
+    :type w_ip: torch.Tensor
+    :param w_fp: 
+    :type w_fp: torch.Tensor
+    :param w_op: 
+    :type w_op: torch.Tensor
+    :rtype: Tuple[torch.Tensor,torch.Tensor]
+
     """
     hx, cx = hidden
     gates = F.linear(input, w_ih) + F.linear(hx, w_hh)
@@ -93,10 +120,26 @@ def PeepholeLSTMCell(input: torch.Tensor,
 
 
 def StackedRNN(inners, num_layers: int, num_directions: int):
+    """
+
+    :param inners: 
+    :param num_layers: 
+    :type num_layers: int
+    :param num_directions: 
+    :type num_directions: int
+
+    """
     num_directions = len(inners)
     total_layers = num_layers * num_directions
 
     def forward(input, hidden, weight):
+        """
+
+        :param input: 
+        :param hidden: 
+        :param weight: 
+
+        """
         next_hidden = []
         for i in range(num_layers):
             all_output = []
@@ -117,7 +160,21 @@ def StackedRNN(inners, num_layers: int, num_directions: int):
 
 
 def Recurrent(inner, reverse: bool = False):
+    """
+
+    :param inner: 
+    :param reverse:  (Default value = False)
+    :type reverse: bool
+
+    """
     def forward(input, hidden, weight):
+        """
+
+        :param input: 
+        :param hidden: 
+        :param weight: 
+
+        """
         output = []
         steps = range(input.size(0) - 1, -1, -1) if reverse else range(input.size(0))
         for i in steps:
@@ -133,6 +190,7 @@ def Recurrent(inner, reverse: bool = False):
 
 
 class PeepholeBidiLSTM(Module):
+    """ """
 
     def __init__(self, input_size: int, hidden_size: int) -> None:
         super().__init__()
@@ -160,6 +218,15 @@ class PeepholeBidiLSTM(Module):
             self._all_weights.append(param_names)
 
     def forward(self, input: torch.Tensor, output_shape: Optional[List[int]] = None) -> torch.Tensor:
+        """
+
+        :param input: 
+        :type input: torch.Tensor
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[List[int]]
+        :rtype: torch.Tensor
+
+        """
         layer = (Recurrent(PeepholeLSTMCell), Recurrent(PeepholeLSTMCell, reverse=True))
         func = StackedRNN(layer, 1, 2)
         input = input.transpose(0, 1)
@@ -171,13 +238,12 @@ class PeepholeBidiLSTM(Module):
 
     @property
     def all_weights(self):
+        """ """
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
 
 
 class Addition(Module):
-    """
-    An addition module
-    """
+    """An addition module"""
     def __init__(self, dim: int, chunk_size: int) -> None:
         """
         An addition module
@@ -195,14 +261,29 @@ class Addition(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[List[int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[List[int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         out = inputs.unfold(self.dim, self.chunk_size, self.chunk_size)
         out = out.sum(self.dim, keepdim=True)
         out = out.transpose(-1, self.dim).squeeze(-1)
         return out, seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
-        """
-        Calculates the output shape from input 4D tuple NCHW.
+        """Calculates the output shape from input 4D tuple NCHW.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
         """
         input = list(input)
         input[self.dim] = self.chunk_size
@@ -210,12 +291,22 @@ class Addition(Module):
         return self.output_shape
 
     def deserialize(self, name, spec):
-        """
-        Noop for deserialization
+        """Noop for deserialization
+
+        :param name: 
+        :param spec: 
+
         """
         pass
 
     def serialize(self, name, input, builder):
+        """
+
+        :param name: 
+        :param input: 
+        :param builder: 
+
+        """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'addition'
         params.description = 'An addition layer'
@@ -230,9 +321,7 @@ class Addition(Module):
 
 
 class Identity(Module):
-    """
-    A placeholder identity operator.
-    """
+    """A placeholder identity operator."""
     def __init__(self) -> None:
         """
         A placeholder identity operator (mostly used for residual connections and similar).
@@ -248,19 +337,47 @@ class Identity(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         return inputs, seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         self.output_shape = input
         return input
 
     def deserialize(self, name, spec):
-        """
-        Noop for deserialization
+        """Noop for deserialization
+
+        :param name: 
+        :param spec: 
+
         """
         pass
 
     def serialize(self, name, input, builder):
+        """
+
+        :param name: 
+        :param input: 
+        :param builder: 
+
+        """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'identity'
         params.description = 'An identity layer'
@@ -272,9 +389,7 @@ class Identity(Module):
 
 
 class Reshape(Module):
-    """
-    Reshapes input and moves it into other dimensions.
-    """
+    """Reshapes input and moves it into other dimensions."""
 
     def __init__(self, src_dim: int, part_a: int, part_b: int, high: int, low: int) -> None:
         """
@@ -303,6 +418,17 @@ class Reshape(Module):
                 input: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param input: 
+        :type input: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         initial_len = input.shape[3]
         # split dimension src_dim into part_a x part_b
         input = input.reshape(input.shape[:self.src_dim] + (self.part_a, self.part_b) + input.shape[self.src_dim + 1:])
@@ -324,6 +450,13 @@ class Reshape(Module):
         return o, seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         input_shape = torch.zeros([x if x else 1 for x in input])
         with torch.no_grad():
             o, _ = self.forward(input_shape)
@@ -331,12 +464,25 @@ class Reshape(Module):
         return self.output_shape  # type: ignore
 
     def deserialize(self, name, spec):
-        """
-        Noop for deserialization
+        """Noop for deserialization
+
+        :param name: 
+        :param spec: 
+
         """
         pass
 
     def serialize(self, name: str, input: str, builder) -> str:
+        """
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+        :rtype: str
+
+        """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'reshape'
         params.description = 'A generalized reshape layer'
@@ -354,9 +500,7 @@ class Reshape(Module):
 
 
 class MaxPool(Module):
-    """
-    A simple wrapper for MaxPool layers
-    """
+    """A simple wrapper for MaxPool layers"""
 
     def __init__(self, kernel_size: Tuple[int, int], stride: Tuple[int, int]) -> None:
         """
@@ -371,12 +515,30 @@ class MaxPool(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         o = self.layer(inputs)
         if seq_len is not None:
             seq_len = torch.floor((seq_len-(self.kernel_size[1]-1)-1).float()/self.stride[1]+1).int()
         return o, seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         self.output_shape = (input[0],
                              input[1],
                              int(np.floor((input[2]-(self.kernel_size[0]-1)-1)/self.stride[0]+1) if input[2] != 0 else 0),
@@ -384,12 +546,26 @@ class MaxPool(Module):
         return self.output_shape
 
     def deserialize(self, name, spec) -> None:
-        """
-        Noop for MaxPool deserialization
+        """Noop for MaxPool deserialization
+
+        :param name: 
+        :param spec: 
+        :rtype: None
+
         """
         pass
 
     def serialize(self, name: str, input: str, builder) -> str:
+        """
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+        :rtype: str
+
+        """
         builder.add_pooling(name,
                             self.kernel_size[0],
                             self.kernel_size[1],
@@ -403,9 +579,7 @@ class MaxPool(Module):
 
 
 class Dropout(Module):
-    """
-    A simple wrapper for dropout layers
-    """
+    """A simple wrapper for dropout layers"""
 
     def __init__(self, p: float, dim: int) -> None:
         """
@@ -423,19 +597,47 @@ class Dropout(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         return self.layer(inputs), seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         self.output_shape = input
         return input
 
     def deserialize(self, name, spec):
-        """
-        Noop for deserialization
+        """Noop for deserialization
+
+        :param name: 
+        :param spec: 
+
         """
         pass
 
     def serialize(self, name, input, builder):
+        """
+
+        :param name: 
+        :param input: 
+        :param builder: 
+
+        """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'dropout'
         params.description = 'An n-dimensional dropout layer'
@@ -449,9 +651,7 @@ class Dropout(Module):
 
 
 class TransposedSummarizingRNN(Module):
-    """
-    An RNN wrapper allowing time axis transpositions and other
-    """
+    """An RNN wrapper allowing time axis transpositions and other"""
 
     def __init__(self,
                  input_size: int,
@@ -502,6 +702,17 @@ class TransposedSummarizingRNN(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         #print("TransposedSummarizingRNN(Module)(): seq_len=",seq_len)
         # NCHW -> HNWC
         inputs = inputs.permute(2, 0, 3, 1)
@@ -540,8 +751,12 @@ class TransposedSummarizingRNN(Module):
         return o.permute(1, 3, 0, 2), seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
-        """
-        Calculates the output shape from input 4D tuple (batch, channel, input_size, seq_len).
+        """Calculates the output shape from input 4D tuple (batch, channel, input_size, seq_len).
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
         """
         if self.summarize:
             if self.transpose:
@@ -554,8 +769,13 @@ class TransposedSummarizingRNN(Module):
         return self.output_shape  # type: ignore
 
     def deserialize(self, name: str, spec) -> None:
-        """
-        Sets the weights of an initialized layer from a coreml spec.
+        """Sets the weights of an initialized layer from a coreml spec.
+
+        :param name: 
+        :type name: str
+        :param spec: 
+        :rtype: None
+
         """
         nn = [x for x in spec.neuralNetwork.layers if x.name == name][0]
         arch = nn.WhichOneof('layer')
@@ -566,6 +786,13 @@ class TransposedSummarizingRNN(Module):
             layer = getattr(nn, arch)
 
         def _deserialize_weights(params, layer, direction):
+            """
+
+            :param params: 
+            :param layer: 
+            :param direction: 
+
+            """
             # ih_matrix
             weight_ih = torch.Tensor([params.inputGateWeightMatrix.floatValue,  # wi
                                       params.forgetGateWeightMatrix.floatValue,  # wf
@@ -585,6 +812,13 @@ class TransposedSummarizingRNN(Module):
                 layer.weight_hh_l0_reverse = torch.nn.Parameter(weight_hh.resize_as_(layer.weight_hh_l0.data))
 
         def _deserialize_biases(params, layer, direction):
+            """
+
+            :param params: 
+            :param layer: 
+            :param direction: 
+
+            """
             # ih biases
             biases = torch.Tensor([params.inputGateBiasVector.floatValue,  # bi
                                    params.forgetGateBiasVector.floatValue,  # bf
@@ -612,15 +846,26 @@ class TransposedSummarizingRNN(Module):
                 _deserialize_biases(bwd_params, self.layer, 'bwd')
 
     def serialize(self, name: str, input: str, builder) -> str:
-        """
-        Serializes the module using a NeuralNetworkBuilder.
+        """Serializes the module using a NeuralNetworkBuilder.
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+        :rtype: str
+
         """
         # coreml weight order is IFOG while pytorch uses IFGO
         # it also uses a single bias while pytorch splits them for some reason
         def _reorder_indim(tensor, splits=4, idx=[0, 1, 3, 2]):
-            """
-            Splits the first dimension into `splits` chunks, reorders them
+            """Splits the first dimension into `splits` chunks, reorders them
             according to idx, and convert them to a numpy array.
+
+            :param tensor: 
+            :param splits:  (Default value = 4)
+            :param idx:  (Default value = [0, 1, 3, 2])
+
             """
             s = tensor.chunk(splits)
             return [s[i].data.numpy() for i in idx]
@@ -671,9 +916,7 @@ class TransposedSummarizingRNN(Module):
 
 
 class LinSoftmax(Module):
-    """
-    A wrapper for linear projection + softmax dealing with dimensionality mangling.
-    """
+    """A wrapper for linear projection + softmax dealing with dimensionality mangling."""
 
     def __init__(self, input_size: int, output_size: int, augmentation: bool = False) -> None:
         """
@@ -702,6 +945,17 @@ class LinSoftmax(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         # move features (C) to last dimension for linear activation
         # NCHW -> NWHC
         inputs = inputs.transpose(1, 3)
@@ -722,15 +976,24 @@ class LinSoftmax(Module):
         return o.transpose(1, 3), seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
-        """
-        Calculates the output shape from input 4D tuple NCHW.
+        """Calculates the output shape from input 4D tuple NCHW.
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
         """
         self.output_shape = (input[0], self.output_size, input[2], input[3])
         return self.output_shape
 
     def deserialize(self, name: str, spec) -> None:
-        """
-        Sets the weights of an initialized module from a CoreML protobuf spec.
+        """Sets the weights of an initialized module from a CoreML protobuf spec.
+
+        :param name: 
+        :type name: str
+        :param spec: 
+        :rtype: None
+
         """
         # extract conv parameters
         lin = [x for x in spec.neuralNetwork.layers if x.name == '{}_lin'.format(name)][0].innerProduct
@@ -740,8 +1003,14 @@ class LinSoftmax(Module):
         self.lin.bias = torch.nn.Parameter(bias)
 
     def serialize(self, name: str, input: str, builder):
-        """
-        Serializes the module using a NeuralNetworkBuilder.
+        """Serializes the module using a NeuralNetworkBuilder.
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+
         """
         lin_name = '{}_lin'.format(name)
         softmax_name = '{}_softmax'.format(name)
@@ -753,16 +1022,18 @@ class LinSoftmax(Module):
         return name
 
     def resize(self, output_size: int, del_indices: Optional[Iterable[int]] = None) -> None:
-        """
-        Resizes the linear layer with minimal disturbance to the existing
+        """Resizes the linear layer with minimal disturbance to the existing
         weights.
-
+        
         First removes the weight and bias at the output positions in
         del_indices, then resizes both tensors to a new output size.
 
-        Args:
-            output_size (int): Desired output size after resizing
-            del_indices (list): List of connection to outputs to remove.
+        :param output_size: Desired output size after resizing
+        :type output_size: int
+        :param del_indices: List of connection to outputs to remove. (Default value = None)
+        :type del_indices: Optional[Iterable[int]]
+        :rtype: None
+
         """
         if not del_indices:
             del_indices = []
@@ -781,9 +1052,10 @@ class LinSoftmax(Module):
 
 
 class ActConv2D(Module):
-    """
-    A wrapper for convolution + activation with automatic padding ensuring no
+    """A wrapper for convolution + activation with automatic padding ensuring no
     dropped columns.
+
+
     """
 
     def __init__(self,
@@ -841,6 +1113,17 @@ class ActConv2D(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor] = None,
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len:  (Default value = None)
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         if self.transposed:
             o = self.co(inputs, output_size=output_shape)
         else:
@@ -867,6 +1150,15 @@ class ActConv2D(Module):
         return o, seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int], target_shape: Optional[Tuple[int, int, int, int]] = None) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :param target_shape:  (Default value = None)
+        :type target_shape: Optional[Tuple[int, int, int, int]]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         if self.transposed:
             """ For transposed convolution, there is some flexibility. """
             min_y = int((input[2] - 1) * self.stride[0] - 2 * self.padding[0] + self.dilation[0] * (self.kernel_size[0] - 1) + 1 if input[2] != 0 else 0)
@@ -887,8 +1179,13 @@ class ActConv2D(Module):
         return self.output_shape
 
     def deserialize(self, name: str, spec) -> None:
-        """
-        Sets the weight of an initialized model from a CoreML protobuf spec.
+        """Sets the weight of an initialized model from a CoreML protobuf spec.
+
+        :param name: 
+        :type name: str
+        :param spec: 
+        :rtype: None
+
         """
         conv = [x for x in spec.neuralNetwork.layers if x.name == '{}_conv'.format(name)][0].convolution
         if self.transposed:
@@ -902,8 +1199,15 @@ class ActConv2D(Module):
         self.co.bias = torch.nn.Parameter(torch.Tensor(conv.bias.floatValue))
 
     def serialize(self, name: str, input: str, builder) -> str:
-        """
-        Serializes the module using a NeuralNetworkBuilder.
+        """Serializes the module using a NeuralNetworkBuilder.
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+        :rtype: str
+
         """
         conv_name = '{}_conv'.format(name)
         act_name = '{}_act'.format(name)
@@ -931,15 +1235,17 @@ class ActConv2D(Module):
         return name
 
     def resize(self, output_size: int, del_indices: Optional[Iterable[int]] = None) -> None:
-        """
-        Resizes the convolutional filters of the layer
-
+        """Resizes the convolutional filters of the layer
+        
         First removes the filters at output positions in del_indices, then
         resizes both tensors to a new output size.
 
-        Args:
-            output_size (int): Desired output dimensionality after resizing
-            del_indices (list): List of connection to outputs to remove.
+        :param output_size: Desired output dimensionality after resizing
+        :type output_size: int
+        :param del_indices: List of connection to outputs to remove. (Default value = None)
+        :type del_indices: Optional[Iterable[int]]
+        :rtype: None
+
         """
         if not del_indices:
             del_indices = []
@@ -964,9 +1270,7 @@ class ActConv2D(Module):
 
 
 class GroupNorm(Module):
-    """
-    A group normalization layer
-    """
+    """A group normalization layer"""
 
     def __init__(self, in_channels: int, num_groups: int) -> None:
         super().__init__()
@@ -979,6 +1283,17 @@ class GroupNorm(Module):
                 inputs: torch.Tensor,
                 seq_len: Optional[torch.Tensor],
                 output_shape: Optional[Tuple[int, int]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+
+        :param inputs: 
+        :type inputs: torch.Tensor
+        :param seq_len: 
+        :type seq_len: Optional[torch.Tensor]
+        :param output_shape:  (Default value = None)
+        :type output_shape: Optional[Tuple[int, int]]
+        :rtype: Tuple[torch.Tensor,Optional[torch.Tensor]]
+
+        """
         t = inputs.dtype
         # XXX: verify that pytorch AMP casts the inputs to float32 correctly at
         # some point.
@@ -986,20 +1301,39 @@ class GroupNorm(Module):
         return o.type(t), seq_len
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: 
+        :type input: Tuple[int, int, int, int]
+        :rtype: Tuple[int,int,int,int]
+
+        """
         self.output_shape = input
         return self.output_shape  # type: ignore
 
     def deserialize(self, name: str, spec) -> None:
-        """
-        Sets the weight of an initialized model from a CoreML protobuf spec.
+        """Sets the weight of an initialized model from a CoreML protobuf spec.
+
+        :param name: 
+        :type name: str
+        :param spec: 
+        :rtype: None
+
         """
         gn = [x for x in spec.neuralNetwork.layers if x.name == '{}'.format(name)][0].custom
         self.layer.weight = torch.nn.Parameter(torch.Tensor(gn.weights[0].floatValue).resize_as_(self.layer.weight))
         self.layer.bias = torch.nn.Parameter(torch.Tensor(gn.weights[1].floatValue).resize_as_(self.layer.bias))
 
     def serialize(self, name: str, input: str, builder) -> str:
-        """
-        Serializes the module using a NeuralNetworkBuilder.
+        """Serializes the module using a NeuralNetworkBuilder.
+
+        :param name: 
+        :type name: str
+        :param input: 
+        :type input: str
+        :param builder: 
+        :rtype: str
+
         """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'groupnorm'
@@ -1020,15 +1354,24 @@ class GroupNorm(Module):
 
 
 class ResNetBasicBlock(MultiParamSequential):
-    """
-    Basic residual block, as could be defined with the standard VGSL below, with <out>
-    target channels:
 
-        ```python
+    """Basic residual block, as could be defined with the standard VGSL below, with `<out>`
+    target channels:
+    
+    .. code-block:: python
+
         [([I Cl1,1,<out> Gn<out>] [Cr3,3,<out> Gn<out> Cl3,3,<out> Gn<out>]) A3,<out> Cr1,1,<out>]
-        ```
+
     """
     def __init__(self, in_channels: int, out_channels: int):
+        """
+        Builds a ResNet basic block.
+
+        :param in_channels: number of input channels.
+        :type in_channels: int
+        :param out_channels: number of output channels.
+        :type out_channels: int
+        """
         
         super().__init__()
 
@@ -1067,15 +1410,30 @@ class ResNetBasicBlock(MultiParamSequential):
 
 
     def get_shape(self, input: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+        """
+
+        :param input: input size (N,C,H,W)
+        :type input: Tuple[int, int, int, int]
+        :returns: output size (N,C,H,W)
+        :rtype: Tuple[int,int,int,int]
+
+        """
         self.output_shape = (input[0], self.out_channels, input[2], input[3] )
         return self.output_shape
 
 
     def serialize( self, name: str, input: str, builder) -> str:
-        """
-        Serializes the module using a NeuralNetworkBuilder.
-
+        """Serializes the module using a NeuralNetworkBuilder.
+        
         Recurrent submodule serialization for this layer is ensured by `vgsl.save_model()`
+
+        :param name: module name.
+        :type name: str
+        :param input: (for the builder's use) label for the inputs ('input', normally)
+        :type input: str
+        :param builder: 
+        :rtype: str
+
         """
         params = NeuralNetwork_pb2.CustomLayerParams()
         params.className = 'resnetblock'
@@ -1091,10 +1449,16 @@ class ResNetBasicBlock(MultiParamSequential):
 
 
     def deserialize( self, name: str, spec ) -> None:
-        """ 
-        Noop for ResNetBasicBlock deserialization.
-
+        """Noop for ResNetBasicBlock deserialization.
+        
         Recurrent submodule deserialization for this layer is ensured by `vgsl.load_model()`
+
+        :param name: module name.
+        :type name: str
+        :param spec: block spec.
+        :type spec: str
+        :rtype: None
+
         """
         pass
 
