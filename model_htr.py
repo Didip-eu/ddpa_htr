@@ -3,7 +3,6 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from kraken.vgsl import TorchVGSLModel
-from kraken.ctc_decoder import greedy_decoder
 import numpy as np
 import re
 import Levenshtein
@@ -225,8 +224,8 @@ class HTR_Model():
 
         if len(predicted_mesg) != len(target_mesg):
             raise ValueError("Input lists must have the same lengths!")
-        char_errors = [ Levenshtein.distance(pred, target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
-        cer = sum(char_errors) / len( predicted_mesg )
+        char_errors = [ Levenshtein.distance(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
+        cer = sum(char_errors) / len(target_mesg)
         line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
 
         return (cer, line_error)

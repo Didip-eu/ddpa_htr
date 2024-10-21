@@ -97,14 +97,14 @@ if __name__ == "__main__":
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
 
-    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(y, t, ly, lt) / args.batch_size
+    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
     if args.auxhead: 
         def combined_ctc_loss(y, t, ly, lt):
             """ Assume that y the (W,N,2*<n classes>)-concatenation of the two tensors we want to combine"""
             y1, y2 = y[:,:,:n_classes], y[:,:,n_classes:]
             loss = torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y1, t, ly, lt)
             loss +=  0.1 * torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y2, t, ly, lt)
-            return loss/args.batch_size
+            return loss / args.batch_size
         criterion = combined_ctc_loss
 
    
@@ -216,7 +216,7 @@ if __name__ == "__main__":
                 model.save( args.resume_fname )
             
 
-        logger.info('Epoch {}, iteration {}, mean loss={}; CER={}, LER={}. Estimated time until completion: {}'.format( 
+        logger.info('Epoch {}, iteration {}, mean loss={:3.3f}; CER={:1.3f}, LER={:1.3f}. Estimated time until completion: {}'.format( 
                 epoch, 
                 batch_index+1, 
                 mean_loss,

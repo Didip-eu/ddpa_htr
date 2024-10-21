@@ -285,5 +285,5 @@ def test_cer_wer():
 
     cer, ler = model_htr.HTR_Model.metrics( predicted, target )
 
-    assert cer == (3+2)/3
+    assert cer == (3/6+2/6)/3
     assert ler == 2/3
