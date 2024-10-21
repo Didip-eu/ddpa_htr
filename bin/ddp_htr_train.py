@@ -146,7 +146,7 @@ if __name__ == "__main__":
             predictions = model.inference_task( img, lengths )
             batch_cer, batch_ler = model.metrics( predictions, transcriptions )
             cer += batch_cer
-            ler += batch_cer
+            ler += batch_ler
 
         writer.add_scalar("CER/validate", cer/len(batches), epoch)
         writer.add_scalar("LER/validate", ler/len(batches), epoch)
