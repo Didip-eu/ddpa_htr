@@ -126,9 +126,7 @@ class HTR_Model():
             widths (Tensor): sequence of image lengths
 
         Returns:
-            Tuple[np.ndarray, np.ndarray]: Tuple with (N,C,W) array and
-            final output sequence lengths; C should match the number of 
-            character classes.
+            Tuple[np.ndarray, np.ndarray]: Tuple with (N,C,W) array and final output sequence lengths; C should match the number of character classes.
         """
         if self.device:
             img_nchw = img_nchw.to( self.device )
@@ -150,18 +148,16 @@ class HTR_Model():
         Decode a batch of network logits into labels.
 
         Args:
-            outputs_ncw (np.ndarray): a network output batch (N,C,W) of length W where C
-                    matches the number of character classes.
-        Returns:
-            List[List[Tuple[int,float]]]: a list of N lists of W tuples `(label, score)` where
-            the score is the max. logit. Eg.
+            outputs_ncw (np.ndarray): a network output batch (N,C,W) of length W where C matches the number of character classes.
 
-            ```
-            [[(30, 0.045990627), (8, 0.04730653), (8, 0.048647244), (8, 0.049242754), (8, 0.049613364), ...],
-             [(8, 0.04726322), (8, 0.047953878), (8, 0.047865044), (8, 0.04712664), (8, 0.046230078), ... ],
-             ...
-            ]
-            ```
+        Returns:
+            List[List[Tuple[int,float]]]: a list of N lists of W tuples `(label, score)` where the score is the max. logit. Eg.::
+
+                [[(30, 0.045990627), (8, 0.04730653), (8, 0.048647244), (8, 0.049242754), (8, 0.049613364), ...],
+                 [(8, 0.04726322), (8, 0.047953878), (8, 0.047865044), (8, 0.04712664), (8, 0.046230078), ... ],
+                 ...
+                ]
+            
         """
         decoded = []
         if lengths is not None:
@@ -180,8 +176,8 @@ class HTR_Model():
         Decode a single output frame (C,W); model-independent.
 
         Args:
-            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C
-                    matches the number of character classes.
+            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C matches the number of character classes.
+
         Returns:
             List[Tuple[int,float]]: a list of tuples (label, score)  
         """
