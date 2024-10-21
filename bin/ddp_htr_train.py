@@ -208,6 +208,7 @@ if __name__ == "__main__":
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
         # save model every time epoch completes and best CER has improved
+        cer, ler = 1.0, 1.0
         if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
             cer, ler = validate( epoch )
             if cer <= best_cer:
