@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-import torch
-import fargv
+
+# stdlib
+
 import sys
-from didip_handwriting_datasets import monasterium
-from didip_handwriting_datasets.alphabet import Alphabet
-from torchvision.transforms import Compose
-from torch.utils.data import DataLoader
-import torch.nn.functional as F
 from pathlib import Path
 import time
+import logging
+import random
+from typing import NamedTuple
+# 3rd-party
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torchvision.transforms import Compose
 from tqdm import tqdm
+# didip
+import fargv
+from didip_handwriting_datasets import monasterium
+from didip_handwriting_datasets.alphabet import Alphabet
 
 """
 Todo:
@@ -22,17 +31,15 @@ Todo:
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
-
 import logging_utils
 from model_htr import HTR_Model
+from kraken import vgsl
 
 # local logger
-import logging
 # root logger
 logging.basicConfig(stream=sys.stdout, level='INFO', format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
-from torch.utils.tensorboard import SummaryWriter
 
 p = {
     "appname": "htr_train",
@@ -78,7 +85,6 @@ if __name__ == "__main__":
     n_classes = len( ds_train.alphabet )
 
     #------------- Models ------------
-    from kraken import vgsl
 
     model_spec_rnn_top = vgsl.build_spec_from_chunks(
             [ ('Input','0,0,0,3'),
@@ -131,9 +137,34 @@ if __name__ == "__main__":
     # TensorBoard writer
     writer = SummaryWriter()
     
-    best_cer = 1.0
+    class Metric(NamedTuple):
+        value: float 
+        epoch: int 
+        
+        def __lt__(self, other):
+            return self.value <= other.value
+        
+    best_cer, best_ler, last_cer, last_ler = Metric(1.0, -1), Metric(1.0, -1), Metric(1.0, -1), Metric(1.0, -1)
+    
+    def sample_prediction_log( epoch:int, cut:int ):
+        model.net.eval()
+
+        b = next(iter(eval_loader))
+   
+        msg_strings = model.inference_task( b['img'][:cut], b['width'][:cut] )
+        gt_strings = b['transcription'][:cut]
+        logger.info('epoch {}'.format( epoch ))
+        for (img_name, gt_string, decoded_string ) in zip(  b['id'][:cut], b['transcription'][:cut], msg_strings ):
+                logger.info("{}:\n\t[{}]\n\t {}".format(img_name, decoded_string, gt_string ))
+
+        model.net.train()
 
     def validate(epoch):
+        """ Validation step: runs inference on the validation set.
+
+        :param epoch: epoch index.
+        :type epoch: int
+        """
 
         model.net.eval()
         
@@ -148,14 +179,19 @@ if __name__ == "__main__":
             cer += batch_cer
             ler += batch_ler
 
-        writer.add_scalar("CER/validate", cer/len(batches), epoch)
-        writer.add_scalar("LER/validate", ler/len(batches), epoch)
+        mean_cer, mean_ler = cer/len(batches), ler/len(batches)
 
         model.net.train()
-        return cer, ler
+        return (mean_cer, mean_ler)
 
     def train_epoch(epoch ):
+        """ Training step.
 
+        :param epoch: epoch index.
+        :type epoch: int
+        """
+        global best_cer, best_ler, last_cer, last_ler
+        
         epoch_losses = []
         batches = iter( train_loader )
         for batch_index in tqdm ( range(len( batches ))):
@@ -182,9 +218,6 @@ if __name__ == "__main__":
             loss = criterion( outputs_wnc.cpu(), labels, output_lengths_n, target_lengths )
             epoch_losses.append( loss.detach()) 
 
-            # visualization
-            writer.add_scalar("Loss/train", loss, epoch)
-
             loss.backward()
 
             optimizer.step()
@@ -192,36 +225,35 @@ if __name__ == "__main__":
             #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
             if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
 
-                model.net.eval()
-
-                b = next(iter(eval_loader))
-                msg_strings = model.inference_task( b['img'], b['width'] )
-                gt_strings = b['transcription']
-                logger.info('epoch {}, iteration {}'.format( epoch, batch_index+1 ))
-                for (img_name, gt_string, decoded_string ) in zip(  b['id'], b['transcription'], msg_strings ):
-                        logger.info("{}: [{}] {}".format(img_name, decoded_string, gt_string ))
-
-                model.net.train()
-
+                cut = 4 if args.batch_size >= 4 else args.batch_size
+                sample_prediction_log( epoch, cut )
 
         mean_loss = torch.stack(epoch_losses).mean().item()       
+        # visualization
+        writer.add_scalar("Loss/train", mean_loss, epoch)
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
         # save model every time epoch completes and best CER has improved
-        cer, ler = 1.0, 1.0
         if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
             cer, ler = validate( epoch )
-            if cer <= best_cer:
-                best_cer = cer
+            last_cer, last_ler = Metric( cer, epoch ), Metric( ler, epoch )
+            if last_cer <= best_cer:
+                best_cer = last_cer
                 model.save( args.resume_fname )
+            if last_ler <= best_ler:
+                best_ler = last_ler
+
+        writer.add_scalar("CER/validate", last_cer.value, epoch)
+        writer.add_scalar("LER/validate", last_ler.value, epoch)
             
 
         logger.info('Epoch {}, iteration {}, mean loss={:3.3f}; CER={:1.3f}, LER={:1.3f}. Estimated time until completion: {}'.format( 
                 epoch, 
                 batch_index+1, 
                 mean_loss,
-                cer, ler,
+                best_cer.value, best_ler.value,
                 logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
+        logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
 
     if args.mode == 'train':
     
