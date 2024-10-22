@@ -112,30 +112,38 @@ class HTR_Model():
 
 
     
-    def forward(self, img_nchw: Tensor, widths_n: Tensor=None):
-        """
-        The internal logics is entirely delegated to the layers wrapped 
+    def forward(self, img_nchw: Tensor, widths_n: Tensor=None, split_output=False):
+        """ The internal logics is entirely delegated to the layers wrapped 
         into the VGSL-defined module: by defaut, an instance of 
         `kraken.lib.layers.MultiParamSequential`.
-        Note: in spite of its name, this method is different from a torch.nn.Module.forward()
-        function; it is just a convenience function, that is meant to be called explicitly,
-        prior to the decoding stage (i.e. outside a training step), not as a callback.
+        
+        .. note:: 
+            In spite of its name, this method is different from a torch.nn.Module.forward()
+            function; it is just a convenience function, that is meant to be called explicitly,
+            prior to the decoding stage (i.e. outside a training step), not as a callback.
 
-        Args:
-            img_nchw (Tensor): a batch of line images
-            widths (Tensor): sequence of image lengths
+        :param img_nchw: a batch of line images.
+        :type img_nchw: Tensor
+        :param widths: sequence of image lengths.
+        :type widths: Tensor
+        :param split_output: if True, only keep first half of the output channels (for pseudo-parallel nets).
+        :type split_output: bool
 
-        Returns:
-            Tuple[np.ndarray, np.ndarray]: Tuple with (N,C,W) array and final output sequence lengths; C should match the number of character classes.
+        :returns: Tuple with (N,C,W) array and final output sequence lengths; C should match the number of character classes.
+        :rtype: Tuple[np.ndarray, np.ndarray]
         """
         if self.device:
             img_nchw = img_nchw.to( self.device )
 
         with torch.no_grad():
 
-            o, owidths = self.net(img_nchw, widths_n)
-            logger.debug("Network outputs have shape {} (lengths={}.".format(o.shape, widths_n ))
-            outputs_ncw = o.detach().squeeze(2).float().cpu().numpy()
+            o_nchw, owidths = self.net(img_nchw, widths_n)
+            if split_output:
+                if o_nchw.shape[1]%2 != 0:
+                    raise ValueError(f"Output tensor cannot be split: odd number of channels ({o_nchw.shape[1]})")
+                o_nchw = o_nchw[:,:o_nchw.shape[1]//2]
+            logger.debug("Network outputs have shape {} (lengths={}.".format(o_nchw.shape, widths_n ))
+            outputs_ncw = o_nchw.detach().squeeze(2).float().cpu().numpy()
             logger.debug("-> distilled into Numpy array with shape {}.".format(outputs_ncw.shape))
             if owidths is not None:
                 owidths = owidths.cpu().numpy()
@@ -144,20 +152,18 @@ class HTR_Model():
 
         
     def decode_batch(self, outputs_ncw: np.ndarray, lengths: np.ndarray=None):
-        """
-        Decode a batch of network logits into labels.
+        """ Decode a batch of network logits into labels.
 
-        Args:
-            outputs_ncw (np.ndarray): a network output batch (N,C,W) of length W where C matches the number of character classes.
+        :param outputs_ncw: a network output batch (N,C,W) of length W where C matches the number of character classes.
+        :type outputs_ncw: np.ndarray
 
-        Returns:
-            List[List[Tuple[int,float]]]: a list of N lists of W tuples `(label, score)` where the score is the max. logit. Eg.::
+        :rtype: List[List[Tuple[int,float]]]
+        :returns: a list of N lists of W tuples `(label, score)` where the score is the max. logit. Eg.::
 
                 [[(30, 0.045990627), (8, 0.04730653), (8, 0.048647244), (8, 0.049242754), (8, 0.049613364), ...],
                  [(8, 0.04726322), (8, 0.047953878), (8, 0.047865044), (8, 0.04712664), (8, 0.046230078), ... ],
                  ...
                 ]
-            
         """
         if lengths is not None:
             return [ self.decoder(o_cw[:,:lgth]) for o_cw, lgth in zip( outputs_ncw, lengths) ]
@@ -167,14 +173,13 @@ class HTR_Model():
 
     @staticmethod
     def decode_greedy(outputs_cw: np.ndarray):
-        """
-        Decode a single output frame (C,W) by choosing the class C with max. logit; model-independent.
+        """ Decode a single output frame (C,W) by choosing the class C with max. logit; model-independent.
 
-        Args:
-            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C matches the number of character classes.
+        :param outputs_cw: a single output sequence (C,W) of length W where C matches the number of character classes.
+        :type outputs_cw: np.ndarray
 
-        Returns:
-            List[Tuple[int,float]]: a list of tuples (label, score)  
+        :returns: a list of tuples (label, score)  
+        :rtype: List[Tuple[int,float]]
         """
         labels = np.argmax( outputs_cw, 0 )
         scores = np.max( outputs_cw, 0 )
@@ -182,23 +187,25 @@ class HTR_Model():
         return list(zip(labels, scores))
 
 
-    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None) -> List[str]:
-        """
-        Make predictions on a batch of images.
+    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False) -> List[str]:
+        """ Make predictions on a batch of images.
 
-        Args:
-            img_nchw (Tensor): a batch of images.
-            widths_n (Tensor): a 1D tensor of lengths.
+        :param img_nchw: a batch of images.
+        :type img_nchw: Tensor
+        :param widths_n: a 1D tensor of lengths.
+        :type widths_n: Tensor
+        :param split_output: if True, only keep first half of the output channels (for pseudo-parallel nets).
+        :type split_output: bool
 
-        Returns:
-            List[str]: a list of human-readable strings.
+        :returns: a list of human-readable strings.
+        :rtype: List[str]
         """
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
         assert isinstance( widths_n, Tensor) and len(widths_n) == img_nchw.shape[0]
 
         # raw outputs
-        outputs_ncw, output_widths = self.forward( img_nchw, widths_n ) 
+        outputs_ncw, output_widths = self.forward( img_nchw, widths_n, split_output=split_output ) 
 
         # decoding labels and scores
         # [[(l1,s1), ...],[(l1,s1), ... ], ...]
@@ -211,15 +218,15 @@ class HTR_Model():
 
     @staticmethod
     def metrics( predicted_mesg: List[str], target_mesg: List[str]) -> Tuple[float, float]:
-        """
-        Compute CER and LER for a batch.
+        """ Compute CER, WER, and LER for a batch.
 
-        Args:
-            predicated_mesg (List[str]): list of predicted strings.
-            predicated_mesg (List[str]): list of predicted strings.
+        :param predicted_mesg: list of predicted strings.
+        :type predicted_mesg: List[str]
+        :param target_mesg: list of target strings.
+        :type target_mesg: List[str]
 
-        Returns:
-            Tuple(float, float): a pair with the CER and LER (line error rate).
+        :returns: a 3-tuple with CER, WER, and LER (line error rate).
+        :rtype: Tuple(float, float)
         """
 
         if len(predicted_mesg) != len(target_mesg):
@@ -228,7 +235,18 @@ class HTR_Model():
         cer = sum(char_errors) / len(target_mesg)
         line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
 
-        return (cer, line_error)
+        # WER
+        pred_split, target_split = [ [ seq.split(' ') for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
+        pairs = list(zip( pred_split, target_split ))
+
+        wer = 0.0
+        for p in pairs:
+            enc = { w:v for (v,w) in enumerate( p[0] + p[1] ) }
+            enc_pred, enc_target = [ enc[w] for w in p[0] ], [enc[w] for w in p[1] ]
+            wer += Levenshtein.distance( enc_pred, enc_target ) / len( enc_target)
+        wer /= len(pairs)
+
+        return (cer, wer, line_error)
 
 
 

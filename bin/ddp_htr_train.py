@@ -23,8 +23,6 @@ from didip_handwriting_datasets.alphabet import Alphabet
 """
 Todo:
 
-+ multistep optimizer
-+ CER/WER for evaluation
 """
 
 
@@ -126,13 +124,14 @@ if __name__ == "__main__":
                               alphabet=ds_train.alphabet, 
                              height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
-                             add_output_layer=False )
+                             add_output_layer=False ) # to allow for parallel network
 
     model.net.train()
 
     optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
+    # multi-step scheduler
+    scheduler = self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*max_epoch), int(.75*max_epoch)])
 
-    t = time.time()
     
     # TensorBoard writer
     writer = SummaryWriter()
@@ -144,14 +143,15 @@ if __name__ == "__main__":
         def __lt__(self, other):
             return self.value <= other.value
         
-    best_cer, best_ler, last_cer, last_ler = Metric(1.0, -1), Metric(1.0, -1), Metric(1.0, -1), Metric(1.0, -1)
+    best_cer, best_wer = Metric(1.0, -1), Metric(1.0, -1)
+    last_cer, last_wer = Metric(1.0, -1), Metric(1.0, -1)
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
 
         b = next(iter(eval_loader))
    
-        msg_strings = model.inference_task( b['img'][:cut], b['width'][:cut] )
+        msg_strings = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings = b['transcription'][:cut]
         logger.info('epoch {}'.format( epoch ))
         for (img_name, gt_string, decoded_string ) in zip(  b['id'][:cut], b['transcription'][:cut], msg_strings ):
@@ -170,19 +170,20 @@ if __name__ == "__main__":
         
         batches = iter( eval_loader )
         cer = 0.0
-        ler = 0.0
+        wer = 0.0
+
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
-            predictions = model.inference_task( img, lengths )
-            batch_cer, batch_ler = model.metrics( predictions, transcriptions )
+            predictions = model.inference_task( img, lengths, split_output=args.auxhead )
+            batch_cer, batch_wer, _ = model.metrics( predictions, transcriptions )
             cer += batch_cer
-            ler += batch_ler
+            wer += batch_wer
 
-        mean_cer, mean_ler = cer/len(batches), ler/len(batches)
+        mean_cer, mean_wer = cer/len(batches), wer/len(batches)
 
         model.net.train()
-        return (mean_cer, mean_ler)
+        return (mean_cer, mean_wer)
 
     def train_epoch(epoch ):
         """ Training step.
@@ -190,8 +191,8 @@ if __name__ == "__main__":
         :param epoch: epoch index.
         :type epoch: int
         """
-        global best_cer, best_ler, last_cer, last_ler
-        
+        t = time.time()
+
         epoch_losses = []
         batches = iter( train_loader )
         for batch_index in tqdm ( range(len( batches ))):
@@ -228,38 +229,40 @@ if __name__ == "__main__":
                 cut = 4 if args.batch_size >= 4 else args.batch_size
                 sample_prediction_log( epoch, cut )
 
+
         mean_loss = torch.stack(epoch_losses).mean().item()       
         # visualization
         writer.add_scalar("Loss/train", mean_loss, epoch)
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
-        # save model every time epoch completes and best CER has improved
-        if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-            cer, ler = validate( epoch )
-            last_cer, last_ler = Metric( cer, epoch ), Metric( ler, epoch )
-            if last_cer <= best_cer:
-                best_cer = last_cer
-                model.save( args.resume_fname )
-            if last_ler <= best_ler:
-                best_ler = last_ler
-
-        writer.add_scalar("CER/validate", last_cer.value, epoch)
-        writer.add_scalar("LER/validate", last_ler.value, epoch)
-            
-
-        logger.info('Epoch {}, iteration {}, mean loss={:3.3f}; CER={:1.3f}, LER={:1.3f}. Estimated time until completion: {}'.format( 
-                epoch, 
-                batch_index+1, 
-                mean_loss,
-                best_cer.value, best_ler.value,
-                logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
-        logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
 
     if args.mode == 'train':
     
-        for epoch in range(1, 0 if args.dry_run else args.max_epoch ):
+        for epoch in range(0, 0 if args.dry_run else args.max_epoch ):
             train_epoch( epoch )
 
+            # save model every time epoch completes and best CER has improved
+            if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
+                cer, wer = validate( epoch )
+                last_cer, last_wer = Metric( cer, epoch ), Metric( wer, epoch )
+                if last_cer <= best_cer:
+                    best_cer = last_cer
+                    model.save( args.resume_fname )
+                if last_wer <= best_wer:
+                    best_wer = last_wer
+
+            writer.add_scalar("CER/validate", last_cer.value, epoch)
+            writer.add_scalar("WER/validate", last_wer.value, epoch)
+                
+
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
+                    epoch, 
+                    mean_loss,
+                    last_cer.value, last_wer.value, 
+                    logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
+            logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
+
+            scheduler.step()
 
     elif args.mode == 'test':
         pass
