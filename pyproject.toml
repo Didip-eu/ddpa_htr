@@ -1,0 +1,28 @@
+[project]
+name = "ddpa_htr"
+version = "1.0"
+authors = [
+  { name="Nicolas Renet", email="nprenet@gmail.com" },
+]
+description = "HTR mini-app, with VGSL capabilities."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [ "torch", "didip_handwriting_datasets" ]
+
+[project.urls]
+Homepage = "https://github.com/Didip-eu/ddpa_htr"
+
+#[scripts]
+#pageconvert = pagexml2json:main
+
+
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
