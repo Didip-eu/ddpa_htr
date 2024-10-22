@@ -130,7 +130,7 @@ if __name__ == "__main__":
 
     optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
     # multi-step scheduler
-    scheduler = self.scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*max_epoch), int(.75*max_epoch)])
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*args.max_epoch), int(.75*args.max_epoch)])
 
     
     # TensorBoard writer
@@ -257,7 +257,7 @@ if __name__ == "__main__":
 
             logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
                     epoch, 
-                    mean_loss,
+                    model.train_epochs[-1]['loss'],
                     last_cer.value, last_wer.value, 
                     logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
             logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
