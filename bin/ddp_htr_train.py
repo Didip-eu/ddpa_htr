@@ -32,6 +32,7 @@ sys.path.append( str(root) )
 import logging_utils
 from model_htr import HTR_Model
 from kraken import vgsl
+import metrics
 
 # local logger
 # root logger
@@ -52,7 +53,7 @@ p = {
     "validation_freq": 100,
     "save_freq": 100,
     "resume_fname": 'model_save.ml',
-    "mode": 'train',
+    "mode": ('train', 'validate', 'test'),
     "auxhead": [False, 'Combine output with CTC shortcut'],
 }
 
@@ -115,8 +116,6 @@ if __name__ == "__main__":
 
     #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
 
-    #self.net.train()
-
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
@@ -126,7 +125,6 @@ if __name__ == "__main__":
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              add_output_layer=False ) # to allow for parallel network
 
-    model.net.train()
 
     optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
     # multi-step scheduler
@@ -159,11 +157,9 @@ if __name__ == "__main__":
 
         model.net.train()
 
-    def validate(epoch):
+    def validate():
         """ Validation step: runs inference on the validation set.
 
-        :param epoch: epoch index.
-        :type epoch: int
         """
 
         model.net.eval()
@@ -176,7 +172,10 @@ if __name__ == "__main__":
             batch = next(batches)
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
-            batch_cer, batch_wer, _ = model.metrics( predictions, transcriptions )
+
+            # predictions on encoded strings, not on raw GT
+            predictions, transcriptions = [ [ eval_loader.dataset.alphabet.encode(ss) for ss in s ] for s in (predictions, transcriptions) ]
+            batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=eval_loader.dataset.alphabet.get_code(' ') )
             cer += batch_cer
             wer += batch_wer
 
@@ -238,12 +237,16 @@ if __name__ == "__main__":
 
     if args.mode == 'train':
     
+        model.net.train()
+
         for epoch in range(0, 0 if args.dry_run else args.max_epoch ):
             train_epoch( epoch )
 
             # save model every time epoch completes and best CER has improved
             if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-                cer, wer = validate( epoch )
+
+                cer, wer = validate()
+
                 last_cer, last_wer = Metric( cer, epoch ), Metric( wer, epoch )
                 if last_cer <= best_cer:
                     best_cer = last_cer
@@ -263,6 +266,10 @@ if __name__ == "__main__":
             logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
 
             scheduler.step()
+
+    elif args.mode == 'validate':
+        cer, wer = validate()
+        logger.info('CER={:1.3f}, WER={:1.3f}'.format( cer, wer ))
 
     elif args.mode == 'test':
         pass

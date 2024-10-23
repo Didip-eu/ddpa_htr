@@ -216,41 +216,6 @@ class HTR_Model():
 
 
 
-    @staticmethod
-    def metrics( predicted_mesg: List[str], target_mesg: List[str]) -> Tuple[float, float]:
-        """ Compute CER, WER, and LER for a batch.
-
-        :param predicted_mesg: list of predicted strings.
-        :type predicted_mesg: List[str]
-        :param target_mesg: list of target strings.
-        :type target_mesg: List[str]
-
-        :returns: a 3-tuple with CER, WER, and LER (line error rate).
-        :rtype: Tuple(float, float)
-        """
-
-        if len(predicted_mesg) != len(target_mesg):
-            raise ValueError("Input lists must have the same lengths!")
-        char_errors = [ Levenshtein.distance(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
-        cer = sum(char_errors) / len(target_mesg)
-        line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
-
-        # WER
-        pred_split, target_split = [ [ seq.split(' ') for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
-        pairs = list(zip( pred_split, target_split ))
-
-        wer = 0.0
-        for p in pairs:
-            enc = { w:v for (v,w) in enumerate( p[0] + p[1] ) }
-            enc_pred, enc_target = [ enc[w] for w in p[0] ], [enc[w] for w in p[1] ]
-            wer += Levenshtein.distance( enc_pred, enc_target ) / len( enc_target)
-        wer /= len(pairs)
-
-        return (cer, wer, line_error)
-
-
-
-    
     def save(self, file_name: str):
         state_dict = self.net.state_dict()
         state_dict['train_mode'] = self.net.training
