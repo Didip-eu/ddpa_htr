@@ -29,6 +29,20 @@ p = {
         }
 
 
+class InferenceDataSet( Dataset ):
+
+    def __init__(self, transform:Callable=None, img_path: Path, page_xml: Path ):
+        self.data = []
+        for (img_chw, mask_hw) in seglib.line_images.from_img_xml_files( img_path, page_xml ):
+            self.data.append( (Monasterium.bbox_median_pad( img_chw, mask_hw ), img_chw.shape[-1]) )
+        self.transform = None
+
+    def __getitem__(self, index: int):
+        img_chw, mask_hw = self.data[index]
+
+        return self.transform(img_
+
+
 
 
 if __name__ == "__main__":
@@ -54,6 +68,18 @@ if __name__ == "__main__":
 
         # Look for existing segmentation file (pattern: <image file stem>.lines.pred.{xml,json})
         segmentation_file_path_candidates = [ segmentation_dir.joinpath(f'{stem}.{args.segmentation_file_suffix}.{format_suffix}') for format_suffix in ('xml',) ]
+
+        # 1. From source (XML, or better: segmentation map), compile ds/dl of tensors
+        #    + get line images BBs + polygon masks
+        # 
+        # 2. Inference requiert:
+        #    1. alphabet (taken from Monasterium, passed to the model)
+        #    2. image transform (taken from Monasterium)
+        #    3. model spec
+        #    (1) and (2) suppose building a small test/validate dataset,
+        #    with features (alphabet, transforms) taken from Monasterium
+        #   + build dataset from bare image samples
+        #   + quick-and-dirt getitem()
 
         for segmentation_file_path in segmentation_file_path_candidates:
             if not segmentation_file_path.exists():
