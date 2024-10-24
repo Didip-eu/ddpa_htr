@@ -4,14 +4,16 @@
 HTR inference on page, with segmentation provided.
 """
 
+# stdlib
 from pathlib import Path
 import sys
 import fargv
-from kraken import rpred
-from kraken.lib import xml, models
 import re
 import glob
 from PIL import Image
+
+# local
+
 
 root = str( Path(__file__).parents[1] ) 
 sys.path.append( root ) 
@@ -19,28 +21,42 @@ sys.path.append( root )
 import seglib
 
 p = {
-
     "appname": "htr",
     "model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )),
     "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/89ce0542679f64d462a73f7e468ae812/*.jpg")))),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
     "segmentation_file_suffix": "lines.pred", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "no_legacy_polygons": [True, "Enforce newer polygon extraction method, no matter how the model was trained."]
-        }
+}
 
 
 class InferenceDataSet( Dataset ):
 
-    def __init__(self, transform:Callable=None, img_path: Path, page_xml: Path ):
+    def __init__(self, transform:Callable=None, img_path: Path, segmentation_spec: Path, alphabet: alphabet.Alphabet ) -> None:
+        """ A minimal dataset class for inference.
+
+        + transcription not included in the sample
+
+        :param img_path: charter image path
+        :type img_path: Path
+        :param segmentation_spec: segmentation metadata (XML or JSON)
+        :type segmentation_spec: Path
+        """
         self.data = []
-        for (img_chw, mask_hw) in seglib.line_images.from_img_xml_files( img_path, page_xml ):
-            self.data.append( (Monasterium.bbox_median_pad( img_chw, mask_hw ), img_chw.shape[-1]) )
+        for (img_path, mask_hw) in seglib.line_images_from_img_xml_files( img_path, page_xml ):
+            img_
+            # raw lines are median-padded anyway
+            self.data.append( { 'img': Monasterium.bbox_median_pad( img_chw, mask_hw ), 
+                                'height':img_chw.shape[1],
+                                'width': img_chw.shape[-1],
+                               } )
         self.transform = None
+        self.alphabet = alphabet
 
     def __getitem__(self, index: int):
         img_chw, mask_hw = self.data[index]
 
-        return self.transform(img_
+        return self.transform( sample )
 
 
 
