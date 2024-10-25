@@ -10,7 +10,16 @@ import sys
 import fargv
 import re
 import glob
+from typing import List, Tuple, Callable, Union
+
+# 3rd party
 from PIL import Image
+from torch.utils.data.dataset import Dataset
+from torch.utils.data import DataLoader
+from torchvision.transforms import ToTensor
+
+# didip
+from didip_handwriting_datasets import monasterium as mom, alphabet
 
 # local
 
@@ -30,35 +39,44 @@ p = {
 }
 
 
-class InferenceDataSet( Dataset ):
+class InferenceDataset( Dataset ):
 
-    def __init__(self, transform:Callable=None, img_path: Path, segmentation_spec: Path, alphabet: alphabet.Alphabet ) -> None:
+    def __init__(self, img_path: Union[str,Path], segmentation_data: Union[str,Path], alphabet: alphabet.Alphabet, transform: Callable=None ) -> None:
         """ A minimal dataset class for inference.
 
         + transcription not included in the sample
 
         :param img_path: charter image path
-        :type img_path: Path
-        :param segmentation_spec: segmentation metadata (XML or JSON)
-        :type segmentation_spec: Path
+        :type img_path: Union[Path,str]
+        :param segmentation_data: segmentation metadata (XML or JSON)
+        :type segmentation_spec: Union[Path, str]
         """
+        # str -> path conversion
+        img_path = Path( img_path ) if type(img_path) is str else img_path
+        segmentation_data = Path( segmentation_data ) if type(segmentation_data) is str else segmentation_data
+
+        # extract line images
+        line_extraction_func = seglib.line_images_from_img_segmentation_dict if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
         self.data = []
-        for (img_path, mask_hw) in seglib.line_images_from_img_xml_files( img_path, page_xml ):
-            img_
+
+        for (img_hwc, mask_hwc) in line_extraction_func( img_path, segmentation_data ):
             # raw lines are median-padded anyway
-            self.data.append( { 'img': Monasterium.bbox_median_pad( img_chw, mask_hw ), 
-                                'height':img_chw.shape[1],
-                                'width': img_chw.shape[-1],
+            print("img.shape =", img_hwc.shape, "mask.shape =", mask_hwc.shape )
+            mask_hw = mask_hwc[:,:,0]
+            self.data.append( { 'img': mom.MonasteriumDataset.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
+                                'height':img_hwc.shape[0],
+                                'width': img_hwc.shape[1],
                                } )
-        self.transform = None
+        self.transform = ToTensor() if transform is None else transform
         self.alphabet = alphabet
 
     def __getitem__(self, index: int):
-        img_chw, mask_hw = self.data[index]
+        sample = self.data[index]
+        sample['img'] = self.transform(sample['img'])
+        return sample
 
-        return self.transform( sample )
-
-
+    def __len__(self):
+        return len(self.data)
 
 
 if __name__ == "__main__":

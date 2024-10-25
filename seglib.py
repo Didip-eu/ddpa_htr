@@ -1,16 +1,19 @@
-from PIL import Image, ImageDraw
-import skimage as ski
+
+#stdlib
 from pathlib import Path
-import xml.etree.ElementTree as ET
-
 import json
-import torch
-from torch import Tensor
-
-import numpy as np
-import numpy.ma as ma
 from typing import List, Tuple, Callable, Optional, Dict, Union, Mapping, Any
 import itertools
+import re
+
+# 3rd-party
+from PIL import Image, ImageDraw
+import skimage as ski
+import xml.etree.ElementTree as ET
+import torch
+from torch import Tensor
+import numpy as np
+import numpy.ma as ma
 
 
 __LABEL_SIZE__=8
@@ -40,7 +43,7 @@ def polygon_map_from_img_json_files(  img: str, segmentation_json: str) -> Tenso
         img (str): the input image's file path
         segmentation_json (str): path of a JSON file
 
-    Output:
+    Returns:
         Tensor: the polygons rendered as a 4-channel image (a tensor).
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
@@ -56,7 +59,7 @@ def polygon_map_from_img_xml_files( img: str, page_xml: str ) -> Tensor:
         img (str): the input image's file path
         page_xml (str): path of a PageXML file.
 
-    Output:
+    Returns:
         Tensor: the polygons rendered as a 4-channel image (a tensor).
     """
 
@@ -81,7 +84,7 @@ def polygon_map_from_img_segmentation_dict( img_wh: Image.Image, segmentation_di
              'regions': [ ... ] }
         img_wh (Image.Image): the input image
 
-    Output:
+    Returns:
         Tensor: the polygons rendered as a 4-channel image (a tensor).
     """
     polygon_boundaries = [ line['boundary'] for line in segmentation_dict['lines'] ]
@@ -115,7 +118,7 @@ def line_binary_mask_from_img_json_files(img: str, segmentation_json: str ) -> T
         img (str): the input image's file path
         segmentation_json (str): a JSON file describing the lines.
 
-    Output:
+    Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
@@ -123,14 +126,14 @@ def line_binary_mask_from_img_json_files(img: str, segmentation_json: str ) -> T
 
 def line_binary_mask_from_img_xml_files(img: str, page_xml: str ) -> Tensor:
     """
-    From a segmentation dictionary describing polygons, return a boolean mask where any pixel belonging
+    From a PageXML file describing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
 
     Args:
         img (str): the input image's file path
         page_xml (str): a Page XML file describing the lines.
 
-    Output:
+    Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
     with Image.open(img, 'r') as img_wh:
@@ -149,7 +152,7 @@ def line_binary_mask_from_img_segmentation_dict(img_wh: Image.Image, segmentatio
         img_whc (Image.Image): the input image (needed for the size information).
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
 
-    Output:
+    Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
 
@@ -168,7 +171,7 @@ def line_binary_mask_from_img_segmentation_dict(img_wh: Image.Image, segmentatio
     return torch.tensor( page_mask_hw )
 
 
-def line_images_from_img_xml_files(img: str, page_xml: str ) -> List[Tuple]:
+def line_images_from_img_xml_files(img: str, page_xml: str ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     From an image file path and a segmentation JSON file describing polygons, return
     a list of pairs (<line cropped BB>, <polygon mask>).
@@ -177,15 +180,15 @@ def line_images_from_img_xml_files(img: str, page_xml: str ) -> List[Tuple]:
         img (str): the input image's file path
         page_xml (str): a Page XML file describing the lines.
 
-    Output:
-        list: a list of pairs (<line image BB>: np.ndarray, mask: np.ndarray)
+    Returns:
+        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
     with Image.open(img, 'r') as img_wh:
         segmentation_dict = segmentation_dict_from_xml( page_xml )
         return line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
 
 
-def line_images_from_img_json_files( img: str, segmentation_json: str ) -> List[Tuple]:
+def line_images_from_img_json_files( img: str, segmentation_json: str ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     From an image file path and a segmentation JSON file describing polygons, return
     a list of pairs (<line cropped BB>, <polygon mask>).
@@ -194,13 +197,13 @@ def line_images_from_img_json_files( img: str, segmentation_json: str ) -> List[
         img (str): the input image's file path
         segmentation_json (str): path of a JSON file
 
-    Output:
-        list: a list of pairs (<line image BB>: np.ndarray, mask: np.ndarray) 
+    Returns:
+        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
         return line_images_from_img_segmentation_dict( img_wh, json.load( json_file ))
 
-def line_images_from_img_segmentation_dict(img_wh: Image.Image, segmentation_dict: dict ) -> List[Tuple]:
+def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     From a segmentation dictionary describing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
@@ -209,11 +212,11 @@ def line_images_from_img_segmentation_dict(img_wh: Image.Image, segmentation_dic
         img_whc (Image.Image): the input image (needed for the size information).
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
 
-    Output:
-        list: a list of pairs (<line image BB>: np.ndarray, mask: np.ndarray)
+    Returns:
+        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
     polygon_boundaries = [ line['boundary'] for line in segmentation_dict['lines'] ]
-    img_hwc = np.asarray( img_wh )
+    img_hwc = np.asarray( img_whc )
 
     pairs_line_bb_and_mask = []# [None] * len(polygon_boundaries)
 
@@ -233,7 +236,7 @@ def line_images_from_img_segmentation_dict(img_wh: Image.Image, segmentation_dic
 
     return pairs_line_bb_and_mask
 
-def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tensor) -> List[Tuple]:
+def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tensor) -> List[Tuple[np.ndarray, np.ndarray]]:
     """
     From a tensor storing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
@@ -242,8 +245,8 @@ def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tenso
         img_whc (Image.Image): the input image (needed for the size information).
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
 
-    Output:
-        list: a list of pairs (<line image BB>: np.ndarray, mask: np.ndarray)
+    Returns:
+        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
 
     max_label = torch.max( polygon_map_chw )
@@ -276,7 +279,7 @@ def expand_flat_tensor_to_n_channels( t_hw: Tensor, n: int ) -> np.ndarray:
         t_hw (Tensor): a flat map.
         n (int): number of (identical) channels in the resulting tensor.
 
-    Output:
+    Returns:
         np.ndarray: a (H,W,n) array.
     """
     if len(t_hw.shape) != 2:
@@ -291,7 +294,7 @@ def segmentation_dict_from_xml(page: str) -> Dict[str,Union[str,List[Any]]]:
     Args:
         page (str): path of a PageXML file
 
-    Output:
+    Returns:
         dict: a dictionary of the form
 
         {"text_direction": ..., "type": "baselines", "lines": [{"tags": ..., "baseline": [ ... ]}]}
@@ -302,10 +305,19 @@ def segmentation_dict_from_xml(page: str) -> Dict[str,Union[str,List[Any]]]:
     page_dict: Dict[str, Union['str', List[Any]]] = { 'type': 'baselines' }
 
     with open( page, 'r' ) as page_file:
+        # extract namespace
+        ns = {}
+        for line in page_file:
+            print(line)
+            m = re.match(r'\s*<PcGts\s+xmlns=[\'"]([^"]+)["\']', line)
+            if m:
+                ns['pc'] = m.group(1)
+                page_file.seek(0)
+                break
+        if 'pc' not in ns:
+            raise ValueError(f"Could not find a name space in file {page}. Parsing aborted.")
         page_tree = ET.parse( page_file )
-        ns = { 'pc': "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"}
         page_root = page_tree.getroot()
-
 
         textRegionElement = page_root.find('.//pc:TextRegion', ns) 
         if textRegionElement is not None:
@@ -388,7 +400,7 @@ def array_to_rgba_uint8( img_hw: np.ndarray ) -> Tensor:
     Args:
         img_hw (np.ndarray): a flat label map of 32-bit integers.
 
-    Output:
+    Returns:
         Tensor: a 4-channel (c,h,w) tensor of unsigned 8-bit integers.
     """
     if len(img_hw.shape) != 2:
@@ -409,7 +421,7 @@ def polygon_pixel_metrics_from_img_segmentation_dict(img: Image.Image, segmentat
         segmentation_dict_pred (dict): a dictionary, typically constructed from a JSON file.
         segmentation_dict_gt (dict): a dictionary, typically constructed from a JSON file.
 
-    Output:
+    Returns:
         np.ndarray: a 2D array, representing IoU values for each possible pair of polygons.
     """
     #polygon_img_gt: Tensor, polygon_img_pred: Tensor, mask: Tensor) -> Tensor:
@@ -427,7 +439,7 @@ def get_mask( img_whc: Image.Image, thresholding_alg: Callable=ski.filters.thres
     Args:
         img (PIL image): input image
 
-    Output:
+    Returns:
         Tensor: a binary map with FG pixels=1 and BG=0.
     """
     img_hwc= np.array( img_whc )
@@ -449,7 +461,7 @@ def polygon_pixel_metrics_from_polygon_maps_and_mask(polygon_chw_pred: Tensor, p
                                    (one for each channel)
         binary_hw_mask (Tensor): a boolean mask that selects the input image's FG pixel
 
-    Output:
+    Returns:
         np.ndarray: metrics (intersection, union, precision, recall, f1) values for each possible pair of labels
                     (i,j) with i ∈  map1 and j ∈ map2. Shared pixels in each map (i.e. overlapping polygons) have
                     their weight decreased according to the number of polygons they vote for.
@@ -483,7 +495,7 @@ def retrieve_polygon_mask_from_map( label_map_chw: Tensor, label: int) -> Tensor
         label_map_chw (Tensor): a 4-channel tensor, where each pixel can store up to 4 labels.
         label (int): the label to be selected.
 
-    Output:
+    Returns:
         Tensor: a flat, boolean mask for the polygon of choice.
     """
     if len(label_map_chw.shape) != 3 and label_map_chw.shape[0] != 4:
@@ -501,7 +513,7 @@ def array_has_label( label_map_hw: np.ndarray, label: int ) -> bool:
     Args:
             label_map_hw (np.ndarray): a 2D map, where each 32-bit integer store up to 4 labels.
             label (int): the label to be checked for.
-    Output:
+    Returns:
             bool: True if map already stores the given label; False otherwise.
     """
     if len(label_map_hw.shape) > 2:
@@ -526,7 +538,7 @@ def polygon_pixel_metrics_two_maps( map_chw_1: Tensor, map_chw_2: Tensor, label_
         map_chw_1 (Tensor): the predicted map, i.e. a 4-channel map with labeled polygons, with potential overlaps.
         map_hw_2 (Tensor): the GT map, i.e. a 4-channel map with labeled polygons, with potential overlaps.
 
-    Output:
+    Returns:
         np.ndarray: a 4 channel array, where each cell [i,j] stores respectively intersection and union counts,
                     as well as precision and recall for a pair of labels [i,j].
     """
@@ -597,7 +609,7 @@ def map_to_depth(map_chw: Tensor) -> Tensor:
     Args:
         map_chw (Tensor): the input tensor (4 channels)
 
-    Output:
+    Returns:
         Tensor: a tensor of integers, where each value represents the
                 number of intersecting polygons for the same position
                 in the input map.
@@ -758,7 +770,7 @@ def polygon_pixel_metrics_to_pixel_based_scores( metrics: np.ndarray) -> Tuple[f
 #                              each entry is a [intersection_count, union_count, precision, recall] sequence.
 #        threshold_range: a series of threshold values, between 0 and 1 (default: [0, 0.05, 0.1, ..., 0.95, 1])
 #
-#    Output:
+#    Returns:
 #        np.ndarray: a 2D array, with precisions in row 0 and recalls in row 1.
 #
 #    """
@@ -777,7 +789,7 @@ def recover_labels_from_map_value( px: int) -> list:
     Args:
         vl (int): a map pixel, whose value is a 32-bit signed integer.
                   labels).
-    Output:
+    Returns:
         list: a list of labels
     """
     return [ b for b in np.array( [px], dtype='int32').view('uint8')[::-1] if b ]
@@ -796,7 +808,7 @@ def mask_from_polygon_map_functional( polygon_map: Tensor, test: Callable) -> Te
         polygon_map (Tensor): polygon set, encoded as a 4-channel, 8-bit tensor.
         test (Callable): a boolean function, to be applied to the map; a partial
                          function may be passed, if added parameters are needed.
-    Output:
+    Returns:
         Tensor: a boolean, flat mask.
     """
     if polygon_map.dtype != torch.uint8:
