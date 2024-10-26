@@ -54,37 +54,55 @@ class HTR_Model():
     +-------------+------------------------------------------+---------------------------------------------+
 
     """
-    default_model_spec = '[4,64,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
+    default_model_spec = '[0,0,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
-    def __init__(self, alphabet:'Alphabet'=Alphabet(['a','b','c']), height=64, model=None, model_spec=default_model_spec, decoder=None, add_output_layer=True, train=False):
+    def __init__( self, 
+                  alphabet:'Alphabet'=Alphabet(['a','b','c']), 
+                  net=None, 
+                  model_spec=default_model_spec, 
+                  decoder=None, 
+                  add_output_layer=True,
+                  train=False):
+        """Initialize a new network wrapper.
 
-        # encoder 
+        :param alphabet: the alphabet object, with encoding/decoding functionalities
+        :type alphabet: alphabet.Alphabet
+
+        :param net: path of an existing, serialized network/Torch module
+        :type net: str
+
+        :model_spec: a VGSL specification for constructing a model.
+        :model_spec: str
+
+        :param decoder: an alphabet-agnostic decoding function, that decodes logits into labels.
+        :type decoder: Callable[[np.ndarray], List[Tuple[int,float]]]
+
+        :param add_output_layer: 
+            if True (default), add the output layer string to the VGSL spec, if it
+            is not already there.
+        :type add_output_layer: bool
+
+        :param train: if True, set mode to train; default is False.
+        :param train: bool
+        """
+
         # during save/resume cycles, alphabet may be serialized into a list
         self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet
         
-
         # initialize self.nn = torch Module
-        if not model:
-
-            # In kraken, TorchVGSLModel is used both for constructing a NN 
-            # (parse(), build*(), ... methods) and for hiding it: it is
-            # a wrapper-class for a 'nn:Module' property, to which a number
-            # of NN-specific method calls (to()...) are forwarded, including
-            #  + train(), eval()
-            # what is the added value of this complexity?
-            # + model modifications (append)
-            # + more abstraction when handling hyper-parameters
-            # Otherwise, better to manipulate the NN directly.
-
+        import sys
+        if net:
+            self.net = self.load( net )
+            print(type(self.net))
+        
+        else:
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
                 model_spec = '[{} O1c{}]'.format( model_spec[1:-1], self.alphabet.maxcode + 1)
-            model_spec = re.sub(r'\[(\d+),\d+', '[\\1,{}'.format(height), model_spec )
+            #model_spec = re.sub(r'\[(\d+),\d+', '[\\1,{}'.format(height), model_spec )
 
-
-            self.net = TorchVGSLModel( model_spec ).nn
-        else:
-            self.net = model
+            self.model_spec = model_spec
+            self.net = TorchVGSLModel( self.model_spec ).nn
         
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         #self.criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / batch_size
@@ -103,7 +121,7 @@ class HTR_Model():
         self.constructor_params = {
                 # serialize the alphabet 
                 'alphabet': self.alphabet.to_list(),
-                'model': model,
+                'net': net,
                 'model_spec': model_spec,
                 'decoder': decoder,
                 'add_output_layer': add_output_layer,
@@ -227,6 +245,11 @@ class HTR_Model():
 
     @staticmethod
     def resume( file_name: str, **kwargs):
+        """ Resume a training task
+
+        :param file_name: a serialized Torch module dictionary.
+        :type file_name: str
+        """
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
             constructor_params = state_dict['constructor_params']
@@ -250,7 +273,25 @@ class HTR_Model():
             return model
         return HTR_Model( **kwargs )
 
-            
+    @staticmethod
+    def load( file_name: str, **kwargs):
+        """ Load an existing model, for evaluation
+        """
+        if Path(file_name).exists():
+            state_dict = torch.load(file_name, map_location="cpu")
+            constructor_params = state_dict['constructor_params']
+            for k in ('constructor_params', 'train_epochs', 'validation_epochs', 'train_mode' ):
+                if k in state_dict:
+                    del state_dict[ k ]
+
+            model = HTR_Model( **constructor_params )
+            model.net.load_state_dict( state_dict )
+            # evaluation mode
+            model.net.train( mode=False )
+            return model.net
+        else:
+            raise FileNotFoundError(f"Serialized model {file_name} not to be found.")
+
 
     def __repr__( self ):
         return "HTR_Model()"

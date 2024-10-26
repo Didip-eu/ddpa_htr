@@ -5,13 +5,14 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 from pathlib import Path
 from didip_handwriting_datasets import monasterium, alphabet
-from torchvision.transforms import PILToTensor, ToPILImage, Compose
+from torchvision.transforms.v2 import Compose
 import numpy as np
 
 # Append app's root directory to the Python search path
 sys.path.append( str( Path(__file__).parents[1] ) )
 
 import model_htr
+import metrics
 
 MAX_HEIGHT=64
 MAX_WIDTH=2048
@@ -283,7 +284,8 @@ def test_cer_wer():
     predicted = ['abcdef', 'abefg', 'abccdefg']
     target = ['abcdef', 'abcdef', 'abcdef']
 
-    cer, ler = model_htr.HTR_Model.metrics( predicted, target )
+    cer, wer, ler = metrics.cer_wer_ler( predicted, target )
 
     assert cer == (3/6+2/6)/3
+    assert wer == 2/3
     assert ler == 2/3
