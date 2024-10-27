@@ -2,16 +2,14 @@
 
 Embryo of a Kraken-based, HTR-only app. The current draft contains:
 
-- a small model wrapper `model_htr.py`, that runs inference on batches of line images
+- a model builder/wrapper `model_htr.py`, that provides the interfaces needed for training and inference.
 - a trainer script `ddp_htr_train.py`, that uses the (provisory) Monasterium handwriting dataset
-- (deprecated) a Kraken-based, high-level script `ddp_htr.py` that runs inference on page images, each provided with an existing (PageXML) segmentation file, whose default path is ``<input_image_stem>.lines.pred.xml``.
+- a Kraken-based, high-level script `ddp_htr_inference.py` that runs inference on page images, each provided with an existing (PageXML) segmentation file, whose default path is ``<input_image_stem>.lines.pred.xml``.
+- a shell-script wrapper, that manage the dependencies for the HTR task: it generates the segmentation meta-dat for the charter, if they are not already present (with `ddpa_lines`) and calls then `ddp_htr_inference.py`.
 
 TODO: 
 
-+ better output (implement ResNet-based model)
 + decoding options
-+ performance measure when GT file exists
-+ replace `ddp_htr.py`
 
 Examples:
 	
