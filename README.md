@@ -9,6 +9,8 @@ Embryo of a Kraken-based, HTR-only app. The current draft contains:
 
 TODO: 
 
++ external storage for models
++ online retrieval of charters images
 + decoding options
 
 Examples:
