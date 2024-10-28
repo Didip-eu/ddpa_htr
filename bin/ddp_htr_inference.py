@@ -83,13 +83,14 @@ class InferenceDataset( VisionDataset ):
         # extract line images: functions line_images_from_img_* return tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)
         line_extraction_func = seglib.line_images_from_img_segmentation_dict if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
 
-        line_padding_func = lambda x, m, c: x # by default, identity function
+        line_padding_func = lambda x, m, channel_dim=2: x # by default, identity function
         if padding_style == 'noise':
             line_padding_func = mom.MonasteriumDataset.bbox_noise_pad
         elif padding_style == 'median':
             line_padding_func = mom.MonasteriumDataset.bbox_median_pad
         elif padding_style == 'zero':
             line_padding_func = mom.MonasteriumDataset.bbox_zero_pad
+        print(line_padding_func)
 
 
         self.data = []
@@ -139,7 +140,8 @@ if __name__ == "__main__":
                                         segmentation_file_path,
                                         transform = Compose([ ToTensor(),
                                                               mom.ResizeToHeight(128,3200),
-                                                              mom.PadToWidth(3200),]))
+                                                              mom.PadToWidth(3200),]),
+                                        padding_style=args.padding_style)
             logger.info(dataset)
             break
         if dataset is None:
@@ -156,7 +158,7 @@ if __name__ == "__main__":
 
         # 3. Output
         if args.output_format == 'stdout':
-            print( predictions )
+            print( '\n'.join( str(ld) for ld in predictions ) )
 
         elif args.output_format in ('json', 'tsv'):
 
@@ -165,7 +167,7 @@ if __name__ == "__main__":
             with open( output_file_name, 'w') as htr_outfile:
 
                 if args.output_format == 'json':
-                    print( json.dumps( predictions ), file=htr_outfile)
+                    json.dump( predictions, htr_outfile, indent=4)
                 elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
 
