@@ -142,7 +142,7 @@ if __name__ == "__main__":
                                                               mom.ResizeToHeight(128,3200),
                                                               mom.PadToWidth(3200),]),
                                         padding_style=args.padding_style)
-            logger.info(dataset)
+            logger.info("Charter mini-dataset: " + str(dataset))
             break
         if dataset is None:
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")

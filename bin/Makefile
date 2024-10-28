@@ -40,8 +40,8 @@ clean_seg:
 	cd $(HTR_APP_DIR); PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -img_paths $<
 
 
-%.lines.pred.xml: %.seals.pred.json
-	cd $(LINESEG_APP_DIR); PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -img_paths $<
+%.lines.pred.xml: %.img.jpg %.seals.pred.json
+	cd $(LINESEG_APP_DIR); PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
 
 %.seals.pred.json: %.img.jpg
 	cd $(REGSEG_APP_DIR); PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -img_paths $<
