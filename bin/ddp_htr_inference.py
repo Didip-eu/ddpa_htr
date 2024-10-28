@@ -38,14 +38,13 @@ logger = logging.getLogger(__name__)
 p = {
     "appname": "ddpa_htr",
     "model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )),
-    #"img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
-    #"img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/6a00def131d425984f7611494045d8eb.img.jpg")))),
-    "img_paths": set([Path.home().joinpath("tmp/data/1000CV/AT-AES/d3a416ef7813f88859c305fb83b20b5b/207cd526e08396b4255b12fa19e8e4f8/4844ee9f686008891a44821c6133694d.img.jpg")]),
+    "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
     "segmentation_file_suffix": "lines.pred", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
-    "htr_format": [ ("json", "tsv", "stdout"), "If 'stdout', results on the standard output."],
+    "output_format": [ ("stdout", "json", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
+    "padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
 
@@ -53,15 +52,25 @@ class InferenceDataset( VisionDataset ):
 
     def __init__(self, img_path: Union[str,Path],
                  segmentation_data: Union[str,Path], 
-                 transform: Callable=None ) -> None:
-        """ A minimal dataset class for inference.
+                 transform: Callable=None,
+                 padding_style=None) -> None:
+        """ A minimal dataset class for inference on a single charter.
 
         + transcription not included in the sample
 
         :param img_path: charter image path
         :type img_path: Union[Path,str]
+
         :param segmentation_data: segmentation metadata (XML or JSON)
         :type segmentation_data: Union[Path, str]
+
+        :param padding_style: 
+            How to pad the bounding box around the polygons, when building the initial, raw dataset (before applying any transform):
+            + 'median'= polygon's median value,
+            + 'noise' = random noise,
+            + 'zero'= 0-padding, 
+            + None (default) = no padding, i.e. raw bounding box
+        :type padding_style: str
         """
 
         trf = transform if transform else ToTensor()
@@ -73,11 +82,21 @@ class InferenceDataset( VisionDataset ):
 
         # extract line images: functions line_images_from_img_* return tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)
         line_extraction_func = seglib.line_images_from_img_segmentation_dict if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
+
+        line_padding_func = lambda x, m, c: x # by default, identity function
+        if padding_style == 'noise':
+            line_padding_func = mom.MonasteriumDataset.bbox_noise_pad
+        elif padding_style == 'median':
+            line_padding_func = mom.MonasteriumDataset.bbox_median_pad
+        elif padding_style == 'zero':
+            line_padding_func = mom.MonasteriumDataset.bbox_zero_pad
+
+
         self.data = []
 
         for (img_hwc, mask_hwc) in line_extraction_func( img_path, segmentation_data ):
             mask_hw = mask_hwc[:,:,0]
-            self.data.append( { 'img': img_hwc, #mom.MonasteriumDataset.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
+            self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #mom.MonasteriumDataset.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
                                } )
@@ -121,7 +140,7 @@ if __name__ == "__main__":
                                         transform = Compose([ ToTensor(),
                                                               mom.ResizeToHeight(128,3200),
                                                               mom.PadToWidth(3200),]))
-            print(dataset)
+            logger.info(dataset)
             break
         if dataset is None:
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")
@@ -136,18 +155,18 @@ if __name__ == "__main__":
             predictions.append( {"line_id": line, "transcription": model.inference_task( sample['img'], sample['width'] ) } )
 
         # 3. Output
-        if args.htr_format == '-':
+        if args.output_format == 'stdout':
             print( predictions )
 
-        elif args.htr_format in ('json', 'tsv'):
+        elif args.output_format in ('json', 'tsv'):
 
             output_dir = Path( img_path ).parent
-            output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.htr_format}')
+            output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
             with open( output_file_name, 'w') as htr_outfile:
 
-                if args.htr_format == 'json':
+                if args.output_format == 'json':
                     print( json.dumps( predictions ), file=htr_outfile)
-                elif args.htr_format == 'tsv':
+                elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
 
                 print(f"Output transcriptions in file {output_file_name}")
