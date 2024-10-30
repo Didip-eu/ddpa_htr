@@ -12,6 +12,7 @@
 #
 #   make $(echo "${@/.img.jpg/.htr.pred.json}")
 #
+# Models (weights) are retrieved from Google drive---a provisory location---until we come up with a better solution.
 #
 
 ROOT=$(HOME)/graz/htr/vre
@@ -21,12 +22,23 @@ HTR_APP_DIR=$(ROOT)/ddpa_htr
 LINESEG_APP_DIR=$(ROOT)/ddpa_lines
 REGSEG_APP_DIR=$(ROOT)/yolov5 # 'seals' app
 
-SEG_OUT_FORMAT="xml"
+LINESEG_OUT_FORMAT="xml"
 HTR_OUT_FORMAT="stdout"
 
+seals_model=seals.20241024.pt
+# NPR Google drive
+seals_model_url="https://drive.google.com/uc?id=17_bhsxtQL28mVFpSYkQ9vMYErbcgKsIk"
+
+line_segmentation_model=blla.mlmodel
+# NPR Google drive
+line_segmentation_model_url="https://drive.google.com/uc?id=160PxpPdnkBAzrpSpzW-dJn8Vd5CHBAom"
+
+htr_model=model_monasterium-2024-10-28.mlmodel
+htr_model_url="https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu"
 
 main:
 	echo $(ROOT)
+
 
 clean_all: clean_htr clean_seg
 
@@ -37,14 +49,21 @@ clean_seg:
 	find ${DATA} -name "*.line.pred.*" | xargs rm -f
 
 %.htr.pred.json: %.img.jpg %.lines.pred.xml
-	cd $(HTR_APP_DIR); PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -img_paths $<
+	cd $(HTR_APP_DIR);\
+		test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
+		PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths "$<"
 
 
 %.lines.pred.xml: %.img.jpg %.seals.pred.json
-	cd $(LINESEG_APP_DIR); PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
+	cd $(LINESEG_APP_DIR);\
+	       test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
+       	       PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths "$<"
+
 
 %.seals.pred.json: %.img.jpg
-	cd $(REGSEG_APP_DIR); PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -img_paths $<
+	cd $(REGSEG_APP_DIR);\
+		test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
+		PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -weights $(seals_model) -img_paths "$<"
 
 
 
