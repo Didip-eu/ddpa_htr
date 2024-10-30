@@ -70,11 +70,15 @@ if __name__ == "__main__":
         from_line_tsv_file=args.dataset_path_train,
         transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
 
+    ds_train.alphabet = Alphabet( Alphabet.prototype_from_scratch() ) 
+
     logger.debug( str(ds_train) )
 
     ds_val = mom.ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_validate,
         transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
+
+    ds_val.alphabet = ds_train.alphabet
 
     logger.debug( str(ds_val) )
 
@@ -118,7 +122,7 @@ if __name__ == "__main__":
 
     model = HTR_Model.resume( args.resume_fname, 
                               alphabet=ds_train.alphabet, 
-                             height=args.img_height, 
+                             #height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              add_output_layer=False ) # to allow for parallel network
 

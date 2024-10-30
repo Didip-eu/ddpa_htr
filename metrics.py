@@ -20,8 +20,8 @@ def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separat
     """
     if len(predicted_mesg) != len(target_mesg):
         raise ValueError("Input lists must have the same lengths!")
-    if type(predicted_mesg[0][0]) != type(word_separator):
-        raise ValueError('Mismatch between sequence type ({}) and separator type ({})'.format( type(predicted_mesg[0]), type(word_separator)))
+    #if type(predicted_mesg[0][0]) != type(word_separator):
+    #    raise ValueError('Mismatch between sequence type ({}) and separator type ({})'.format( type(predicted_mesg[0]), type(word_separator)))
     char_errors = [ Levenshtein.distance(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
     cer = sum(char_errors) / len(target_mesg)
     line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
