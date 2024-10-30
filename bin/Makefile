@@ -40,30 +40,35 @@ main:
 	echo $(ROOT)
 
 
-clean_all: clean_htr clean_seg
+clean_all: clean_htr clean_lineseg clean_regseg
 
 clean_htr:
 	find ${DATA} -name "*.htr.pred.*" | xargs rm -f
 
-clean_seg:
+clean_lineseg:
 	find ${DATA} -name "*.line.pred.*" | xargs rm -f
+
+clean_regseg:
+	find ${DATA} -name "*.seals.pred.*" | xargs rm -f
+
+.SECONDARY: $(%.lines.pred.xml) $(%.seals.pred.json)
 
 %.htr.pred.json: %.img.jpg %.lines.pred.xml
 	cd $(HTR_APP_DIR);\
 		test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
-		PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths "$<"
+		PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths $<
 
 
 %.lines.pred.xml: %.img.jpg %.seals.pred.json
 	cd $(LINESEG_APP_DIR);\
 	       test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
-       	       PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths "$<"
+       	       PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
 
 
 %.seals.pred.json: %.img.jpg
 	cd $(REGSEG_APP_DIR);\
 		test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
-		PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -weights $(seals_model) -img_paths "$<"
+		PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -weights $(seals_model) -img_paths $<
 
 
 
