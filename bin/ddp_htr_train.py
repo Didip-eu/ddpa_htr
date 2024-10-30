@@ -17,7 +17,7 @@ from torchvision.transforms import Compose
 from tqdm import tqdm
 # didip
 import fargv
-from didip_handwriting_datasets import monasterium
+from didip_handwriting_datasets import monasterium as mom
 from didip_handwriting_datasets.alphabet import Alphabet
 
 """
@@ -52,12 +52,10 @@ p = {
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
     "save_freq": 100,
-    "resume_fname": 'model_save.ml',
+    "resume_fname": 'model_save.mlmodel',
     "mode": ('train', 'validate', 'test'),
     "auxhead": [False, 'Combine output with CTC shortcut'],
 }
-
-
 
 
 if __name__ == "__main__":
@@ -65,19 +63,18 @@ if __name__ == "__main__":
     args, _ = fargv.fargv( p )
     logger.debug("CLI arguments: {}".format( args ))
 
-
     #-------------- Dataset ---------------
     # Alphabet is to be found in the same directory as the TSV file:
     # the two datasets below share the same directory, and consequently, their alphabet
-    ds_train = monasterium.MonasteriumDataset( task='htr', shape='polygons',
-        from_tsv_file=args.dataset_path_train,
-        transform=Compose([ monasterium.ResizeToHeight( args.img_height, args.img_width ), monasterium.PadToWidth( args.img_width ) ]))
+    ds_train = mom.ChartersDataset( task='htr', shape='polygons',
+        from_line_tsv_file=args.dataset_path_train,
+        transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
 
     logger.debug( str(ds_train) )
 
-    ds_val = monasterium.MonasteriumDataset( task='htr', shape='polygons',
-        from_tsv_file=args.dataset_path_validate,
-        transform=Compose([ monasterium.ResizeToHeight( args.img_height, args.img_width ), monasterium.PadToWidth( args.img_width ) ]))
+    ds_val = mom.ChartersDataset( task='htr', shape='polygons',
+        from_line_tsv_file=args.dataset_path_validate,
+        transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
 
     logger.debug( str(ds_val) )
 
