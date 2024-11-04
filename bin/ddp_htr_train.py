@@ -174,7 +174,8 @@ if __name__ == "__main__":
 
             # predictions on encoded strings, not on raw GT
             #predictions, transcriptions = [ [ eval_loader.dataset.alphabet.encode(ss) for ss in s ] for s in (predictions, transcriptions) ]
-            batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=eval_loader.dataset.alphabet.get_code(' ') )
+            #batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=eval_loader.dataset.alphabet.get_code(' ') )
+            batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
             wer += batch_wer
 
