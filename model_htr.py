@@ -288,7 +288,7 @@ class HTR_Model():
             model.net.load_state_dict( state_dict )
             # evaluation mode
             model.net.train( mode=False )
-            return model.net
+            return model
         else:
             raise FileNotFoundError(f"Serialized model {file_name} not to be found.")
 

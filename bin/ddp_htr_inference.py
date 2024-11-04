@@ -149,7 +149,8 @@ if __name__ == "__main__":
          
         # 2. HTR inference
 
-        model = HTR_Model( mom.MonasteriumDataset.get_default_alphabet(), net=args.model_path  )
+        #model = HTR_Model( net=args.model_path  )
+        model = HTR_Model.load( args.model_path )
 
         predictions = []
 
