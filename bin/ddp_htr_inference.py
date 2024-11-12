@@ -40,7 +40,7 @@ p = {
     "model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )),
     "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
-    "segmentation_file_suffix": "lines.pred", # under each image dir, suffix of the subfolder that contains the segmentation data 
+    "segmentation_file_suffix": "lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
     "output_format": [ ("stdout", "json", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
@@ -81,7 +81,7 @@ class InferenceDataset( VisionDataset ):
         segmentation_data = Path( segmentation_data ) if type(segmentation_data) is str else segmentation_data
 
         # extract line images: functions line_images_from_img_* return tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)
-        line_extraction_func = seglib.line_images_from_img_segmentation_dict if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
+        line_extraction_func = seglib.line_images_from_img_json_files if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
 
         line_padding_func = lambda x, m, channel_dim=2: x # by default, identity function
         if padding_style == 'noise':
@@ -129,21 +129,19 @@ if __name__ == "__main__":
             else:
                 raise FileNotFoundError(f"Provided segmentation directory {args.segmentation_dir} does not exists!")
 
-        # Look for existing segmentation file (pattern: <image file stem>.lines.pred.{xml,json})
-        segmentation_file_path_candidates = [ segmentation_dir.joinpath(f'{stem}.{args.segmentation_file_suffix}.{format_suffix}') for format_suffix in ('xml','json') ]
+        segmentation_file_path = segmentation_dir.joinpath(f'{stem}.{args.segmentation_file_suffix}')
 
         dataset = None
-        for segmentation_file_path in segmentation_file_path_candidates:
-            if not segmentation_file_path.exists():
-                continue
-            dataset = InferenceDataset( img_path, 
-                                        segmentation_file_path,
-                                        transform = Compose([ ToTensor(),
-                                                              mom.ResizeToHeight(128,3200),
-                                                              mom.PadToWidth(3200),]),
-                                        padding_style=args.padding_style)
-            logger.info("Charter mini-dataset: " + str(dataset))
-            break
+        if not segmentation_file_path.exists():
+            continue
+        dataset = InferenceDataset( img_path, 
+                                    segmentation_file_path,
+                                    transform = Compose([ ToTensor(),
+                                                          mom.ResizeToHeight(128,3200),
+                                                          mom.PadToWidth(3200),]),
+                                    padding_style=args.padding_style)
+        logger.info("Charter mini-dataset: " + str(dataset))
+        
         if dataset is None:
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")
          

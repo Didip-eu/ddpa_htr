@@ -22,8 +22,8 @@ HTR_APP_DIR=$(ROOT)/ddpa_htr
 LINESEG_APP_DIR=$(ROOT)/ddpa_lines
 REGSEG_APP_DIR=$(ROOT)/yolov5 # 'seals' app
 
-LINESEG_OUT_FORMAT="xml"
-HTR_OUT_FORMAT="stdout"
+LINESEG_OUT_FORMAT="json"
+HTR_OUT_FORMAT="json"
 
 seals_model=seals.20241024.pt
 # NPR Google drive
@@ -35,6 +35,9 @@ line_segmentation_model_url="https://drive.google.com/uc?id=160PxpPdnkBAzrpSpzW-
 
 htr_model=model_monasterium-2024-10-28.mlmodel
 htr_model_url="https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu"
+
+
+
 
 main:
 	echo $(ROOT)
@@ -51,15 +54,15 @@ clean_lineseg:
 clean_regseg:
 	find ${DATA} -name "*.seals.pred.*" | xargs rm -f
 
-.SECONDARY: $(%.lines.pred.xml) $(%.seals.pred.json)
+.SECONDARY: $(%.lines.pred.json) $(%.seals.pred.json)
 
-%.htr.pred.json: %.img.jpg %.lines.pred.xml
+%.htr.pred.json: %.img.jpg %.lines.pred.json
 	cd $(HTR_APP_DIR);\
 		test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
 		PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths $<
 
 
-%.lines.pred.xml: %.img.jpg %.seals.pred.json
+%.lines.pred.json: %.img.jpg %.seals.pred.json
 	cd $(LINESEG_APP_DIR);\
 	       test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
        	       PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
@@ -69,7 +72,6 @@ clean_regseg:
 	cd $(REGSEG_APP_DIR);\
 		test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
 		PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -weights $(seals_model) -img_paths $<
-
 
 
 
