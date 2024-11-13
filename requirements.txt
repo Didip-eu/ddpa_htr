@@ -1,6 +1,6 @@
 coremltools~=6.3.0
 didip_handwriting_datasets~=1.0
-fargv~=2.0.1
+fargv
 numpy~=1.23.5
 Pillow~=11.0.0
 protobuf~=3.20.3
@@ -8,7 +8,8 @@ pytest~=8.3.3
 python_Levenshtein~=0.26.0
 scipy~=1.14.1
 setuptools~=75.1.0
-skimage~=0.0
+scikit-image
 torch~=2.1.2
 torchvision~=0.16.2
 tqdm~=4.66.5
+python-Levenshtein
