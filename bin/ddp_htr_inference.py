@@ -28,7 +28,7 @@ from model_htr import HTR_Model
 import seglib
 import transforms as tsf
 
-logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +36,9 @@ p = {
     "appname": "ddpa_htr",
     #"model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )), # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
     "model_path": "/tmp/model_monasterium-2024-10-28.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
-    "img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
+    #"img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
+    "img_paths": set([]),
+    "charter_dirs": set(["./"]),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
     "segmentation_file_suffix": "lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
@@ -52,29 +54,24 @@ class InferenceDataset( VisionDataset ):
                  segmentation_data: Union[str,Path], 
                  transform: Callable=None,
                  padding_style=None) -> None:
-        """ A minimal dataset class for inference on a single charter.
+        """ A minimal dataset class for inference on a single charter (no transcription in the sample).
 
-        + transcription not included in the sample
+        Args:
+            img_path (Union[Path,str]): charter image path
 
-        :param img_path: charter image path
-        :type img_path: Union[Path,str]
+            segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
 
-        :param segmentation_data: segmentation metadata (XML or JSON)
-        :type segmentation_data: Union[Path, str]
-
-        :param padding_style: 
-            How to pad the bounding box around the polygons, when building the initial, raw dataset (before applying any transform):
-            + 'median'= polygon's median value,
-            + 'noise' = random noise,
-            + 'zero'= 0-padding, 
-            + None (default) = no padding, i.e. raw bounding box
-        :type padding_style: str
+            padding_style (str): How to pad the bounding box around the polygons, when 
+                building the initial, raw dataset (before applying any transform):
+                + 'median'= polygon's median value,
+                + 'noise' = random noise,
+                + 'zero'= 0-padding, 
+                + None (default) = no padding, i.e. raw bounding box
         """
 
         trf = transform if transform else ToTensor()
         super().__init__(root, transform=trf )
 
-        # str -> path conversion
         img_path = Path( img_path ) if type(img_path) is str else img_path
         segmentation_data = Path( segmentation_data ) if type(segmentation_data) is str else segmentation_data
 
@@ -89,7 +86,6 @@ class InferenceDataset( VisionDataset ):
         elif padding_style == 'zero':
             line_padding_func = tsf.bbox_zero_pad
         print(line_padding_func)
-
 
         self.data = []
 
@@ -113,13 +109,28 @@ if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
 
+    all_img_paths = list(sorted(args.img_paths))
+
+    for charter_dir in args.charter_dirs:
+        charter_dir_path = Path( charter_dir )
+        logger.debug(f"Charter Dir: {charter_dir}")
+        if charter_dir_path.is_dir() and charter_dir_path.joinpath("CH_cei.xml").exists():
+            charter_images = [str(f) for f in charter_dir_path.glob("*.img.*")]
+            print(charter_images)
+            all_img_paths += charter_images
+        args.img_paths = list(all_img_paths)
+
+    logger.debug(args)
+
     for img_path in list( args.img_paths):
+
+        img_path = Path( img_path )
 
         # remove any dot-prefixed substring from the file name
         # (Path.suffix() only removes the last suffix)
-        stem = re.sub(r'\..+', '',  Path( img_path ).name )
+        stem = re.sub(r'\..+', '',  img_path.name )
 
-        segmentation_dir = Path( img_path ).parent
+        segmentation_dir = img_path.parent
 
         if args.segmentation_dir != "":
             if Path( args.segmentation_dir ).exists():
@@ -132,8 +143,7 @@ if __name__ == "__main__":
         dataset = None
         if not segmentation_file_path.exists():
             continue
-        dataset = InferenceDataset( img_path, 
-                                    segmentation_file_path,
+        dataset = InferenceDataset( img_path, segmentation_file_path,
                                     transform = Compose([ ToTensor(),
                                                           tsf.ResizeToHeight(128,3200),
                                                           tsf.PadToWidth(3200),]),
@@ -145,9 +155,7 @@ if __name__ == "__main__":
          
         # 2. HTR inference
 
-        #model = HTR_Model( net=args.model_path  )
         model = HTR_Model.load( args.model_path )
-
         predictions = []
 
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
@@ -162,13 +170,11 @@ if __name__ == "__main__":
             output_dir = Path( img_path ).parent
             output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
             with open( output_file_name, 'w') as htr_outfile:
-
                 if args.output_format == 'json':
                     json.dump( predictions, htr_outfile, indent=4)
                 elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
-
-                print(f"Output transcriptions in file {output_file_name}")
+                logger.info(f"Output transcriptions in file {output_file_name}")
 
             
 
