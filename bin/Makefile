@@ -56,22 +56,36 @@ clean_regseg:
 
 .SECONDARY: $(%.lines.pred.json) $(%.seals.pred.json)
 
-%.htr.pred.json: %.img.jpg %.lines.pred.json
-	cd $(HTR_APP_DIR);\
-		test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
-		PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths $<
 
+# process all images for a single charter (unit: the charter)
+%/htr.sentinel: %/*.img.jpg %/*.lines.pred.json
+	test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
+	PYTHON_PATH=$(HTR_APP_DIR) $(HTR_APP_DIR)/bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -dir_paths $*
+
+
+# process a single image
+%.htr.pred.json: %.img.jpg %.lines.pred.json
+	test -f "$(htr_model)" || gdown -O $(htr_model) $(htr_model_url);\
+	PYTHONPATH=$(HTR_APP_DIR) bin/ddp_htr_inference -output_format $(HTR_OUT_FORMAT) -model_path $(htr_model) -img_paths $<
+
+
+
+%/lines.sentinel: %/*.img.jpg %/*.seals.pred.json
+	test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
+	PYTHON_PATH=$(LINESEG_APP_DIR) $(LINESEG_APP_DIR)/bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -dir_paths $*
 
 %.lines.pred.json: %.img.jpg %.seals.pred.json
-	cd $(LINESEG_APP_DIR);\
-	       test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
-       	       PYTHONPATH=$(LINESEG_APP_DIR) bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
+	test -f "$(line_segmentation_model)" || gdown -O $(line_segmentation_model) $(line_segmentation_model_url);\
+     	PYTHONPATH=$(LINESEG_APP_DIR) $(LINESEG_APP_DIR)/bin/ddp_line_detect -output_format $(LINESEG_OUT_FORMAT) -model_path $(line_segmentation_model) -region_segmentation_suffix '.seals.pred.json' -img_paths $<
 
+
+%/seals.sentinel: %/*.img.jpg
+	test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
+	PYTHONPATH=$(REGSEG_APP_DIR) $(REGSEG_APP_DIR)/bin/ddp_seals_detect -weights $(seals_model) -idir_paths $*
 
 %.seals.pred.json: %.img.jpg
-	cd $(REGSEG_APP_DIR);\
-		test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
-		PYTHONPATH=$(REGSEG_APP_DIR) bin/ddp_seals_detect -weights $(seals_model) -img_paths $<
+	test -f "$(seals_model)" || gdown -O $(seals_model) $(seals_model_url);\
+	PYTHONPATH=$(REGSEG_APP_DIR) $(REGSEG_APP_DIR)/bin/ddp_seals_detect -weights $(seals_model) -img_paths $<
 
 
 
