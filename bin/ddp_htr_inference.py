@@ -21,15 +21,12 @@ from torch.utils.data import DataLoader
 from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
 
-# didip
-from didip_handwriting_datasets import monasterium as mom, alphabet 
-
 # local
 root = str( Path(__file__).parents[1] ) 
 sys.path.append( root ) 
-
 from model_htr import HTR_Model
 import seglib
+import transforms as tsf
 
 logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
@@ -86,11 +83,11 @@ class InferenceDataset( VisionDataset ):
 
         line_padding_func = lambda x, m, channel_dim=2: x # by default, identity function
         if padding_style == 'noise':
-            line_padding_func = mom.MonasteriumDataset.bbox_noise_pad
+            line_padding_func = tsf.bbox_noise_pad
         elif padding_style == 'median':
-            line_padding_func = mom.MonasteriumDataset.bbox_median_pad
+            line_padding_func = tsf.bbox_median_pad
         elif padding_style == 'zero':
-            line_padding_func = mom.MonasteriumDataset.bbox_zero_pad
+            line_padding_func = tsf.bbox_zero_pad
         print(line_padding_func)
 
 
@@ -98,7 +95,7 @@ class InferenceDataset( VisionDataset ):
 
         for (img_hwc, mask_hwc) in line_extraction_func( img_path, segmentation_data ):
             mask_hw = mask_hwc[:,:,0]
-            self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #mom.MonasteriumDataset.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
+            self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #tsf.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
                                } )
@@ -138,8 +135,8 @@ if __name__ == "__main__":
         dataset = InferenceDataset( img_path, 
                                     segmentation_file_path,
                                     transform = Compose([ ToTensor(),
-                                                          mom.ResizeToHeight(128,3200),
-                                                          mom.PadToWidth(3200),]),
+                                                          tsf.ResizeToHeight(128,3200),
+                                                          tsf.PadToWidth(3200),]),
                                     padding_style=args.padding_style)
         logger.info("Charter mini-dataset: " + str(dataset))
         

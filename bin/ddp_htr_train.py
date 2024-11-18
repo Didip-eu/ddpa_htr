@@ -17,8 +17,7 @@ from torchvision.transforms import Compose
 from tqdm import tqdm
 # didip
 import fargv
-from didip_handwriting_datasets import monasterium as mom
-from didip_handwriting_datasets.alphabet import Alphabet
+
 
 """
 Todo:
@@ -33,6 +32,7 @@ import logging_utils
 from model_htr import HTR_Model
 from kraken import vgsl
 import metrics
+import transforms as tsf
 
 # local logger
 # root logger
@@ -68,13 +68,13 @@ if __name__ == "__main__":
     # the two datasets below share the same directory, and consequently, their alphabet
     ds_train = mom.ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_train,
-        transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
+        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
 
     logger.debug( str(ds_train) )
 
     ds_val = mom.ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_validate,
-        transform=Compose([ mom.ResizeToHeight( args.img_height, args.img_width ), mom.PadToWidth( args.img_width ) ]))
+        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
 
     ds_val.alphabet = ds_train.alphabet
 
