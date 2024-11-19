@@ -45,7 +45,8 @@ where optional flags are one or more of the following:
 
 ```bash	
 python3 ./bin/ddp_htr_train.py [ -<option> ...]
-``̀ 
+```
+
 where optional flags are one or more of the following:
 
 ```bash
