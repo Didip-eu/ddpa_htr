@@ -144,7 +144,7 @@ class Alphabet:
                 <symbol>     <code>
 
             prototype (bool): if True, the TSV file may store more than 1 symbol on the same
-                             line, as well as a proto-code at the end (-1); codes are to be generated.
+                line, as well as a proto-code at the end (-1); codes are to be generated.
 
         Returns:
             Dict[str, int]: a dictionary `{ <symbol>: <code> }`
@@ -159,41 +159,48 @@ class Alphabet:
                 # Building list-of-list from TVS:
                 # A   ae   -1          
                 # O   o    ö    -1 ---> [['A', 'ae'], 'O', 'o', 'ö'], ... ]
-                print("Loading alphabet")
                 lol = [ s if len(s)>1 else s[0] for s in [ line.split('\t')[:-1] for line in infile if re.match(r'\s*$', line) is None ]]
                 
                 return cls.from_list( lol )
 
             objects = { s:int(c.rstrip()) for (s,c) in sorted([ line.split('\t') for line in infile if re.match(r'\s*$', line) is None]) }
-            print("objects=",objects)
             return objects
 
     @classmethod
     def from_list(cls, symbol_list: List[Union[List,str]]) -> Dict[str,int]:
         """Construct a symbol-to-code dictionary from a list of strings or sublists of symbols (for many-to-one alphabets):
         symbols in the same sublist are assigned the same label.
-
         Works on many-to-one, compound symbols. Eg.::
 
             >>> from_list( [['A','ae'], 'b', ['ü', 'ue', 'u', 'U'], 'c'] )
             { 'A':2, 'U':3, 'ae':2, 'b':4, 'c':5, 'u':6, 'ue':6, ... }
 
         Args:
-            symbol_list (List[Union[List,str]]): a list of either symbols (possibly with more than one characters) or
-                sublists of symbols that should map to the same code.
+            symbol_list (List[Union[List,str]]): a list of either symbols (possibly with more
+                than one characters) or sublists of symbols that should map to the same code.
 
         Returns:
             Dict[str,int]: a dictionary mapping symbols to codes.
         """
+        def flatten( l:list):
+            if l == []:
+                return l
+            if type(l[0]) is not list:
+                return [l[0]] + flatten(l[1:])
+            return flatten(l[0]) + flatten(l[1:])
+
+        flat_list = flatten( symbol_list )
+        if len(flat_list) != len(set(flat_list)):
+            raise ValueError("Input sublists are not disjoint!")
 
         # if list is not nested (one-to-one)
         if all( type(elt) is str for elt in symbol_list ):
             return {s:c for (c,s) in enumerate( sorted( symbol_list), start=2)}
 
         # nested list (many-to-one)
+        reserved_symbols = (cls.start_of_seq_symbol, cls.end_of_seq_symbol, cls.null_symbol, cls.unknown_symbol)
         def sort_and_label( lol ):
-            # remove SoS and EoS symbols first
-            lol = [ elt for elt in lol if type(elt) is list or (elt.lower() != cls.start_of_seq_symbol and elt.lower() != cls.end_of_seq_symbol) ]
+            lol = itertools.filterfalse( lambda x: x in reserved_symbols, lol )
             return [ (c,s) for (c,s) in enumerate(sorted([ sorted(sub) for sub in lol ], key=lambda x: x[0]), start=2)]
 
         alphadict =dict( sorted( { s:c for (c,item) in sort_and_label( symbol_list ) for s in item if not s.isspace() or s==' ' }.items()) ) 
@@ -203,11 +210,11 @@ class Alphabet:
     def from_string(cls, stg: str ) -> Dict[str,int]:
         """Construct a one-to-one alphabet from a single string.
 
-                :param stg: a string of characters.
-                :type stg: str
-
-                :returns: a `{ code: symbol }` mapping.
-                :rtype: Dict[str,int]
+        Args:
+            stg (str): a string of characters.
+        
+        Returns:
+            Dict[str,int]: a `{ code: symbol }` mapping.
         """
         alphadict = { s:c for (c,s) in enumerate(sorted(set( [ s for s in stg if not s.isspace() or s==' ' ])), start=2) }
         return alphadict
@@ -222,12 +229,11 @@ class Alphabet:
         return one_symbol_per_line.replace( self.null_symbol, '\u03f5' )
 
     def __repr__( self ) -> str:
-        return repr( self._utf_2_code )
+        return repr( self.to_list() )
 
 
     @property
     def maxcode( self ):
-        #print(self._code_2_utf.keys())
         return max( list(self._utf_2_code.values()) )
     
     def __eq__( self, other ):
@@ -251,7 +257,6 @@ class Alphabet:
 
         Args:
             code (int): a integer code.
-
             all (bool): if True, returns all symbols that map to the given code; if False (default),
                 returns the class representative.
 
@@ -332,13 +337,12 @@ class Alphabet:
 
         Args:
             samples_s (List[str]): a list of strings
-
             padded (bool): if True (default), return a tensor of size (N,S) where S is the maximum
                length of a sample mesg; otherwise, return an unpadded 1D-sequence of labels.
 
         Returns:
-                Tuple[Tensor, Tensor]: a pair of tensors, with encoded batch as first element
-                 and lengths as second element.
+            Tuple[Tensor, Tensor]: a pair of tensors, with encoded batch as first element
+                and lengths as second element.
         """
         encoded_samples = [ self.encode( s ) for s in samples_s ]
         lengths = [ len(s) for s in encoded_samples ] 
@@ -358,7 +362,6 @@ class Alphabet:
         
         Args:
             sample_t (Tensor): a tensor of integers (W,).
-
             length (int): sample's length; if -1 (default), all symbols are decoded.
 
         Returns:
@@ -373,9 +376,7 @@ class Alphabet:
 
         Args:
             sample_nw (Tensor): each row of integers encodes a string.
-
             lengths (Tensor): length to be decoded in each sample; the default is full-length decoding.
-
         Returns:
             list: a sequence of strings.
         """
