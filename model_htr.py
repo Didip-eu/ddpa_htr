@@ -14,7 +14,7 @@ import Levenshtein
 
 # local
 from kraken.vgsl import TorchVGSLModel
-from alphabet import Alphabet
+from libs.alphabet import Alphabet
 import character_classes as cc
 
 
@@ -50,7 +50,7 @@ class HTR_Model():
         """
 
         if alphabet is None:
-            self.alphabet = Alphabet( [ cs if len(cs)==1 else list(cs) for cs in cc.space_charset + cc.latin_charset + cc.punctuation_charset ])
+            self.alphabet = Alphabet( cc.space_charset + cc.latin_charset + cc.punctuation_charset )
         else:
             # during save/resume cycles, alphabet may be serialized into a list
             self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet

@@ -15,8 +15,7 @@ from typing import *
 from tqdm import tqdm
 import defusedxml.ElementTree as ET
 #import xml.etree.ElementTree as ET
-from PIL import Image, ImageDraw
-from PIL import ImagePath as IP
+from PIL import Image
 import skimage as ski
 
 import numpy as np
@@ -27,9 +26,8 @@ from torchvision.datasets import VisionDataset
 import torchvision.transforms as transforms
 
 from . import download_utils as du
-from . import xml_utils as xu
 
-from . import alphabet
+#from . import alphabet, character_classes.py
 
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
@@ -45,7 +43,7 @@ Utility classes to manage charter data.
 """
 
 import logging
-logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 # this is the tarball's top folder, automatically created during the extraction  (not configurable)
@@ -57,128 +55,27 @@ class ChartersDataset(VisionDataset):
 
         * region and line/transcription extraction methods (from original page images and XML metadata)
         * commonly-used transforms, for use in getitem()
-        * default alphabet
 
-        =============
-        How to use
-        =============
+        Attributes:
+            dataset_resource (dict): meta-data (URL, archive name, type of repository).
 
-        ------------------------------------------------------
-        Working from an existing dataset archive → subclassing
-        ------------------------------------------------------
+            work_folder_name (str): The work folder is where a task-specific instance of the data is created; if it not
+                passed to the constructor, a default path is constructed, using this default name.
 
-        This is probably the most common use of the `ChartersDataset` class: assuming that the dataset
-        is provided as an archive of page images and their metadata, that we want to keep
-        separate from other sources, we create a subclass with the appropriate archive metadata
-        (the `dataset_resource` class attribute), as illustrated by the `MonasteriumDataset` and
-        `KoenigsfeldenDataset` classes below in this module. Setting a couple of class attributes
-        allows for specific default root and work directories to be created, with no risk of overriding
-        an existing folder.
+            root_folder_basename (str): A basename for the root folder, that contains
+                * the archive
+                * the subfolder that is created from it.
+                * work folders for specific tasks
+                By default, a folder named ``data/<root_folder_basename>`` is created in the *project directory*,
+                if no other path is passed to the constructor.
 
-        As an example, the following line decompresses all images and pageXML files contained in the Koenigsfelden
-        archive into a Koenigsfelden root folder:
-
-        .. code-block::
-
-       >>> monasterium.KoenigsfeldenDataset(extract_pages=True)
-
-        (Since the archive extraction stage may takes a few minutes, the default is to assume that it has already
-        been decompressed.)
-
-        ----------------------------------------------------------------------------
-        Create a dataset from arbitrary pages or line items -> direct instantiation
-        ----------------------------------------------------------------------------
-
-        Assuming that a directory already contains some data (whose provenance does not matter), we want to
-        create a dataset object that is fit for training or inference tasks:
-
-        * if the directory contains page images ``%.jpg`` and their corresponding PageXML metadata ``%.xml``,
-     the ``-from_page_xml_dir`` option allows for building the line images and transcriptions into a
-     task-specific work folder, as well as a corresponding TSV file mapping images to their sizes
-     and transcriptions.
-
-        * if a folder already contains line images ``%.png`` and transcriptions ``%.gt.txt``, any TSV file
-     that lists all or part of those files may be used to create a working dataset:
-
-       * if the TSV file does not exist, create it from existing line items as shown here:
-
-         .. code-block::
-
-             >>> trainDS = mom.ChartersDataset(task='htr', build_items=False, subset='train', subset_ratios=(.85,.05,.1))
-
-         The ``build_items=False`` option ensures that the (costly) line extraction routine does not run.
-         The provided subset ratios allow to define which proportion of the existing files
-         should go into respectively the 'train', 'validate', and 'test' sets. (All 3
-         sets are distinct, no matter what.)
-
-       * in order to reuse an existing TSV dataset definition, use the ``-from_line_tsv_file`` option:
-         it builds a sample set out of the files listed in the provided TSV file---it
-         may reference any subset of the files contained in the parent directory, which
-         implicitly becomes the work folder for the task.  A single work folder can be used to
-         construct different sample sets: just provide different TSV files for each. A typical use
-         is to create train, validation, and test TSV specs, out of a single set of physical image/GT files.
-
-         .. code-block::
-
-             >>> trainDS = mom.ChartersDataset(task='htr', from_line_tsv_file='myCustomSet.tsv')
-
-        ===============================================
-        Directories: root, raw data, and work folders
-        ===============================================
-
-        The workflow assumes the following directory structure:
-
-        * ``root``: where datasets archives are to be downloaded (default: the 'data' subfolder in this package directory).
-        * ``root/<raw data folder>`` : where content of the original archive is to be extracted (i.e. a subdirectory
-     ``MonasteriumTekliaGTDataset`` containing all image files)
-        * ``work_folder``: where to create the dataset to be used for given task (segmentation or htr)
-
-        The first two directories can be created with a 'no-task' (default) initialization and forcing the archive extraction:
-
-        .. code-block:: python
-
-       >>> ChartersDataset( extract_pages=True )
-
-        The following call leaves the first two folders untouched and uses their data to build a task-specific instance:
-
-        .. code-block:: python
-
-       >>> myHtrDs = ChartersDataset( task='htr' )
-
-        :param dataset_resource:
-       meta-data (URL, archive name, type of repository).
-        :type dataset_resource: dict
-
-        :param work_folder_name:
-       The work folder is where a task-specific instance of the data is created; if it not
-       passed to the constructor, a default path is constructed, using this default name.
-        :type work_folder_name: str
-
-        :param root_folder_basename:
-       The root folder contains the archive and the subfolder that is created from it. By default,
-       a folder with this name is created in the project directory, if no other path is passed
-       to the constructor.
-        :type root_folder_basename: str
-
-        :param default_alphabet:
-       a many-to-one alphabet in list form, to be used if no other alphabet is passed to the initialization function.
-        :type default_alphabet: list
     """
 
     dataset_resource = None
-    "Where to access the data: archive location, url, etc."
 
     work_folder_name = "ChartersHandwritingDataset"
-    "Used to construct default work directory name (when none provided)"
 
     root_folder_basename="Charters"
-    "Where the archive (if relevant) is downloaded and raw data are extracted"
-
-    alphabet_tsv_name="alphabet.tsv"
-    "A file with this name is added to an instance folder"
-
-    default_alphabet = alphabet.Alphabet.prototype_from_scratch( exclude=["Hebrew","Diacritic","Parenthesis",], unknown='&' )
-    #"Alphabet to be used if no other alphabet is provided."
 
     def __init__( self,
                 root: str='',
@@ -194,7 +91,6 @@ class ChartersDataset(VisionDataset):
                 task: str = '',
                 shape: str = '',
                 count: int = 0,
-                alphabet_tsv: str = None,
                 line_padding_style: str = 'median',
                 resume_task: bool = False
                 ) -> None:
@@ -210,8 +106,7 @@ class ChartersDataset(VisionDataset):
                 created; default:
                 '<root>/MonasteriumHandwritingDatasetHTR'; if parameter
                 is a relative path, the work folder is created under
-                <root>; an absolute path overrides this. For HTR task,
-                the work folder also contains the alphabet in TSV form.
+                <root>; an absolute path overrides this.
             subset (str): 'train' (default), 'validate' or 'test'.
             subset_ratios (Tuple[float, float, float]): ratios for
                 respective ('train', 'validate', ...) subsets
@@ -238,7 +133,6 @@ class ChartersDataset(VisionDataset):
                 work folder, superceding the work_folder option).
             count (int): Stops after extracting {count} image items (for
                 testing purpose only).
-            alphabet_tsv (str): TSV file containing the alphabet
             line_padding_style (str): When extracting line bounding
                 boxes for an HTR task, padding to be used around the
                 polygon: 'median' (default) pads with the median value
@@ -258,7 +152,7 @@ class ChartersDataset(VisionDataset):
         if transform:
             trf = v2.Compose( [ v2.PILToTensor(), transform ] )
 
-        super().__init__(root, transform=trf, target_transform=target_transform if target_transform else self.filter_transcription)
+        super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
         print( "from_page_xml_dir=", from_page_xml_dir )
         print( "self.dataset_resource=", self.dataset_resource)
@@ -299,9 +193,6 @@ class ChartersDataset(VisionDataset):
 
         self.data = []
 
-        # Used only for HTR tasks: initialized by _build_task()
-        self.alphabet = None
-
         self.resume_task = resume_task
 
         self._task = ''
@@ -311,7 +202,6 @@ class ChartersDataset(VisionDataset):
             self._build_task( task, build_items=build_ok, from_line_tsv_file=from_line_tsv_file, 
                              subset=subset, subset_ratios=subset_ratios, 
                              work_folder=work_folder, count=count, 
-                             alphabet_tsv=alphabet_tsv, 
                              line_padding_style=line_padding_style,)
 
             logger.debug("data={}".format( self.data[:6]))
@@ -325,7 +215,6 @@ class ChartersDataset(VisionDataset):
                    count: int=0, 
                    work_folder: str='', 
                    crop=False,
-                   alphabet_tsv='',
                    line_padding_style='median',
                    )->None:
         """From the read-only, uncompressed archive files, build the image/GT files required for the task at hand:
@@ -341,8 +230,8 @@ class ChartersDataset(VisionDataset):
             build_items (bool): if True (default), extract and store
                 images for the task from the pages;
             from_line_tsv_file (str): TSV file from which the data are
-                to be loaded (containing folder is
-                                     assumed to be the work folder, superceding the work_folder option). (Default value = '')
+                to be loaded (containing folder is assumed to be the work folder, superceding
+                the work_folder option). (Default value = '')
             subset (str): 'train', 'validate' or 'test'. (Default value
                 = 'train')
             subset_ratios (Tuple[float,float,float]): ratios for
@@ -350,26 +239,19 @@ class ChartersDataset(VisionDataset):
                 value = (.7, 0.1, 0.2))
             count (int): Stops after extracting {count} image items (for
                 testing purpose only). (Default value = 0)
-            work_folder (str): Where line images and ground truth
-                transcriptions fitting a particular task
-                                   are to be created; default: './MonasteriumHandwritingDatasetHTR'.
-            crop (bool): (for segmentation set only) crop text regions
-                from both image and PageXML file. (Default value =
-                False)
-            alphabet_tsv (str): TSV file containing the alphabet
-                (Default value = '')
-            line_padding_style (str): When extracting line bounding
-                boxes for an HTR task, padding to be used around the
-                polygon: 'median' (default) pads with the median value
-                of the polygon; 'noise' pads with random noise.
+            work_folder (str): Where line images and ground truth transcriptions fitting a particular task
+                are to be created; default: './MonasteriumHandwritingDatasetHTR'.
+            crop (bool): (for segmentation set only) crop text regions from both image and 
+                PageXML file. (Default value = False)
+            line_padding_style (str): When extracting line bounding boxes for an HTR task,
+                padding to be used around the polygon: 'median' (default) pads with the
+                median value of the polygon; 'noise' pads with random noise.
 
         Returns:
             None
 
         Raises:
-            FileNotFoundError: the TSV file passed to the
-                `from_line_tsv_file` option does not exist, or the
-                specified TSV alphabet does not exist.
+            FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
         """
         if task == 'htr':
             
@@ -378,7 +260,6 @@ class ChartersDataset(VisionDataset):
             
             # create from existing TSV files - passed directory that contains:
             # + image to GT mapping (TSV)
-            # + alphabet.tsv
             if from_line_tsv_file != '':
                 tsv_path = Path( from_line_tsv_file )
                 if tsv_path.exists():
@@ -422,21 +303,7 @@ class ChartersDataset(VisionDataset):
                 self._generate_readme("README.md", 
                         { 'subset': subset, 'subset_ratios': subset_ratios, 'build_items': build_items, 
                           'task': task, 'crop': crop, 'count': count, 'from_line_tsv_file': from_line_tsv_file,
-                          'work_folder': work_folder, 'alphabet_tsv': alphabet_tsv, 
-                          'line_padding_style': line_padding_style} )
-
-                # serialize the alphabet into the work folder
-                logger.debug("Serialize default (hard-coded) alphabet into {}".format(self.work_folder_path.joinpath('alphabet.tsv')))
-                self.default_alphabet.to_tsv( self.work_folder_path.joinpath('alphabet.tsv'))
-                #shutil.copy(self.root.joinpath( self.alphabet_tsv_name ), self.work_folder_path )
-            
-            # load alphabet
-            alphabet_tsv_input = Path( alphabet_tsv ) if alphabet_tsv else self.work_folder_path.joinpath( self.alphabet_tsv_name )
-            if not alphabet_tsv_input.exists():
-                raise FileNotFoundError("Alphabet file: {}".format( alphabet_tsv_input))
-            logger.debug('alphabet path: {}'.format( str(alphabet_tsv_input)))
-            self.alphabet = alphabet.Alphabet( alphabet_tsv_input )
-                
+                          'work_folder': work_folder, 'line_padding_style': line_padding_style} )
 
         elif task == 'segment':
             self.work_folder_path = Path('.', self.work_folder_name+'Segment') if work_folder=='' else Path( work_folder )
@@ -456,8 +323,8 @@ class ChartersDataset(VisionDataset):
         line images and line transcriptions
 
         Args:
-            work_folder_path (Union[Path,str]): a folder containing
-                images (`*.png`) and transcription files (`*.gt.txt`)
+            work_folder_path (Union[Path,str]): a folder containing images (`*.png`) and
+            transcription files (`*.gt.txt`)
 
         Returns:
             List[dict]: a list of samples.
@@ -487,7 +354,6 @@ class ChartersDataset(VisionDataset):
 
         + avg, median, min, max on image heights and widths
         + avg, median, min, max on transcriptions
-        + effective character set + which subset of the default alphabet is being used
 
         Args:
             samples (List[dict]): a list of samples.
@@ -519,8 +385,7 @@ class ChartersDataset(VisionDataset):
 
         Args:
             filename (str): a filepath.
-            params (dict): dictionary of parameters passed to the
-                dataset task builder.
+            params (dict): dictionary of parameters passed to the dataset task builder.
 
         Returns:
             None
@@ -543,12 +408,9 @@ class ChartersDataset(VisionDataset):
         extract only.
 
         Args:
-            root (Path): where to save the archive
-            raw_data_folder_path (Path): where to extract the archive.
-            fl_meta (dict): a dictionary with file meta-info (keys: url,
-                filename, md5, full-md5, origin, desc)
-            extract (bool): If False (default), skip archive extraction
-                step.
+            root (Path): where to save the archive raw_data_folder_path (Path): where to extract the archive.
+            fl_meta (dict): a dictionary with file meta-info (keys: url, filename, md5, full-md5, origin, desc)
+            extract (bool): If False (default), skip archive extraction step.
 
         Returns:
             None
@@ -593,8 +455,7 @@ class ChartersDataset(VisionDataset):
         deleted, as well as the TSV file.
 
         Args:
-            folder (str): Name of the subfolder to _purge (relative the
-                caller's pwd
+            folder (str): Name of the subfolder to _purge (relative the caller's pwd
 
         Returns:
             int: number of deleted files.
@@ -613,10 +474,8 @@ class ChartersDataset(VisionDataset):
 
         Args:
             samples (List[dict]): dataset samples.
-            file_path (str): A TSV (absolute) file path (Default value =
-                '')
-            all_path_style (bool): list GT file name instead of GT
-                content. (Default value = False)
+            file_path (str): A TSV (absolute) file path (Default value = '')
+            all_path_style (bool): list GT file name instead of GT content. (Default value = False)
 
         Returns:
             None
@@ -642,18 +501,15 @@ class ChartersDataset(VisionDataset):
 
     @staticmethod
     def load_from_tsv(file_path: Path) -> List[dict]:
-        """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple:
-
-        .. code-block::
+        """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
 
             <img file path> <transcription text> <height> <width> [<polygon points>]
 
         Args:
-            file_path (Path): A file path (relative to the caller's
-                pwd).
+            file_path (Path): A file path (relative to the caller's pwd).
 
         Returns:
-            List[dict]: A list of dictionaries of the form:
+            List[dict]: A list of dictionaries of the form::
 
             {'img': <img file path>,
              'transcription': <transcription text>,
@@ -693,21 +549,16 @@ class ChartersDataset(VisionDataset):
         """Create a new dataset for segmentation that associate each page image with its metadata.
 
         Args:
-            raw_data_folder_path (Path): root of the (read-only)
-                expanded archive.
-            work_folder_path (Path): Line images are extracted in this
-                subfolder (relative to the caller's pwd).
-            text_only (bool): If True, only generate the transcription
-                files; default is False.
-            count (int): Stops after extracting {count} images (for
-                testing purpose). (Default value = 0)
+            raw_data_folder_path (Path): root of the (read-only) expanded archive.
+            work_folder_path (Path): Line images are extracted in this subfolder (relative to the caller's pwd).
+            text_only (bool): If True, only generate the transcription files; default is False.
+            count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
             metadata_format (str): 'xml' (default) or 'json'
 
         )
 
         Returns:
-            List[Tuple[str,str]]: a list of pairs `(<absolute img
-            filepath>, <absolute transcription filepath>)`
+            List[Tuple[str,str]]: a list of pairs `(<absolute img filepath>, <absolute transcription filepath>)`
         """
         Path( work_folder_path ).mkdir(exist_ok=True, parents=True) # always create the subfolder if not already there
 
@@ -741,19 +592,14 @@ class ChartersDataset(VisionDataset):
            region image has a corresponding, new PageXML decriptor.
 
         Args:
-            raw_data_folder_path (Path): root of the (read-only)
-                expanded archive.
-            work_folder_path (Path): Line images are extracted in this
-                subfolder (relative to the caller's pwd).
-            text_only (bool): if True, only generate the GT text files.
-                Default: False.
-            count (int): Stops after extracting {count} images (for
-                testing purpose). (Default value = 0)
+            raw_data_folder_path (Path): root of the (read-only) expanded archive.
+            work_folder_path (Path): Line images are extracted in this subfolder (relative to the caller's pwd).
+            text_only (bool): if True, only generate the GT text files.  Default: False.
+            count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
             metadata_format (str): `'xml'` (default) or `'json'`
 
         Returns:
-            List[Tuple[str,str]]: a list of pairs `(img_file_path,
-            transcription)`
+            List[Tuple[str,str]]: a list of pairs `(img_file_path, transcription)`
         """
         # filtering out Godzilla-sized images (a couple of them)
         warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -832,12 +678,10 @@ class ChartersDataset(VisionDataset):
 
         Args:
             page (str): path to the PageXML file.
-            region_id (str): id attribute of the region element in the
-                PageXML file
+            region_id (str): id attribute of the region element in the PageXML file
 
         Returns:
-            Tuple[int,int,int,int]: region's new coordinates, as (x1,
-            y1, x2, y2)
+            Tuple[int,int,int,int]: region's new coordinates, as $(x1, y1, x2, y2)$
         """
 
         def within(pt, bbox):
@@ -943,27 +787,23 @@ class ChartersDataset(VisionDataset):
         of the consumer's program.
 
         Args:
-            raw_data_folder_path (Path): root of the (read-only)
-                expanded archive.
-            work_folder_path (Path): Line images are extracted in this
-                subfolder (relative to the caller's pwd).
-            shape (str): Extract lines as bboxes (default) or as
-                polygon-within-bbox.
-            text_only (bool): Store only the transcriptions (*.gt.txt
-                files). (Default value = False)
-            count (int): Stops after extracting {count} images (for
-                testing purpose). (Default value = 0)
-            padding_func (Callable[[np.ndarray], np.ndarray]): For
-                polygons, a function that accepts a (C,H,W) Numpy array
-                and returns the line BBox image, with padding around the
-                polygon.
+            raw_data_folder_path (Path): root of the (read-only) expanded archive.
+            work_folder_path (Path): Line images are extracted in this subfolder (relative to the
+                caller's pwd).
+            shape (str): Extract lines as bboxes (default) or as polygon-within-bbox.
+            text_only (bool): Store only the transcriptions (*.gt.txt files). (Default value = False)
+            count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
+            padding_func (Callable[[np.ndarray], np.ndarray]): For polygons, a function that
+                accepts a (C,H,W) Numpy array and returns the line BBox image, with padding
+                around the polygon.
 
         Returns:
-            List[Dict[str,Union[Tensor,str,int]]]: An array of
-            dictionaries of the form:: {'img': <absolute img_file_path>,
-             'transcription': <transcription text>,
-             'height': <original height>,
-             'width': <original width>}
+            List[Dict[str,Union[Tensor,str,int]]]: An array of dictionaries of the form:: 
+
+                {'img': <absolute img_file_path>,
+                 'transcription': <transcription text>,
+                 'height': <original height>,
+                 'width': <original width>}
         """
         logger.debug("_extract_lines()")
 
@@ -1086,10 +926,8 @@ class ChartersDataset(VisionDataset):
 
         Args:
             samples (object): any dataset sample.
-            ratios (Tuple[float, float, float]): respective proportions
-                for possible subsets
-            subset (str): subset to be build  ('train', 'validate', or
-                'test')
+            ratios (Tuple[float, float, float]): respective proportions for possible subsets
+            subset (str): subset to be build  ('train', 'validate', or 'test')
 
         Returns:
             List[object]: a list of samples.
@@ -1159,12 +997,11 @@ class ChartersDataset(VisionDataset):
     def __getitems__(self, indexes: list ) -> List[dict]:
         """To help with batching.
 
-                :param indexes:
-           a list of indexes.
-                :type indexes: list
+        Args:
+            indexes (list): a list of indexes.
 
-                :returns: a list of samples.
-                :rtype: List[dict]
+        Returns:
+            List[dict]: a list of samples.
         """
         return [ self.__getitem__( idx ) for idx in indexes ]
 
@@ -1199,24 +1036,24 @@ class ChartersDataset(VisionDataset):
                     f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
         if self.from_line_tsv_file:
              summary += "\nBuilt from TSV input:\t{}".format( self.from_line_tsv_file )
-        if self.task == 'HTR':
-            summary += "\nAlphabet:\t{} ({} codes)".format( self.work_folder_path.joinpath(self.alphabet_tsv_name), len(self.alphabet))
         
-        prototype_alphabet = self.get_prototype_alphabet()
-
-        if prototype_alphabet is not None:
-            summary += f"\n + A prototype alphabet generated from this subset would have {len(prototype_alphabet)} codes." 
-        
-            symbols_shared = self.alphabet.symbol_intersection( prototype_alphabet )
-            symbols_only_here, symbols_only_prototype = self.alphabet.symbol_differences( prototype_alphabet )
-
-
-            summary += f"\n + Dataset alphabet shares {len(symbols_shared)} symbols with a data-generated charset."
-            summary += f"\n + Dataset alphabet and a data-generated charset are identical: {self.alphabet == prototype_alphabet}"
-            if symbols_only_here:
-                summary += f"\n + Dataset alphabet's symbols that are not in a data-generated charset: {symbols_only_here}"
-            if symbols_only_prototype:
-                summary += f"\n + Data-generated charset's symbols that are not in the dataset alphabet: {symbols_only_prototype}"
+#        prototype_alphabet = alphabet.Alphabet.prototype_from_data_samples( 
+#                list(itertools.chain.from_iterable( character_classes.charsets )),
+#                self.data ) if data else None
+#
+#        if prototype_alphabet is not None:
+#            summary += f"\n + A prototype alphabet generated from this subset would have {len(prototype_alphabet)} codes." 
+#        
+#            symbols_shared = self.alphabet.symbol_intersection( prototype_alphabet )
+#            symbols_only_here, symbols_only_prototype = self.alphabet.symbol_differences( prototype_alphabet )
+#
+#
+#            summary += f"\n + Dataset alphabet shares {len(symbols_shared)} symbols with a data-generated charset."
+#            summary += f"\n + Dataset alphabet and a data-generated charset are identical: {self.alphabet == prototype_alphabet}"
+#            if symbols_only_here:
+#                summary += f"\n + Dataset alphabet's symbols that are not in a data-generated charset: {symbols_only_here}"
+#            if symbols_only_prototype:
+#                summary += f"\n + Data-generated charset's symbols that are not in the dataset alphabet: {symbols_only_prototype}"
 
         return ("\n________________________________\n"
                 f"\n{summary}"
@@ -1230,8 +1067,7 @@ class ChartersDataset(VisionDataset):
             folder (str): a directory path.
 
         Returns:
-            Tuple[int,int]: a pair `(<number of GT files>, <number of
-            image files>)`
+            Tuple[int,int]: a pair `(<number of GT files>, <number of image files>)`
         """
         return (
                 len( [ i for i in Path(folder).glob('*.gt.txt') ] ),
@@ -1239,46 +1075,18 @@ class ChartersDataset(VisionDataset):
                 )
 
 
-    def get_prototype_alphabet( self ) -> alphabet.Alphabet:
-        """Return a prototype alphabet, generated from the transcriptions.
-
-        Returns:
-            alphabet.Alphabet: alphabet.Alphabet: a prototypical
-            alphabet instance, generated from the transcriptions.
-        """
-        if self.data == []:
-            logger.warning("Sample set is empty!")
-            return None
-        return alphabet.Alphabet.prototype_from_data_samples( [ s['transcription'] for s in self.data ])
-
-
-    def filter_transcription(self, transcription:str ) -> str:
-        """Rewrite a message by using only the symbols that are in the alphabet.
-
-        Args:
-            transcription (str): A transcription ground truth.
-
-        Returns:
-            str: a rewritten message.
-        """
-        return ''.join([ self.alphabet.get_symbol(c) if c != self.alphabet.null_value else '' for c in self.alphabet.encode( transcription ) ])
-            
     @staticmethod
     def bbox_median_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
         """Pad a polygon BBox with the median value of the polygon. Used by
-                the line extraction method.
+        the line extraction method.
 
-                :param img_chw: an array (C,H,W). Optionally: (H,W,C)
-                :type img_chw: np.ndarray.
-
-                :param mask_hw: a 2D Boolean mask (H,W).
-                :type mask_hw: np.ndarray
-
-                :param channel_dim: the channel dimension: 2 for (H,W,C) images. Default is 0.
-                :type channel_dim: int
-
-                :returns: the padded image, with same shape as input.
-                :rtype: np.ndarray.
+        Args:
+            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
+            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+            param channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
+        
+        Returns:
+            np.ndarray: the padded image, with same shape as input.
         """
         img = img_chw.transpose(2,0,1) if channel_dim == 2 else img_chw
         padding_bg = np.zeros( img.shape, dtype=img.dtype)
@@ -1293,17 +1101,13 @@ class ChartersDataset(VisionDataset):
     def bbox_noise_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
         """Pad a polygon BBox with noise. Used by the line extraction method.
 
-                :param img_chw: an array (C,H,W). Optionally: (H,W,C)
-                :type img_chw: np.ndarray
+        Args:
+            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
+            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+            channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
 
-                :param mask_hw: a 2D Boolean mask (H,W).
-                :type mask_hw: np.ndarray
-
-                :param channel_dim: the channel dimension: 2 for (H,W,C) images. Default is 0.
-                :type channel_dim: int
-
-                :returns: the padded image, with same shape as input.
-                :rtype: np.ndarray.
+        Returns:
+            np.ndarray: the padded image, with same shape as input.
         """
         img = img_chw.transpose(2,0,1) if channel_dim == 2 else img_chw
         padding_bg = np.random.randint(0, 255, img.shape, dtype=img_chw.dtype)
@@ -1317,17 +1121,13 @@ class ChartersDataset(VisionDataset):
     def bbox_zero_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
         """Pad a polygon BBox with zeros. Used by the line extraction method.
 
-                :param img_chw: an array (C,H,W). Optionally: (H,W,C)
-                :type img_chw: np.ndarray
+        Args:
+            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
+            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+            channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
 
-                :param mask_hw: a 2D Boolean mask (H,W).
-                :type mask_hw: np.ndarray
-
-                :param channel_dim: the channel dimension: 2 for (H,W,C) images. Default is 0.
-                :type channel_dim: int
-
-                :returns: the padded image, with same shape as input.
-                :rtype: np.ndarray.
+        Returns:
+            np.ndarray: the padded image, with same shape as input.
         """
         img = img_chw.transpose(2,0,1) if channel_dim == 2 else img_chw
         mask_chw = np.stack( [ mask_hw, mask_hw, mask_hw ] )
@@ -1443,7 +1243,7 @@ class KoenigsfeldenDataset(ChartersDataset):
             'desc': 'Koenigsfelden ground truth data',
             'origin': 'local',
             'tarball_root_name': 'koenigsfelden_1308-1662',
-            'comment': 'Minimal clean-up on transcriptions: removal of obvious junk or non-printable characters, as well a redundant punctuation marks (star-shaped unicode symbols); unicode-abbreviation marks have been kept.',
+            'comment': 'Transcriptions have been cleaned up (removal of obvious junk or non-printable characters, as well a redundant punctuation marks---star-shaped unicode symbols); unicode-abbreviation marks have been expanded.',
     }
 
     work_folder_name="KoenigsfeldenHandwritingDataset"
@@ -1459,6 +1259,34 @@ class KoenigsfeldenDataset(ChartersDataset):
         #self.target_transform = self.filter_transcription
 
 
+
+
+class KoenigsfeldenDatasetAbbrev(ChartersDataset):
+    """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
+        The data have been compiled from raw Transkribus exports.
+    """
+
+    dataset_resource = {
+            'file': f"{os.getenv('HOME')}/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
+            'tarball_filename': 'koenigsfelden_1308-1662_abbrev.tar.gz',
+            'md5': '9326bc99f9035fb697e1b3f552748640',
+            'desc': 'Koenigsfelden ground truth data',
+            'origin': 'local',
+            'tarball_root_name': 'koenigsfelden_1308-1662_abbrev',
+            'comment': 'Similar to the KoenigsfeldenDataset, with a notable difference: Unicode abbreviations have been kept.',
+    }
+
+    work_folder_name="KoenigsfeldenHandwritingDataset"
+    "This prefix will be used when creating a work folder."
+
+    root_folder_basename="KoenigsfeldenAbbrev"
+    "This is the root of the archive tree."
+
+    def __init__(self, *args, **kwargs ):
+
+        super().__init__( *args, **kwargs)
+
+        #self.target_transform = self.filter_transcription
 
 
 

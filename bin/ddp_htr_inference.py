@@ -25,8 +25,7 @@ from torchvision.datasets import VisionDataset
 root = str( Path(__file__).parents[1] ) 
 sys.path.append( root ) 
 from model_htr import HTR_Model
-import seglib
-import transforms as tsf
+from libs import seglib, transforms as tsf
 
 logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)

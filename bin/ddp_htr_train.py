@@ -27,11 +27,11 @@ Todo:
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
-import logging_utils
+from libs import utils, metrics, transforms as tsf
 from model_htr import HTR_Model
 from kraken import vgsl
-import metrics
-import transforms as tsf
+from libs.charters import ChartersDataset
+import character_classes as cc
 
 # local logger
 # root logger
@@ -47,6 +47,7 @@ p = {
     "max_epoch": 200,
     "dataset_path_train": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_validate": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    "ignored_chars": [ cc.subscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored at encoding time." ], 
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
@@ -61,7 +62,6 @@ if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
     logger.debug("CLI arguments: {}".format( args ))
-
 
     #------------- Model ------------
     model_spec_rnn_top = vgsl.build_spec_from_chunks(
@@ -80,21 +80,25 @@ if __name__ == "__main__":
     # (our model already computes the softmax )
 
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
-
    
-    if not args.dataset_path_train or not args.dataset_path_validate:
+    if args.dataset_path_train == '' or args.dataset_path_validate == '':
         sys.exit()
 
     #-------------- Dataset ---------------
-    ds_train = mom.ChartersDataset( task='htr', shape='polygons',
+
+    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in utils.flatten( args.ignored_chars ), s))
+
+    ds_train = ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_train,
-        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
+        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+        target_transform=filter_transcription,)
 
     logger.debug( str(ds_train) )
 
-    ds_val = mom.ChartersDataset( task='htr', shape='polygons',
+    ds_val = ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_validate,
-        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
+        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+        target_transform=filter_transcription,)
 
     logger.debug( str(ds_val) )
 
@@ -237,7 +241,7 @@ if __name__ == "__main__":
                     epoch, 
                     model.train_epochs[-1]['loss'],
                     last_cer.value, last_wer.value, 
-                    logging_utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
+                    utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
             logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
 
             scheduler.step()
