@@ -1,8 +1,8 @@
 # classes for characters, for building alphabets
 
-# each line define a tuple (<class representant>, <charset>) 
-# * all chars in the same set (string) map to the same code
-# * the char that comes first in a set is assumed to be the subset's representative
+# Each name defines a broad category of symbols, for easy construction of alphabets:
+# * all chars in the same sublist map to the same code
+# * the char that comes first in a sublist is assumed to be the subset's representative
 
 space_charset  = [ ' ' ]
 
