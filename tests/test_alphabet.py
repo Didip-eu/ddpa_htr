@@ -81,12 +81,27 @@ def test_alphabet_from_list_many_to_one():
     alpha = alphabet.Alphabet.from_list( input_list )
     assert alpha == {'A': 2, 'D': 3, 'J': 4, 'O': 5, 'U': 6, 'a': 2, 'b': 7, 'd': 3, 'o': 5, 'w': 8, 'y': 9, 'z': 10, 'ö': 5, 'ü': 11}
                     
+def test_alphabet_from_list_compound_symbols_many_to_one():
+    input_list = ['A', 'ae', 'J', ['ü','U'], 'eu', 'w', 'y', 'z', ['...', '.'], 'D']
+    alpha = alphabet.Alphabet.from_list( input_list )
+    assert alpha == {'.': 2, '...': 2, 'A': 3, 'D': 4, 'J': 5, 'U': 6, 'a': 7, 'e': 8, 'u': 8, 'w': 9, 'y': 10, 'z': 11, 'ü': 6}
+
 def test_alphabet_from_list_realistic():
     """ Passing a list with virtual symbols (EoS, SoS) yields a correct mapping 
     """
     input_list = [ ' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'a', 'ä'], ['B', 'b'], ['C', 'c'], [    'D', 'd'], ['E', 'e', 'é'], '⇥', ['F', 'f'], ['G', 'g'], ['H', 'h'], ['I', 'i'], ['J', 'j'], ['K', 'k'], ['L', 'l'], ['M', 'm'], ['N', 'n'], ['O', 'o', 'Ö', 'ö'], ['P', 'p'], ['Q', 'q'], ['R', 'r', 'ř'], ['S', 's'], '↦', ['T', 't'], ['U', 'u', 'ü'], ['V', 'v'], ['W', 'w'], ['X', 'x'], ['Y', 'y', 'ÿ'], ['Z', 'z', 'Ž'], '¬','…' ]
     alpha = alphabet.Alphabet.from_list( input_list )
     assert alpha == {' ': 2, ',': 3, '-': 4, '.': 5, '1': 6, '2': 7, '4': 8, '5': 9, '6': 10, ':': 11, ';': 12, 'A': 13, 'B': 14, 'C': 15, 'D': 16, 'E': 17, 'F': 18, 'G': 19, 'H': 20, 'I': 21, 'J': 22, 'K': 23, 'L': 24, 'M': 25, 'N': 26, 'O': 27, 'P': 28, 'Q': 29, 'R': 30, 'S': 31, 'T': 32, 'U': 33, 'V': 34, 'W': 35, 'X': 36, 'Y': 37, 'Z': 38, 'a': 13, 'b': 14, 'c': 15, 'd': 16, 'e': 17, 'f': 18, 'g': 19, 'h': 20, 'i': 21, 'j': 22, 'k': 23, 'l': 24, 'm': 25, 'n': 26, 'o': 27, 'p': 28, 'q': 29, 'r': 30, 's': 31, 't': 32, 'u': 33, 'v': 34, 'w': 35, 'x': 36, 'y': 37, 'z': 38, '¬': 39, 'Ö': 27, 'ä': 13, 'é': 17, 'ö': 27, 'ü': 33, 'ÿ': 37, 'ř': 30, 'Ž': 38, '…': 40} 
+
+def test_alphabet_from_list_duplicated_symbol():
+    """ Sublists should be disjoint """
+    valid_list = [ ' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'ae', 'ä'], ['B', 'b', 'a']]
+    assert alphabet.Alphabet.from_list( valid_list ) == {' ': 2, ',': 3, '-': 4, '.': 5, '1': 6, '2': 7, '4': 8, '5': 9, '6': 10, ':': 11, ';': 12, 'A': 13, 'B': 14, 'a': 14, 'ae': 13, 'b': 14, 'ä': 13}
+    # 'a' is in two sublists
+    invalid_list = [ ' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'a', 'ae', 'ä'], ['B', 'b', 'a']]
+    with pytest.raises( ValueError ) as e:
+        alphabet.Alphabet.from_list( invalid_list )
+    
 
 
 def test_alphabet_many_to_one_from_tsv( alphabet_many_to_one_tsv ):

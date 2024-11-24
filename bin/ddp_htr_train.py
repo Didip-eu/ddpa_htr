@@ -21,7 +21,6 @@ import fargv
 
 """
 Todo:
-
 """
 
 
@@ -36,7 +35,7 @@ import transforms as tsf
 
 # local logger
 # root logger
-logging.basicConfig(stream=sys.stdout, level='INFO', format="%(asctime)s - %(funcName)s: %(message)s", force=True)
+logging.basicConfig(stream=sys.stdout, level='DEBUG', format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -46,8 +45,8 @@ p = {
     "img_height": 128,
     "img_width": 2048,
     "max_epoch": 200,
-    "dataset_path_train": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
-    "dataset_path_validate": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both the images and the alphabet (alphabet.tsv)."],
+    "dataset_path_train": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    "dataset_path_validate": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
@@ -63,9 +62,30 @@ if __name__ == "__main__":
     args, _ = fargv.fargv( p )
     logger.debug("CLI arguments: {}".format( args ))
 
+
+    #------------- Model ------------
+    model_spec_rnn_top = vgsl.build_spec_from_chunks(
+            [ ('Input','0,0,0,3'),
+              ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
+          ('Column Maxpool', 'Mp{height//8},1'),
+          ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do')],
+          height = args.img_height)
+
+    model = HTR_Model.resume( args.resume_fname, 
+                             #height=args.img_height, 
+                             model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
+                             add_output_layer=True ) 
+
+    #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
+    # (our model already computes the softmax )
+
+    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
+
+   
+    if not args.dataset_path_train or not args.dataset_path_validate:
+        sys.exit()
+
     #-------------- Dataset ---------------
-    # Alphabet is to be found in the same directory as the TSV file:
-    # the two datasets below share the same directory, and consequently, their alphabet
     ds_train = mom.ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_train,
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
@@ -76,61 +96,16 @@ if __name__ == "__main__":
         from_line_tsv_file=args.dataset_path_validate,
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]))
 
-    ds_val.alphabet = ds_train.alphabet
-
     logger.debug( str(ds_val) )
-
-    n_classes = len( ds_train.alphabet )
-
-    #------------- Models ------------
-
-    model_spec_rnn_top = vgsl.build_spec_from_chunks(
-            [ ('Input','0,0,0,3'),
-              ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
-          ('Column Maxpool', 'Mp{height//8},1'),
-          ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}' ) ],
-          height = args.img_height, classes=n_classes)
-
-    model_spec_rnn_and_shortcut = vgsl.build_spec_from_chunks(
-            [ ('Input','0,0,0,3'),
-              ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
-          ('Column Maxpool', 'Mp{height//8},1'),
-          ('Recurrent head and shortcut', '([Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do O1c{classes}] [Do Cr1,3,{classes}])' ) ],
-          height = args.img_height, classes=n_classes)
-
-    #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
-    # (our model already computes the softmax )
-
-    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
-    if args.auxhead: 
-        def combined_ctc_loss(y, t, ly, lt):
-            """ Assume that y the (W,N,2*<n classes>)-concatenation of the two tensors we want to combine"""
-            y1, y2 = y[:,:,:n_classes], y[:,:,n_classes:]
-            loss = torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y1, t, ly, lt)
-            loss +=  0.1 * torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y2, t, ly, lt)
-            return loss / args.batch_size
-        criterion = combined_ctc_loss
-
-   
-
-    #optimizer = torch.optim.AdamW(list(self.net.parameters(), lr=1e-3, weight_decay=0.00005))
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
-    model = HTR_Model.resume( args.resume_fname, 
-                              alphabet=ds_train.alphabet, 
-                             #height=args.img_height, 
-                             model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
-                             add_output_layer=False ) # to allow for parallel network
-
+    # ------------ Training features ----------
 
     optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
-    # multi-step scheduler
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*args.max_epoch), int(.75*args.max_epoch)])
-
     
-    # TensorBoard writer
     writer = SummaryWriter()
     
     class Metric(NamedTuple):
@@ -173,8 +148,8 @@ if __name__ == "__main__":
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
 
             # predictions on encoded strings, not on raw GT
-            #predictions, transcriptions = [ [ eval_loader.dataset.alphabet.encode(ss) for ss in s ] for s in (predictions, transcriptions) ]
-            #batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=eval_loader.dataset.alphabet.get_code(' ') )
+            #predictions, transcriptions = [ [ model.alphabet.encode(ss) for ss in s ] for s in (predictions, transcriptions) ]
+            #batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=model.alphabet.get_code(' ') )
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
             wer += batch_wer
@@ -197,7 +172,7 @@ if __name__ == "__main__":
         for batch_index in tqdm ( range(len( batches ))):
             batch = next( batches )
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
-            labels, target_lengths = ds_train.alphabet.encode_batch( transcriptions, padded=False ) 
+            labels, target_lengths = model.alphabet.encode_batch( transcriptions, padded=False ) 
             img, labels = img.cuda(), labels.cuda()
 
 

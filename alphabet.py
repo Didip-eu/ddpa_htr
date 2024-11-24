@@ -191,7 +191,8 @@ class Alphabet:
 
         flat_list = flatten( symbol_list )
         if len(flat_list) != len(set(flat_list)):
-            raise ValueError("Input sublists are not disjoint!")
+            duplicates = list( itertools.filterfalse( lambda x: x[1]==1, Counter(sorted(flat_list)).items()))
+            raise ValueError(f"Duplicates characters in the input sublists: {duplicates}")
 
         # if list is not nested (one-to-one)
         if all( type(elt) is str for elt in symbol_list ):
@@ -288,29 +289,29 @@ class Alphabet:
                }
 
 
-    def symbol_intersection( self, alpha: Self )->set:
+    def symbol_intersection( self, alph: Self )->set:
         """Returns a set of those symbols that can be encoded in both alphabets.
 
         Args:
-            alpha (Alphabet): an Alphabet object.
+            alph (Alphabet): an Alphabet object.
 
         Returns:
             set: a set of symbols.
         """
-        return set( self._utf_2_code.keys()).intersection( set( alpha._utf_2_code.keys()))
+        return set( self._utf_2_code.keys()).intersection( set( alph._utf_2_code.keys()))
 
-    def symbol_differences( self, alpha: Self ) -> Tuple[set,set]:
+    def symbol_differences( self, alph: Self ) -> Tuple[set,set]:
         """Compute the differences of two alphabets.
 
         Args:
-            alpha (Alphabet): an Alphabet object.
+            alph (Alphabet): an Alphabet object.
 
         Returns:
             Tuple[set, set]: a tuple with two sets - those symbols that can be encoded with the first alphabet, but
                  not the second one; and conversely.
         """
-        return ( set(self._utf_2_code.keys()).difference( set( alpha._utf_2_code.keys())),
-                 set(alpha._utf_2_code.keys()).difference( set( self._utf_2_code.keys())))
+        return ( set(self._utf_2_code.keys()).difference( set( alph._utf_2_code.keys())),
+                 set(alph._utf_2_code.keys()).difference( set( self._utf_2_code.keys())))
 
 
     def encode(self, sample_s: str) -> list:

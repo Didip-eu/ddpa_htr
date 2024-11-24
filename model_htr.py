@@ -1,63 +1,37 @@
+
+# stdlib
 from pathlib import Path
+import logging
+from typing import Union,Tuple,List
+import re
+import warnings
+
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
-from kraken.vgsl import TorchVGSLModel
 import numpy as np
-import re
 import Levenshtein
-from didip_handwriting_datasets.alphabet import Alphabet
+
+# local
+from kraken.vgsl import TorchVGSLModel
+from alphabet import Alphabet
+import character_classes as cc
 
 
-from typing import Union,Tuple,List
-import warnings
-
-
-import logging
 logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
-
 class HTR_Model():
     """
-    Note: by convention, VGSL specifies the dimensions in NHWC order, while Torch uses NCHW. The example
-    below uses a NHWC = (1, 64, 2048, 3) image as an input.
-
-    +-------------+------------------------------------------+---------------------------------------------+
-    | VGSL        | DESCRIPTION                              | Output size (NHWC)     | Output size (NCHW) |
-    +=============+==========================================+=============================================+
-    | Cr3,13,32   | kernel filter 3x13, 32 activations relu  | 1, 64, 2048, 32        | 1, 32, 64, 2048    |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | Do0.1,2     | dropout prob 0.1 dims 2                  | -                      | -                  |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | Mp2,2       | Max Pool kernel 2x2 stride 2x2           | 1, 32, 1024, 32        | 1, 32, 32, 1024    | 
-    +-------------+------------------------------------------+---------------------------------------------+
-    | ...         | (same)                                   | 1, 16,  512, 32        | 1, 32, 16, 512     |
-    | Cr3,9,64    | kernel filter 3x9, 64 activations relu   | 1, 16,  512, 64        | 1, 64, 16, 512     |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | ...         |                                          |                        |                    |
-    | Mp2,2       |                                          | 1, 8, 256, 64          | 1, 64, 8, 256      |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | Cr3,9,64    |                                          | 1, 8, 256, 64          | 1, 64, 8, 256      |
-    | Do0.1,2     |                                          |                        |                    |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | S1(1x0)1,3  | reshape (N,H,W,C) into N, 1, W,C*H       | 1, 1, 256, 64x8=512    | 1, 1024, 1, 256    |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | Lbx200      | RNN b[irectional] on width-dimension (x) | 1, 1, 256, 400         | 1, 400, 1, 256     |
-    |             | with 200 output channels                 | (either forward (f) or |                    |
-    |             |                                          |reverse (r) would yield |                    |
-    |             |                                          | 200-sized output)      |                    |
-    +-------------+------------------------------------------+---------------------------------------------+
-    | ...         | (same)                                   |                        |                    |
-    | Lbx200      | RNN b[irectional] on width-dimension (x) | 1, 1, 256, 400         | 1, 400, 1, 256     |
-    +-------------+------------------------------------------+---------------------------------------------+
+    Initializing and saving an HTR model, from VGSL specs.
 
     """
+
     default_model_spec = '[0,0,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
     def __init__( self, 
-                  alphabet:'Alphabet'=Alphabet(['a','b','c']), 
+                  alphabet:'Alphabet'=None,
                   net=None, 
                   model_spec=default_model_spec, 
                   decoder=None, 
@@ -65,40 +39,30 @@ class HTR_Model():
                   train=False):
         """Initialize a new network wrapper.
 
-        :param alphabet: the alphabet object, with encoding/decoding functionalities
-        :type alphabet: alphabet.Alphabet
-
-        :param net: path of an existing, serialized network/Torch module
-        :type net: str
-
-        :model_spec: a VGSL specification for constructing a model.
-        :model_spec: str
-
-        :param decoder: an alphabet-agnostic decoding function, that decodes logits into labels.
-        :type decoder: Callable[[np.ndarray], List[Tuple[int,float]]]
-
-        :param add_output_layer: 
-            if True (default), add the output layer string to the VGSL spec, if it
-            is not already there.
-        :type add_output_layer: bool
-
-        :param train: if True, set mode to train; default is False.
-        :param train: bool
+        Args:
+            alphabet (alphabet.Alphabet): the alphabet object, with encoding/decoding functionalities
+            net (str): path of an existing, serialized network/Torch module
+            model_spec (str): a VGSL specification for constructing a model.
+            decoder (Callable[[np.ndarray], List[Tuple[int,float]]]: an alphabet-agnostic decoding function, 
+                that decodes logits into labels.
+            add_output_layer (bool): if True (default), add the output layer string to the VGSL spec.
+            train (bool)): if True, set mode to train; default is False.
         """
 
-        # during save/resume cycles, alphabet may be serialized into a list
-        self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet
+        if alphabet is None:
+            self.alphabet = Alphabet( [ cs if len(cs)==1 else list(cs) for cs in cc.space_charset + cc.latin_charset + cc.punctuation_charset ])
+        else:
+            # during save/resume cycles, alphabet may be serialized into a list
+            self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet
         
-        # initialize self.nn = torch Module
-        import sys
         if net:
             self.net = self.load( net )
-            print(type(self.net))
         
         else:
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
-                model_spec = '[{} O1c{}]'.format( model_spec[1:-1], self.alphabet.maxcode + 1)
+                model_spec = '[{} O1c{}]'.format( model_spec[1:-1], len(self.alphabet))
+                print(model_spec)
             #model_spec = re.sub(r'\[(\d+),\d+', '[\\1,{}'.format(height), model_spec )
 
             self.model_spec = model_spec
@@ -140,15 +104,13 @@ class HTR_Model():
             function; it is just a convenience function, that is meant to be called explicitly,
             prior to the decoding stage (i.e. outside a training step), not as a callback.
 
-        :param img_nchw: a batch of line images.
-        :type img_nchw: Tensor
-        :param widths: sequence of image lengths.
-        :type widths: Tensor
-        :param split_output: if True, only keep first half of the output channels (for pseudo-parallel nets).
-        :type split_output: bool
+        Args:
+            img_nchw (Tensor): a batch of line images.
+            widths (Tensor): sequence of image lengths.
+            split_output (bool): if True, only keep first half of the output channels (for pseudo-parallel nets).
 
-        :returns: Tuple with (N,C,W) array and final output sequence lengths; C should match the number of character classes.
-        :rtype: Tuple[np.ndarray, np.ndarray]
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: pair with (N,C,W) array and final output sequence lengths; C should match the number of character classes.
         """
         if self.device:
             img_nchw = img_nchw.to( self.device )
@@ -172,11 +134,11 @@ class HTR_Model():
     def decode_batch(self, outputs_ncw: np.ndarray, lengths: np.ndarray=None):
         """ Decode a batch of network logits into labels.
 
-        :param outputs_ncw: a network output batch (N,C,W) of length W where C matches the number of character classes.
-        :type outputs_ncw: np.ndarray
+        Args:
+            outputs_ncw (np.ndarray): a network output batch (N,C,W) of length W where C matches the number of character classes.
 
-        :rtype: List[List[Tuple[int,float]]]
-        :returns: a list of N lists of W tuples `(label, score)` where the score is the max. logit. Eg.::
+        Returns:
+            List[List[Tuple[int,float]]] : a list of N lists of W tuples `(label, score)` where the score is the max. logit. Eg.::
 
                 [[(30, 0.045990627), (8, 0.04730653), (8, 0.048647244), (8, 0.049242754), (8, 0.049613364), ...],
                  [(8, 0.04726322), (8, 0.047953878), (8, 0.047865044), (8, 0.04712664), (8, 0.046230078), ... ],
@@ -193,11 +155,11 @@ class HTR_Model():
     def decode_greedy(outputs_cw: np.ndarray):
         """ Decode a single output frame (C,W) by choosing the class C with max. logit; model-independent.
 
-        :param outputs_cw: a single output sequence (C,W) of length W where C matches the number of character classes.
-        :type outputs_cw: np.ndarray
+        Args:
+            outputs_cw (np.ndarray): a single output sequence (C,W) of length W where C matches the number of character classes.
 
-        :returns: a list of tuples (label, score)  
-        :rtype: List[Tuple[int,float]]
+        Returns:
+            List[Tuple[int,float]]: a list of tuples (label, score)  
         """
         labels = np.argmax( outputs_cw, 0 )
         scores = np.max( outputs_cw, 0 )
@@ -208,15 +170,15 @@ class HTR_Model():
     def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False) -> List[str]:
         """ Make predictions on a batch of images.
 
-        :param img_nchw: a batch of images.
-        :type img_nchw: Tensor
-        :param widths_n: a 1D tensor of lengths.
-        :type widths_n: Tensor
-        :param split_output: if True, only keep first half of the output channels (for pseudo-parallel nets).
-        :type split_output: bool
+        Args:
+            img_nchw (Tensor): a batch of images.
 
-        :returns: a list of human-readable strings.
-        :rtype: List[str]
+            widths_n (Tensor): a 1D tensor of lengths.
+
+            split_output (bool): if True, only keep first half of the output channels (for pseudo-parallel nets).
+        
+        Returns:
+             List[str]: a list of human-readable strings.
         """
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
@@ -247,8 +209,8 @@ class HTR_Model():
     def resume( file_name: str, **kwargs):
         """ Resume a training task
 
-        :param file_name: a serialized Torch module dictionary.
-        :type file_name: str
+        Args:
+            file_name (str): a serialized Torch module dictionary.
         """
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")

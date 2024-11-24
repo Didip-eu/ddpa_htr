@@ -34,9 +34,7 @@ logger = logging.getLogger(__name__)
 
 p = {
     "appname": "ddpa_htr",
-    #"model_path": str(Path( root, 'models', 'htr', 'default.mlmodel' )), # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
     "model_path": "/tmp/model_monasterium-2024-10-28.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
-    #"img_paths": set(glob.glob( str(Path.home().joinpath("tmp/data/1000CV/SK-SNA/f5dc4a3628ccd5307b8e97f02d9ff12a/*/*.jpg")))),
     "img_paths": set([]),
     "charter_dirs": set(["./"]),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
