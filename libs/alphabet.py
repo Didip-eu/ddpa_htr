@@ -14,7 +14,7 @@ from torch import Tensor
 import numpy as np
 
 # local
-from . import list_utils
+from . import list_utils as lu
 
 class Alphabet:
     """Creating and handling alphabets.
@@ -335,23 +335,24 @@ class Alphabet:
 
     @classmethod
     def prototype_from_data_paths(cls, 
-                                std_charsets: List[str],
+                                std_charsets: List[Union[list,str]],
                                 paths: List[str], 
                                 merge:List[str]=[],
                                 many_to_one:bool=True,) -> Tuple[ Alphabet, Dict[str,str]]:
         """Given a list of GT transcription file paths, return an alphabet.
 
         Args:
-            std_charsets (List[str]): a list of charsets (strings of chars), considered 
+
+            std_charsets (List[Union[str,list]]): a list of charsets (strings of chars), considered 
                 "standard" for the dataset. Eg.::
             
-                    [' ', '1', '2', ..., '9', 'AÁÂÃÄÅÆĂĄÀ', 'aáâãäåæāăąàæ', ..., 'zźżž']
+                    [' ', '1', '2', ..., '9', ['A','Á','Â',...], ['a','á',...], ..., ['z','ź',...]]
 
             paths (List[str]): a list of file paths (wildards accepted).
 
-            merge (List[str]): for each of the provided subsequences, merge those output sublists that
-                contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
-                (`[iI$î...]`) with the `'j'` sublist (`[jJ...]`)
+            merge (List[str]): for each of the provided subsequences, merge those output sublists
+                that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
+                (`['i','I','î',...]`) with the `'j'` sublist (`['j','J',...]`)
 
             many_to_one (bool): if True (default), builds a many-to-one alphabet, based on the
                 Alphabet class' character classes.
@@ -378,7 +379,7 @@ class Alphabet:
         for fp in file_paths:
             with open(fp, 'r') as infile:
                 chars_in_this_file = set( char for line in infile for char in list(line.strip())  ).difference()
-                for c in chars_in_this_file.difference( set(''.join(std_charsets))) :
+                for c in chars_in_this_file.difference( set( lu.flatten( std_charsets))) :
                     if c in char_to_file:
                         char_to_file[ c ].append( fp.name )
                     else:
@@ -389,21 +390,21 @@ class Alphabet:
 
 
     @classmethod
-    def prototype_from_data_samples(cls, std_charsets: List[str], transcriptions: List[str], 
+    def prototype_from_data_samples(cls, std_charsets: List[Union[str,list]], transcriptions: List[str], 
                                     merge:List[str]=[], many_to_one:bool=True,) -> Alphabet:
         """Given a list of GT transcription strings, return an Alphabet.
 
         Args:
-            std_charsets (List[str]): a list of charsets (strings of chars), considered 
+            std_charsets (List[Union[list,str]]): a list of charsets (strings of chars), considered 
                 "standard" for the dataset. Eg.::
             
-                    [' ', '1', '2', ..., '9', 'AÁÂÃÄÅÆĂĄÀ', 'aáâãäåæāăąàæ', ..., 'zźżž']
+                    [' ', '1', '2', ..., '9', ['A','Á','Â',...], ['a','á',...], ..., ['z','ź',...]]
 
             transcriptions (List[str]): a list of transcriptions.
 
-            merge (List[str]): for each of the provided subsequences, merge those output 
-                sublists that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'`
-                sublist (`[iI$î...]`) with the `'j'` sublist (`[jJ...]`)
+            merge (List[str]): for each of the provided subsequences, merge those output sublists
+                that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
+                (`['i','I','î',...]`) with the `'j'` sublist (`['j','J',...]`)
 
             many_to_one (bool): if True (default), builds a many-to-one alphabet, based on
                 the Alphabet class' character classes.
@@ -422,41 +423,17 @@ class Alphabet:
 
         
     @classmethod
-    def prototype_from_scratch( cls, std_charsets: List[str], merge:List[str]=[],) -> Alphabet:
-        """Build a tentative, "universal", alphabet from scratch, without regard to the data: it
-        maps every class of characters (charset) to a common code.
-
-        Args:
-            std_charsets (List[str]): a list of charsets (strings of chars), considered 
-                "standard" for the dataset. Eg.::
-            
-                    [' ', '1', '2', ..., '9', ['A','Á','Â',...], ['a','á',...], ..., ['z','ź',...]]
-
-            merge (List[str]): for each of the provided subsequences, merge those output sublists
-                that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
-                (`['i','I','î',...]`) with the `'j'` sublist (`['j','J',...]`)
-
-        Returns:
-             Alphabet: an Alphabet object
-        """
-
-        symbol_list = cls.list_utils.groups_from_groups( std_charsets )
-        symbol_list = cls.list_utils.merge_sublists( symbol_list, merge )        
-
-        return cls(symbol_list)
-
-
-    @classmethod
     def charset_to_alphabet( cls, charset: List[str], std_charsets: List[str], merge:List[str], many_to_one):
 
         charset.difference_update( set( char for char in charset if char.isspace() and char!=' '))    
-
-        weird_chars = charset.difference( set(''.join( std_charsets )))
+        
+        print("charset=", charset)
+        weird_chars = charset.difference( set(lu.flatten( std_charsets )))
         if weird_chars:
             warnings.warn("The following characters are in the data, but not in the 'standard' charsets used by this prototype: {}".format( weird_chars ))
 
-        symbol_list = cls.list_utils.groups_from_groups(std_charsets, charset) if many_to_one else sorted(charset)
-        symbol_list = cls.list_utils.merge_sublists( symbol_list, merge )
+        symbol_list = lu.groups_from_groups(std_charsets, charset) if many_to_one else sorted(charset)
+        symbol_list = lu.merge_sublists( symbol_list, merge )
 
         return cls(symbol_list)
 
@@ -487,7 +464,7 @@ class Alphabet:
         flat_list = flatten( symbol_list )
         if len(flat_list) != len(set(flat_list)):
             duplicates = list( itertools.filterfalse( lambda x: x[1]==1, Counter(sorted(flat_list)).items()))
-            raise ValueError(f"Duplicates characters in the input sublists: {duplicates}")
+            raise ValueError(f"Duplicate characters in the input sublists: {duplicates}")
 
         # if list is not nested (one-to-one)
         if all( type(elt) is str for elt in symbol_list ):

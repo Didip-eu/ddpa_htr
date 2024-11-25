@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
 
+import itertools
+
 from typing import Union,Tuple,List,Dict 
 
 
-def flatten( l:list):
-    if l == []:
-        return l
-    if type(l[0]) is not list:
-        return [l[0]] + flatten(l[1:])
-    return flatten(l[0]) + flatten(l[1:])
+
+def flatten(l:list, max_depth:int=-1):
+    """ Flatten a list, Lisp-style.
+
+    Args:
+        depth (int): depth. Default (-1) flattens sublists at every level; 
+            0 flattens only the top-level sublists, etc.
+    Returns:
+        list: a list.
+    """
+    def flatten_rec( l:list, dpt:int):
+        if l == [] or (max_depth != -1 and dpt > max_depth):
+            return l
+        if type(l[0]) is not list:
+            return [l[0]] + flatten_rec(l[1:], dpt)
+        return flatten_rec(l[0], dpt+1) + flatten_rec(l[1:], dpt)
+
+    return flatten_rec( l, 0 )
 
 
 def deep_sorted(list_of_lists: List[Union[str,list]]) ->List[Union[str,list]]:
@@ -92,7 +106,7 @@ def groups_from_groups(list_of_lists: List[Union[list,str]], atoms: set = None, 
     unknown_atoms = set( c for c in atoms if c not in all_atom_set )
 
     atoms = atoms.difference( unknown_atoms )
-    keys=[ [ c in sl for sl in list_of_list ].index(True) for c in atoms]
+    keys=[ [ c in sl for sl in list_of_lists ].index(True) for c in atoms]
     list_of_lists_new = []
     keyfunc = lambda x: x[0]
     list_of_lists_new = [ [ t[1] for t in l ] for k, l in itertools.groupby( sorted( zip(keys, atoms), key=keyfunc), key=keyfunc) ]

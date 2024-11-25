@@ -48,11 +48,11 @@ diacritic_charset = [ ["'","ʼ"] + [ chr(c) for c in range(0x300,0x316) ] ]
 
 parenthesis_charset = [ ['(',')','[',']','/','\\','|'] ]
 
-abbreviation_charset = [ 'ƺ','ꝙ','Ꝯ','ꝯ','ꝫ','ȝ','ꝝ','₰','ꝛ','ꝰ','ꝭ','&','§','₎','כּ' ]
+abbreviation_charset = [ 'ƺ','Ꝯ','ꝯ','ꝫ','ȝ','ꝝ','₰','ꝛ','ꝰ','ꝭ','&','₎','כּ' ]
 
 hebrew_charset = [ chr(c) for c in range(0x0591,0x05f5) ]
 
-greek_charset = [ chr(c) for c in range(0x03b1,0x03e1) ] + [ chr(c) for c in range(0x0391,0x03e0) ]
+greek_charset = [ chr(c) for c in range(0x03b1,0x03e1) ] + [ chr(c) for c in range(0x0391,0x03b0) ]
 
 charsets = [ space_charset, latin_charset, punctuation_charset, subscript_charset, diacritic_charset, parenthesis_charset, abbreviation_charset, hebrew_charset, greek_charset ]
 
