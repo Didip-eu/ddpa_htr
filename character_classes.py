@@ -39,7 +39,7 @@ latin_charset = [
 
 punctuation_charset = [[ '.','✳'],  [',',';',':'], ['-','¬','—','='], ['¶','§' ]] 
 
-# respectively= acdehimortuvx
+# respectively: acdehimortuvx
 subscript_charset = [['\u0363','\u0368','\u0369','\u0364','\u036a','\u0365','\u036b','\u0366','\u036c','\u036d','\u0367','\u036e','\u036f']]
 
 # variety of diacritics (to be used in combination with other letters, not to

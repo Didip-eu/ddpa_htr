@@ -11,7 +11,6 @@ from collections import Counter
 # 3rd party
 import torch
 from torch import Tensor
-import numpy as np
 
 # local
 from . import list_utils as lu
@@ -21,8 +20,6 @@ class Alphabet:
 
     + one-to-one or many-to-one alphabet, with deterministic mapping either way;
     + prototyping from reasonable subsets of characters to be grouped
-    + a choice of input/output sources: TSV, nested lists, mappings.
-
     """
     null_symbol = '\u03f5'
     null_value = 0
@@ -454,14 +451,7 @@ class Alphabet:
         Returns:
             Dict[str,int]: a dictionary mapping symbols to codes.
         """
-        def flatten( l:list):
-            if l == []:
-                return l
-            if type(l[0]) is not list:
-                return [l[0]] + flatten(l[1:])
-            return flatten(l[0]) + flatten(l[1:])
-
-        flat_list = flatten( symbol_list )
+        flat_list = lu.flatten( symbol_list )
         if len(flat_list) != len(set(flat_list)):
             duplicates = list( itertools.filterfalse( lambda x: x[1]==1, Counter(sorted(flat_list)).items()))
             raise ValueError(f"Duplicate characters in the input sublists: {duplicates}")
@@ -475,7 +465,6 @@ class Alphabet:
         def sort_and_label( lol ):
             lol = itertools.filterfalse( lambda x: x in reserved_symbols, lol )
             lol = [ (c,s) for (c,s) in enumerate(sorted([ sub for sub in lol ], key=lambda x: x[0]), start=2)] 
-            print("sorted_and_labeled=", lol)
             return lol
 
         sall = sort_and_label( symbol_list )
@@ -483,7 +472,6 @@ class Alphabet:
         alphadict ={ s:c for (c,s) in sall if type(s) is str and (not s.isspace() or s==' ') }
         # compound symbols
         alphadict.update( {s:c for (c,item) in sall for s in item if type(item) is list }) 
-        print("alphadict=",alphadict)
         return alphadict
 
     @classmethod

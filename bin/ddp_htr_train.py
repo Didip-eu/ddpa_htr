@@ -28,7 +28,7 @@ Todo:
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
-from libs import metrics, transforms as tsf, list_utils
+from libs import metrics, transforms as tsf, list_utils as lu
 from model_htr import HTR_Model
 from kraken import vgsl
 from libs.charters import ChartersDataset
@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
     #-------------- Dataset ---------------
 
-    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in list_utils.flatten( args.ignored_chars ), s))
+    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
     ds_train = ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_train,
