@@ -8,6 +8,7 @@ import time
 import logging
 import random
 from typing import NamedTuple
+
 # 3rd-party
 import torch
 import torch.nn.functional as F
@@ -27,7 +28,7 @@ Todo:
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
-from libs import utils, metrics, transforms as tsf
+from libs import metrics, transforms as tsf, list_utils
 from model_htr import HTR_Model
 from kraken import vgsl
 from libs.charters import ChartersDataset
@@ -58,6 +59,13 @@ p = {
 }
 
 
+def duration_estimate( iterations_past, iterations_total, current_duration ):
+    time_left = time.gmtime((iterations_total - iterations_past) * current_duration)
+    return ''.join([
+     '{} h '.format( time_left.tm_hour ) if time_left.tm_hour > 0 else '',
+     '{} mn'.format( time_left.tm_min ) ])
+
+
 if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
@@ -86,7 +94,7 @@ if __name__ == "__main__":
 
     #-------------- Dataset ---------------
 
-    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in utils.flatten( args.ignored_chars ), s))
+    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in list_utils.flatten( args.ignored_chars ), s))
 
     ds_train = ChartersDataset( task='htr', shape='polygons',
         from_line_tsv_file=args.dataset_path_train,
@@ -241,7 +249,7 @@ if __name__ == "__main__":
                     epoch, 
                     model.train_epochs[-1]['loss'],
                     last_cer.value, last_wer.value, 
-                    utils.duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
+                    duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
             logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
 
             scheduler.step()

@@ -70,8 +70,28 @@ Desired features
 * No matter how it has been created (from a in-memory dictionary or a file), the alphabet 
   is stored and serialized with the model.
 
+* In its serialized form, the alphabet is easy to read and easy to modify, as well as foolproof: ordering should not matter.
+
+----------------------------
+Input/Serialization format
+----------------------------
+
+Although the internal storage of an alphabet is a pair of dictionaries (symbol-to-code and code-to-symbol),
+the preferred format for input and serialization is a list of lists of this form:
+
+```python
+['0', '1', '2', ..., ['A', 'À', 'Á', 'Â', ...], 'B', ['C', 'Ç', 'Ć', ...], ..., ['Z', 'Ź', 'Ż', 'Ž'], ... ]
+```
+
+* A list made only of atoms (no sublist) defines a one-to-one alphabet; atoms may single-character symbols or compound symbols (eg. `'ae'`).
+* All symbols in the same sublist map to the same code.
+* Order does not matter, except in one case: the code assigned to a sublist maps to the first character in the list (in the decoding stage)
+* Special characters (EOS, SOS, epsilon, default) are handled automatically, whether they are already in the input list or not.
+
+There is an option to dump the alphabet's dictionary into a TSV file, for easy checking of the mapping. This is a one-way operation: in order to avoid redundancy, no method is provided to construct an alphabet from a TSV file.
+
 -----------------------------------------
-Fitting data actual charset to a model
+How actual data fit to a model
 -----------------------------------------
 
 Distinguish between:

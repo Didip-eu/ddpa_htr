@@ -9,27 +9,11 @@ import random
 # Append app's root directory to the Python search path
 sys.path.append( str( Path(__file__).parents[1] ) )
 
-import alphabet
+from libs import alphabet
 
 @pytest.fixture(scope="session")
 def data_path():
     return Path( __file__ ).parent.joinpath('data')
-
-@pytest.fixture(scope="session")
-def alphabet_one_to_one_tsv(data_path):
-    return data_path.joinpath('alphabet_one_to_one_repr_without_nullchar.tsv')
-
-@pytest.fixture(scope="session")
-def alphabet_one_to_one_tsv_nullchar(data_path):
-    return data_path.joinpath('alphabet_one_to_one_repr_with_nullchar.tsv')
-
-@pytest.fixture(scope="session")
-def alphabet_many_to_one_tsv(data_path):
-    return data_path.joinpath('alphabet_many_to_one_repr.tsv')
-
-@pytest.fixture(scope="session")
-def alphabet_many_to_one_prototype_tsv( data_path ):
-    return data_path.joinpath('alphabet_many_to_one_prototype.tsv')
 
 @pytest.fixture(scope="session")
 def gt_transcription_samples( data_path ):
@@ -45,55 +29,35 @@ def test_alphabet_dict_from_string():
     assert alphabet.Alphabet._dict_from_string('ßaf \u2009db\n\tce\t→') == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 'ß': 9, '→': 10}
 
 
-def test_alphabet_dict_from_tsv_with_null_char( alphabet_one_to_one_tsv_nullchar ):
-    """
-    Raw dict contains everything that is in the TSV
-    """
-    # null char
-    alpha = alphabet.Alphabet._dict_from_tsv( str(alphabet_one_to_one_tsv_nullchar) )
-    # unique symbols, sorted
-    assert alpha == {'ϵ': 0, '?': 1, ' ': 2, ',': 3, 'A': 4, 'J': 11, 'R': 16, 'S': 17, 'V': 18,
-                     'b': 21, 'c': 22, 'd': 23, 'o': 33, 'p': 34, 'r': 35, 'w': 40, 
-                     'y': 41, 'z': 42, '¬': 43, 'ü': 44}
-
-def test_alphabet_dict_from_tsv_without_null_char( alphabet_one_to_one_tsv ):
-    """
-    Raw dict contains nothing more than what is in the TSV
-    """
-    alpha = alphabet.Alphabet._dict_from_tsv( str(alphabet_one_to_one_tsv) )
-    # unique symbols, sorted
-    assert alpha == {' ': 2, ',': 3, 'A': 4, 'J': 11, 'R': 16, 'S': 17, 'V': 18,
-                     'b': 21, 'c': 22, 'd': 23, 'o': 33, 'p': 34, 'r': 35, 'w': 40, 
-                     'y': 41, 'z': 42, '¬': 43, 'ü': 44}
-
-def test_alphabet_from_list_one_to_one():
+def test_dict_from_list_one_to_one():
     input_list = ['A', 'a', 'J', 'b', 'ö', 'o', 'O', 'ü', 'U', 'w', 'y', 'z', 'd', 'D']
     alpha = alphabet.Alphabet._dict_from_list( input_list )
     assert alpha == {'A': 2, 'D': 3, 'J': 4, 'O': 5, 'U': 6, 'a': 7, 'b': 8, 'd': 9, 'o': 10, 'w': 11, 'y': 12, 'z': 13, 'ö': 14, 'ü': 15}
 
-def test_alphabet_from_list_compound_symbols_one_to_one():
+def test_dict_from_list_compound_symbols_one_to_one():
     input_list = ['A', 'ae', 'J', 'ü', 'eu', 'w', 'y', 'z', '...', 'D']
     alpha = alphabet.Alphabet._dict_from_list( input_list )
     assert alpha == {'...': 2, 'A': 3, 'D': 4, 'J': 5, 'ae': 6, 'eu': 7, 'w': 8, 'y': 9, 'z': 10, 'ü': 11} 
 
-def test_alphabet_from_list_many_to_one():
+def test_dict_from_list_many_to_one():
     input_list = [['A', 'a'], 'J', 'b', ['ö', 'o', 'O'], 'ü', 'U', 'w', 'y', 'z', ['d', 'D']]
     alpha = alphabet.Alphabet._dict_from_list( input_list )
-    assert alpha == {'A': 2, 'D': 3, 'J': 4, 'O': 5, 'U': 6, 'a': 2, 'b': 7, 'd': 3, 'o': 5, 'w': 8, 'y': 9, 'z': 10, 'ö': 5, 'ü': 11}
+    assert alpha == {'A': 2, 'a': 2, 'J': 3, 'U': 4, 'b': 5, 'd': 6, 'D': 6, 'w': 7, 'y': 8, 'z': 9, 'ö': 10, 'o': 10, 'O': 10, 'ü': 11}
                     
-def test_alphabet_from_list_compound_symbols_many_to_one():
+def test_dict_from_list_compound_symbols_many_to_one():
     input_list = ['A', 'ae', 'J', ['ü','U'], 'eu', 'w', 'y', 'z', ['...', '.'], 'D']
     alpha = alphabet.Alphabet._dict_from_list( input_list )
-    assert alpha == {'.': 2, '...': 2, 'A': 3, 'D': 4, 'J': 5, 'U': 6, 'a': 7, 'e': 8, 'u': 8, 'w': 9, 'y': 10, 'z': 11, 'ü': 6}
+    assert set(alpha.keys()) == set([ 'A', 'ae', 'J','ü','U','eu', 'w', 'y', 'z', '...', '.', 'D'])
+    assert alpha == {'A': 3, 'D': 4, 'J': 5, 'ae': 6, 'eu': 7, 'w': 8, 'y': 9, 'z': 10, '...': 2, '.': 2, 'ü': 11, 'U': 11}
 
-def test_alphabet_from_list_realistic():
+def test_dict_from_list_realistic():
     """ Passing a list with virtual symbols (EoS, SoS) yields a correct mapping 
     """
     input_list = [ ' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'a', 'ä'], ['B', 'b'], ['C', 'c'], [    'D', 'd'], ['E', 'e', 'é'], '⇥', ['F', 'f'], ['G', 'g'], ['H', 'h'], ['I', 'i'], ['J', 'j'], ['K', 'k'], ['L', 'l'], ['M', 'm'], ['N', 'n'], ['O', 'o', 'Ö', 'ö'], ['P', 'p'], ['Q', 'q'], ['R', 'r', 'ř'], ['S', 's'], '↦', ['T', 't'], ['U', 'u', 'ü'], ['V', 'v'], ['W', 'w'], ['X', 'x'], ['Y', 'y', 'ÿ'], ['Z', 'z', 'Ž'], '¬','…' ]
     alpha = alphabet.Alphabet._dict_from_list( input_list )
     assert alpha == {' ': 2, ',': 3, '-': 4, '.': 5, '1': 6, '2': 7, '4': 8, '5': 9, '6': 10, ':': 11, ';': 12, 'A': 13, 'B': 14, 'C': 15, 'D': 16, 'E': 17, 'F': 18, 'G': 19, 'H': 20, 'I': 21, 'J': 22, 'K': 23, 'L': 24, 'M': 25, 'N': 26, 'O': 27, 'P': 28, 'Q': 29, 'R': 30, 'S': 31, 'T': 32, 'U': 33, 'V': 34, 'W': 35, 'X': 36, 'Y': 37, 'Z': 38, 'a': 13, 'b': 14, 'c': 15, 'd': 16, 'e': 17, 'f': 18, 'g': 19, 'h': 20, 'i': 21, 'j': 22, 'k': 23, 'l': 24, 'm': 25, 'n': 26, 'o': 27, 'p': 28, 'q': 29, 'r': 30, 's': 31, 't': 32, 'u': 33, 'v': 34, 'w': 35, 'x': 36, 'y': 37, 'z': 38, '¬': 39, 'Ö': 27, 'ä': 13, 'é': 17, 'ö': 27, 'ü': 33, 'ÿ': 37, 'ř': 30, 'Ž': 38, '…': 40} 
 
-def test_alphabet_from_list_duplicated_symbol():
+def test_dict_from_list_duplicated_symbol():
     """ Sublists should be disjoint """
     valid_list = [ ' ', ',', '-', '.', '1', '2', '4', '5', '6', ':', ';', ['A', 'ae', 'ä'], ['B', 'b', 'a']]
     assert alphabet.Alphabet._dict_from_list( valid_list ) == {' ': 2, ',': 3, '-': 4, '.': 5, '1': 6, '2': 7, '4': 8, '5': 9, '6': 10, ':': 11, ';': 12, 'A': 13, 'B': 14, 'a': 14, 'ae': 13, 'b': 14, 'ä': 13}
@@ -102,35 +66,6 @@ def test_alphabet_from_list_duplicated_symbol():
     with pytest.raises( ValueError ) as e:
         alphabet.Alphabet._dict_from_list( invalid_list )
     
-
-
-def test_alphabet_many_to_one_from_tsv( alphabet_many_to_one_tsv ):
-    alpha = alphabet.Alphabet._dict_from_tsv( str(alphabet_many_to_one_tsv) )
-    # unique symbols, sorted
-    assert alpha == {'ϵ': 0, 'A': 1, 'D': 10, 'J': 2, 'O': 4, 'U': 6, 'a': 1, 'b': 3, 
-                     'd': 10, 'o': 4, 'w': 7, 'y': 8, 'z': 9, 'ö': 4, 'ü': 5}
-
-def test_alphabet_many_to_one_prototype_tsv( alphabet_many_to_one_prototype_tsv ):
-    alpha = alphabet.Alphabet._dict_from_tsv( str(alphabet_many_to_one_prototype_tsv), prototype=True)
-    assert alpha == {'A': 2, 'D': 3, 'J': 4, 'O': 5, 'U': 6, 'ae': 2, 'b': 7, 'd': 3, 'o': 5, 'w': 8, 'y': 9, 'z': 10, 'ö': 5, 'ü': 11}
-
-
-def test_alphabet_many_to_one_init( alphabet_many_to_one_tsv ):
-    alpha = alphabet.Alphabet( str(alphabet_many_to_one_tsv) )
-    # unique symbols, sorted
-    assert alpha._utf_2_code == {'A': 1, 'D': 10, 'J': 2, 'O': 4, 'U': 6, 'a': 1, 'b': 3, 'd': 10, 'o': 4, 'w': 7, 'y': 8, 'z': 9, 'ö': 4, 'ü': 5, 'ϵ': 0, '?': 1, '↦': 11, '⇥': 12}
-    assert alpha._code_2_utf == {12: '⇥', 11: '↦', 0: 'ϵ', 5: 'ü', 4: 'o', 9: 'z', 8: 'y', 7: 'w', 10: 'd', 3: 'b', 1: '?', 6: 'u', 2: 'j'}
-
-def test_alphabet_many_to_one_deterministic_tsv_init(data_path):
-    """ Given a code, a many-to-one alphabet from tsv consistently returns the same symbol,
-        no matter the order of the items in the input file.
-    """
-    # initialization from the same input (TSV here) give consistent results
-    symbols = set()
-    for i in range(10):
-        symbols.add( alphabet.Alphabet( str(data_path.joinpath('lol_many_to_one_shuffled_{}'.format(i))) ).get_symbol(2))
-    assert len(symbols) == 1
-
 
 def test_alphabet_many_to_one_deterministic_dict_init():
     """
@@ -143,6 +78,17 @@ def test_alphabet_many_to_one_deterministic_dict_init():
         symbols.add( alphabet.Alphabet( { k:v for (k,v) in key_values } ).get_symbol(2) )
     assert len(symbols) == 1
 
+def test_alphabet_many_to_one_consistent_decoding():
+    """
+    With list-of-lists input, every code assigned to a sublist should map to the first character
+    in the sublist.
+    """
+    alpha = alphabet.Alphabet(['0', '1', '2', ['A', 'À', 'Á', 'Â'], 'B'])
+    assert alpha.get_symbol( alpha.get_code('Â')) == 'A'
+    assert alpha.get_symbol( alpha.get_code('Á')) == 'A'
+    alpha = alphabet.Alphabet(['0', '1', '2', ['C', 'À', 'A', 'Á'], 'B'])
+    assert alpha.get_symbol( alpha.get_code('Á')) == 'C'
+    assert alpha.get_symbol( alpha.get_code('A')) == 'C'
 
 def test_alphabet_many_to_one_deterministic_list_init():
     """ 
@@ -174,11 +120,6 @@ def test_alphabet_init_from_str():
     assert alpha._code_2_utf == {12: '⇥', 11: '↦', 10: '→', 0: 'ϵ', 9: 'ß', 8: 'f', 7: 'e', 6: 'd', 5: 'c', 4: 'b', 3: 'a', 1: '?', 2: ' '} 
 
 
-def test_alphabet_init_from_tsv( alphabet_one_to_one_tsv ):
-    alpha = alphabet.Alphabet( str(alphabet_one_to_one_tsv) )
-    assert alpha._utf_2_code == {' ': 2, ',': 3, 'A': 4, 'J': 11, 'R': 16, 'S': 17, 'V': 18, 'b': 21, 'c': 22, 'd': 23, 'o': 33, 'p': 34, 'r': 35, 'w': 40, 'y': 41, 'z': 42, '¬': 43, 'ü': 44, 'ϵ': 0, '?': 1, '↦': 45, '⇥': 46}
-    assert alpha._code_2_utf == {46: '⇥', 45: '↦', 0: 'ϵ', 44: 'ü', 43: '¬', 42: 'z', 41: 'y', 40: 'w', 35: 'r', 34: 'p', 33: 'o', 23: 'd', 22: 'c', 21: 'b', 18: 'V', 17: 'S', 16: 'R', 11: 'J', 4: 'A', 1: '?', 3: ',', 2: ' '}
-    
 
 def test_alphabet_to_list():
     list_of_lists = [['A', 'a'], ['D', 'd'], 'J', ['O', 'o', 'ö'], 'U', 'b', 'w', 'y', 'z', 'ü']
@@ -331,7 +272,7 @@ def test_decode_ctc():
     decoded = alpha.decode_ctc( np.array([20, 20, 20, 0, 0, 17, 17, 0, 24, 24, 24, 24, 0, 0,
                                 24, 24, 0, 27, 27, 3, 0, 2, 35, 35, 27, 30, 30, 30, 
                                 24, 16]) )
-    assert decoded == 'hello, world'
+    assert decoded == 'HELLO, WORLD'
 
 
 

@@ -13,6 +13,9 @@ import torch
 from torch import Tensor
 import numpy as np
 
+# local
+from . import list_utils
+
 class Alphabet:
     """Creating and handling alphabets.
 
@@ -31,11 +34,6 @@ class Alphabet:
     def __init__( self, alpha_repr: Union[str,list]='', tokenizer=None ) -> None:
         """Initialize a new Alphabet object. The special characters are added automatically.
 
-            From a TSV path::
-
-                >>> alphabet.Alphabet('alpha.tsv')
-                {'A': 1, 'a': 1, 'b': 2, 'c': 3, 'ϵ': 0, '↦': 4, '⇥': 5}
-
             From a nested list::
 
                 >>> alphabet.Alphabet([['a','A'],'b','c'])
@@ -47,18 +45,12 @@ class Alphabet:
                 {' ': 1, 'A': 2, 'a': 3, 'b': 4, 'c': 5, 'ϵ': 0, '↦': 6, '⇥': 7}
 
             Returns:
-                alpha_repr (Union[str, list]): the input source--it may be a dictionary that maps chars to codes,
-                       a nested list, a plain string, or the path of a TSV file.
+                alpha_repr (Union[str, list]): the input source--it may be a nested list, or a plain string.
         """
         self._utf_2_code = {}
 
-        if type(alpha_repr) is str or isinstance(alpha_repr, Path):
-            alpha_path = Path( alpha_repr ) if type(alpha_repr) is str else alpha_repr
-            if alpha_path.suffix == '.tsv' and alpha_path.exists():
-                #print("__init__( tsv_path )")
-                self._utf_2_code = self._dict_from_tsv( alpha_repr )  
-            else:
-                self._utf_2_code = self._dict_from_string( alpha_repr )
+        if type(alpha_repr) is str:
+            self._utf_2_code = self._dict_from_string( alpha_repr )
         elif type(alpha_repr) is list:
             self._utf_2_code = self._dict_from_list( alpha_repr )
 
@@ -86,9 +78,10 @@ class Alphabet:
                 self._utf_2_code[ s ] = self.maxcode+1
         
         if self.many_to_one:
-            self._code_2_utf = { c:s.lower() for (s,c) in sorted(self._utf_2_code.items(), reverse=True) }
+            # ensure that a many-to-one code maps to first character in a sublist 
+            self._code_2_utf = { c:s for (s,c) in reversed(self._utf_2_code.items()) }
         else:
-            self._code_2_utf = { c:s for (s,c) in sorted(self._utf_2_code.items(), reverse=True) }
+            self._code_2_utf = { c:s for (s,c) in self._utf_2_code.items() }
             
 
     def to_tsv( self, filename: Union[str,Path]) -> None:
@@ -432,27 +425,25 @@ class Alphabet:
     def prototype_from_scratch( cls, std_charsets: List[str], merge:List[str]=[],) -> Alphabet:
         """Build a tentative, "universal", alphabet from scratch, without regard to the data: it
         maps every class of characters (charset) to a common code.
-        The resulting encoding is rather short and lends itself to a variety of datasets.
-        The output can be redirected on file, reworked and then fed back through `from_tsv()`.
 
         Args:
             std_charsets (List[str]): a list of charsets (strings of chars), considered 
                 "standard" for the dataset. Eg.::
             
-                    [' ', '1', '2', ..., '9', 'AÁÂÃÄÅÆĂĄÀ', 'aáâãäåæāăąàæ', ..., 'zźżž']
+                    [' ', '1', '2', ..., '9', ['A','Á','Â',...], ['a','á',...], ..., ['z','ź',...]]
 
             merge (List[str]): for each of the provided subsequences, merge those output sublists
                 that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
-                (`[iI$î...]`) with the `'j'` sublist (`[jJ...]`)
+                (`['i','I','î',...]`) with the `'j'` sublist (`['j','J',...]`)
 
         Returns:
              Alphabet: an Alphabet object
         """
 
-        symbol_list = cls._build_charsets_from_chars( std_charsets )
-        symbol_list = cls._merge_sublists( symbol_list, merge )        
+        symbol_list = cls.list_utils.groups_from_groups( std_charsets )
+        symbol_list = cls.list_utils.merge_sublists( symbol_list, merge )        
 
-        return cls(cls._deep_sorted(symbol_list))
+        return cls(symbol_list)
 
 
     @classmethod
@@ -464,83 +455,11 @@ class Alphabet:
         if weird_chars:
             warnings.warn("The following characters are in the data, but not in the 'standard' charsets used by this prototype: {}".format( weird_chars ))
 
-        symbol_list = cls._build_charsets_from_chars(std_charsets, charset) if many_to_one else sorted(charset)
-        symbol_list = cls._merge_sublists( symbol_list, merge )
+        symbol_list = cls.list_utils.groups_from_groups(std_charsets, charset) if many_to_one else sorted(charset)
+        symbol_list = cls.list_utils.merge_sublists( symbol_list, merge )
 
-        return cls(cls._deep_sorted(symbol_list))
+        return cls(symbol_list)
 
-
-    @staticmethod
-    def _merge_sublists( symbol_list: List[Union[str,list]], merge:List[str]=[] ) -> List[Union[str,list]]:
-        """Given a nested list and a list of strings, merge the lists contained in <symbol_list>
-        such that characters joined in a <merge> string are stored in the same list.
-
-        Args:
-            merge (List[str]): for each of the provided subsequences, merge those output sublists
-                that contain the characters in it. Eg. ``merge=['ij']`` will merge the ``'i'``
-                sublist (``[iIî...]``) with the ``'j'`` sublist (``[jJ...]``)
-
-        Returns:
-            List[Union[str,list]]: a list of lists.
-        """
-        if not merge:
-            return symbol_list
-
-        symbol_list = symbol_list.copy()
-
-        to_delete = []
-        to_add = []
-        for mgs in merge:
-            merged = set()
-            for charlist in symbol_list:
-                if set(charlist).intersection( set(mgs) ):
-                    merged.update( charlist )
-                    to_delete.append( charlist )
-            if len(merged):
-                to_add.append( list(merged) )
-        for deleted_subset in to_delete:
-            try:
-                symbol_list.remove( deleted_subset )
-            except ValueError:
-                print(f'Could not delete element {deleted_subset} from list of symbols.')
-        if len(to_add):
-            symbol_list.extend( to_add ) 
-        return symbol_list
-
-
-    @staticmethod
-    def _build_charsets_from_chars(list_charsets: List[Union[list,str]], chars: set = None, exclude=[]) -> List[Union[list,str]]:
-        """Given a list of charsets and a list of chars, return an alphabet as a list of lists.
-        Symbols that are not in the first list of charsets are included as atomic elements.
-
-        Args:
-            list_charsets (List[Union[list,str]]): sets of chars which determine the grouping.
-            chars (set): set of individual chars.
-
-        Returns: 
-            List[Union[List,str]]: a list of individual chars or list of chars.
-
-        Example::
-
-            >>> build_intersection( ['1','2','3','9','JĴ','jĵɉ','Q','UÙÚÛÜŨŪŬŮŰŲ','uùúûüũūŭůűų'], ['u','2','%','9','j','Ų','J','Q','U','ũ'])
-            ['2', '9', 'J', 'j', 'Q', ['Ų', 'U'], ['u', 'ũ'], '%']
-
-
-        """
-        if chars is None:
-            return [ list(l) if len(l)>1 else l for l in list_charsets ]
-
-        all_char_set = ''.join( list_charsets )
-        unknown_chars = set( c for c in chars if c not in all_char_set )
-
-        chars = chars.difference( unknown_chars )
-        keys=[ [ c in sl for sl in list_charsets ].index(True) for c in chars]
-        charsets_new = []
-        keyfunc = lambda x: x[0]
-        charsets_new = [ [ t[1] for t in l ] for k, l in itertools.groupby( sorted( zip(keys, chars), key=keyfunc), key=keyfunc) ]
-
-        return [ l[0] if len(l)==1 else l for l in charsets_new ] + list(unknown_chars)
-        
 
     @classmethod
     def _dict_from_list(cls, symbol_list: List[Union[List,str]]) -> Dict[str,int]:
@@ -578,49 +497,17 @@ class Alphabet:
         reserved_symbols = (cls.start_of_seq_symbol, cls.end_of_seq_symbol, cls.null_symbol, cls.unknown_symbol)
         def sort_and_label( lol ):
             lol = itertools.filterfalse( lambda x: x in reserved_symbols, lol )
-            return [ (c,s) for (c,s) in enumerate(sorted([ sorted(sub) for sub in lol ], key=lambda x: x[0]), start=2)]
+            lol = [ (c,s) for (c,s) in enumerate(sorted([ sub for sub in lol ], key=lambda x: x[0]), start=2)] 
+            print("sorted_and_labeled=", lol)
+            return lol
 
-        alphadict =dict( sorted( { s:c for (c,item) in sort_and_label( symbol_list ) for s in item if not s.isspace() or s==' ' }.items()) ) 
+        sall = sort_and_label( symbol_list )
+        # single-character symbols
+        alphadict ={ s:c for (c,s) in sall if type(s) is str and (not s.isspace() or s==' ') }
+        # compound symbols
+        alphadict.update( {s:c for (c,item) in sall for s in item if type(item) is list }) 
+        print("alphadict=",alphadict)
         return alphadict
-
-
-    @classmethod
-    def _dict_from_tsv(cls, tsv_filename: str, prototype=False) -> Dict[str,int]:
-        """Initialize an alphabet dictionary from a TSV file.
-
-        Assumption: if it is not a prototype, the TSV file always contains a correct mapping,
-        but the symbols need to be sorted before building the dictionary, to ensure a
-        deterministic mapping of codes to symbols; if it is a prototype, the last column in each
-        line is -1 (a dummy for the code) and the previous columns store the symbols that should
-        map to the same code.
-
-        Args:
-            tsv_filename (str): pathname of a TSV file of the form::
-
-                <symbol>     <code>
-
-            prototype (bool): if True, the TSV file may store more than 1 symbol on the same
-                line, as well as a proto-code at the end (-1); codes are to be generated.
-
-        Returns:
-            Dict[str, int]: a dictionary `{ <symbol>: <code> }`
-        """
-        with open( tsv_filename, 'r') as infile:
-            if prototype:
-                if next(infile).split('\t')[-1].rstrip() != '-1':
-                    raise ValueError("File is not a prototype TSV. Format expected:"
-                                     "<char1>    [<char2>,    ...]    -1")
-                infile.seek(0)
-                # prototype TSV may have more than one symbol on the same line, for many-to-one mapping
-                # Building list-of-list from TVS:
-                # A   ae   -1          
-                # O   o    ö    -1 ---> [['A', 'ae'], 'O', 'o', 'ö'], ... ]
-                lol = [ s if len(s)>1 else s[0] for s in [ line.split('\t')[:-1] for line in infile if re.match(r'\s*$', line) is None ]]
-                
-                return cls._dict_from_list( lol )
-
-            objects = { s:int(c.rstrip()) for (s,c) in sorted([ line.split('\t') for line in infile if re.match(r'\s*$', line) is None]) }
-            return objects
 
     @classmethod
     def _dict_from_string(cls, stg: str ) -> Dict[str,int]:
@@ -634,27 +521,6 @@ class Alphabet:
         """
         alphadict = { s:c for (c,s) in enumerate(sorted(set( [ s for s in stg if not s.isspace() or s==' ' ])), start=2) }
         return alphadict
-        
-
-    @staticmethod
-    def _deep_sorted(list_of_lists: List[Union[str,list]]) ->List[Union[str,list]]:
-        """Sort a list that contains either lists of strings, or plain strings.
-        Eg.::
-
-           >>> _deep_sorted(['a', ['B', 'b'], 'c', 'd', ['e', 'E'], 'f'])
-           [['B', 'b'], ['E', 'e'], 'a', 'c', 'd', 'f']
-
-        Args:
-            list_of_lists (List[Union[str,list]]): a list where each element can be a characters or a 
-                list of characters.
-
-        Returns:
-            List[Union[str,list]]: a sorted list, where each sublist is sorted and the top sorting 
-                key is the either the character or the first element of the list to be sorted.
-        """
-        return sorted([sorted(i) if len(i)>1 else i for i in list_of_lists],
-                       key=lambda x: x[0])
-
 
     def _tokenize_crude( self, mesg: str, quiet=True ) -> List[str]:
         """Tokenize a string into tokens that are consistent with the provided alphabet.
