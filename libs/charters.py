@@ -83,10 +83,11 @@ class ChartersDataset(VisionDataset):
                 subset: str = 'train',
                 subset_ratios: Tuple[float,float,float]=(.7, 0.1, 0.2),
                 transform: Optional[Callable] = None,
-                target_transform: Optional[Callable] = None,
+                target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
                 from_line_tsv_file: str = '',
                 from_page_xml_dir: str = '',
+                from_work_folder: str = '',
                 build_items: bool = True,
                 task: str = '',
                 shape: str = '',
@@ -97,55 +98,49 @@ class ChartersDataset(VisionDataset):
         """Initialize a dataset instance.
 
         Args:
-            root (str): Where the archive is to be downloaded and the
-                subfolder containing original files (pageXML documents
-                and page images) is to be created. Default: subfolder
-                `data/Monasterium' in this project's directory.
-            work_folder (str): Where line images and ground truth
-                transcriptions fitting a particular task are to be
-                created; default:
-                '<root>/MonasteriumHandwritingDatasetHTR'; if parameter
-                is a relative path, the work folder is created under
+            root (str): Where the archive is to be downloaded and the subfolder containing
+                original files (pageXML documents and page images) is to be created. 
+                Default: subfolder `data/Monasterium' in this project's directory.
+            work_folder (str): Where line images and ground truth transcriptions fitting a
+                particular task are to be created; default: '<root>/MonasteriumHandwritingDatasetHTR';
+                if parameter is a relative path, the work folder is created under
                 <root>; an absolute path overrides this.
             subset (str): 'train' (default), 'validate' or 'test'.
-            subset_ratios (Tuple[float, float, float]): ratios for
-                respective ('train', 'validate', ...) subsets
-            transform (Callable): Function to apply to the PIL image at
-                loading time.
-            target_transform (Callable): Function to apply to the
-                transcription ground truth at loading time.
-            extract_pages (bool): if True, extract the archive's content
-                into the base folder no matter what; otherwise
-                (default), check first for a file tree with matching
-                name and checksum.
-            task (str): 'htr' for HTR set = pairs (line, transcription),
-                'segment' for segmentation = cropped TextRegion images,
-                with corresponding PageXML files.  If '' (default), the
-                dataset archive is extracted but no actual data get
+            subset_ratios (Tuple[float, float, float]): ratios for respective ('train', 
+                'validate', ...) subsets
+            transform (Callable): Function to apply to the PIL image at loading time.
+            target_transform (Callable): Function to apply to the transcription ground
+                truth at loading time.
+            extract_pages (bool): if True, extract the archive's content into the base
+                folder no matter what; otherwise (default), check first for a file tree 
+                with matching name and checksum.
+            task (str): 'htr' for HTR set = pairs (line, transcription), 'segment' for
+                segmentation = cropped TextRegion images, with corresponding PageXML files.
+                If '' (default), the dataset archive is extracted but no actual data get
                 built.
-            shape (str): 'bbox' (default) for line bounding boxes or
-                'polygons'
-            build_items (bool): if True (default), extract and store
-                images for the task from the pages; otherwise, just
-                extract the original data from the archive.
-            from_line_tsv_file (str): TSV file from which the data are
-                to be loaded (containing folder is assumed to be the
-                work folder, superceding the work_folder option).
-            count (int): Stops after extracting {count} image items (for
-                testing purpose only).
-            line_padding_style (str): When extracting line bounding
-                boxes for an HTR task, padding to be used around the
-                polygon: 'median' (default) pads with the median value
-                of the polygon; 'noise' pads with random noise.
-            resume_task (bool): If True, the work folder is not purged.
-                Only those page items (lines, regions) that not already
-                in the work folder are extracted. (Partially
-                implemented: works only for lines.)
+            shape (str): 'bbox' (default) for line bounding boxes or 'polygons'.
+            build_items (bool): if True (default), extract and store images for the task
+                from the pages; otherwise, just extract the original data from the archive.
+            from_line_tsv_file (str): if set, the data are to be loaded from the given file
+                (containing folder is assumed to be the work folder, superceding the
+                work_folder option).
+            from_page_xml_dir (str): if set, the samples have to be extracted from the 
+                raw page data contained in the given directory.
+            from_work_folder (str): if set, the samples are to be loaded from the 
+                given directory, without prior processing.
+            folder count (int): Stops after extracting {count} image items (for testing 
+                purpose only).
+            line_padding_style (str): When extracting line bounding boxes for an HTR task,
+                padding to be used around the polygon: 'median' (default) pads with the
+                median value of the polygon; 'noise' pads with random noise.
+            resume_task (bool): If True, the work folder is not purged. Only those page
+                items (lines, regions) that not already in the work folder are extracted.
+                (Partially implemented: works only for lines.)
 
         """
 
         # A dataset resource dictionary needed, unless we build from existing files
-        if self.dataset_resource is None and not (from_page_xml_dir or from_line_tsv_file):
+        if self.dataset_resource is None and not (from_page_xml_dir or from_line_tsv_file or from_work_folder):
             raise FileNotFoundError("This dataset class cannot be instantiated without a valid resource dictionary")
         
         trf = v2.PILToTensor()
@@ -154,8 +149,8 @@ class ChartersDataset(VisionDataset):
 
         super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
-        print( "from_page_xml_dir=", from_page_xml_dir )
-        print( "self.dataset_resource=", self.dataset_resource)
+        logger.debug( "from_page_xml_dir=", from_page_xml_dir )
+        logger.debug( "self.dataset_resource=", self.dataset_resource)
 
         self.root = Path(root) if root else Path(__file__).parent.joinpath('data', self.root_folder_basename)
         logger.debug("Root folder: {}".format( self.root ))
@@ -168,12 +163,19 @@ class ChartersDataset(VisionDataset):
 
         self.from_line_tsv_file = ''
         if from_line_tsv_file == '':
-            # Local file system, no archive (for building datasets on the fly)
-            if from_page_xml_dir != '':
+            # Local file system with data samples, no archive
+            if from_work_folder != '':
+                work_folder = from_work_folder 
+                if not Path( work_folder ).exists():
+                    raise FileNotFoundError(f"Work folder {self.work_folder_path} does not exist. Abort.")
+                
+            # Local file system with raw page data, no archive 
+            elif from_page_xml_dir != '':
                 self.raw_data_folder_path = Path( from_page_xml_dir )
                 if not self.raw_data_folder_path.exists():
                     raise FileNotFoundError(f"Directory {self.raw_data_folder_path} does not exist. Abort.")
                 self.pagexmls = sorted( self.raw_data_folder_path.glob('*.xml'))
+
             # Online archive
             elif self.dataset_resource is not None:
                 # tarball creates its own base folder
@@ -198,7 +200,8 @@ class ChartersDataset(VisionDataset):
         self._task = ''
         if (task != ''):
             self._task = task # for self-documentation only
-            build_ok = build_items if from_line_tsv_file == '' else False
+            build_ok = False if (from_line_tsv_file!='' or from_work_folder!='' ) else build_items
+            print(build_ok)
             self._build_task( task, build_items=build_ok, from_line_tsv_file=from_line_tsv_file, 
                              subset=subset, subset_ratios=subset_ratios, 
                              work_folder=work_folder, count=count, 
