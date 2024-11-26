@@ -165,8 +165,9 @@ class ChartersDataset(VisionDataset):
         if from_line_tsv_file == '':
             # Local file system with data samples, no archive
             if from_work_folder != '':
-                work_folder = from_work_folder 
-                if not Path( work_folder ).exists():
+                work_folder = from_work_folder
+                logger.debug("work_folder="+ work_folder)
+                if not Path(work_folder).exists():
                     raise FileNotFoundError(f"Work folder {self.work_folder_path} does not exist. Abort.")
                 
             # Local file system with raw page data, no archive 
@@ -207,7 +208,7 @@ class ChartersDataset(VisionDataset):
                              work_folder=work_folder, count=count, 
                              line_padding_style=line_padding_style,)
 
-            if self.data:
+            if self.data and not from_line_tsv_file:
                 # Generate a TSV file with one entry per img/transcription pair
                 self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{subset}.tsv")) )
                 self._generate_readme("README.md", 
@@ -273,7 +274,7 @@ class ChartersDataset(VisionDataset):
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
         """
         if task == 'htr':
-            
+             
             if crop:
                 self.logger.warning("Warning: the 'crop' [to WritingArea] option ignored for HTR dataset.")
             
@@ -397,7 +398,6 @@ class ChartersDataset(VisionDataset):
             row_format.format("Img width", *width_stats),
             row_format.format("GT length", *gt_length_stats),
         ])
-
 
 
     def _generate_readme( self, filename: str, params: dict )->None:
@@ -542,6 +542,8 @@ class ChartersDataset(VisionDataset):
         """
         work_folder_path = file_path.parent
         samples=[]
+        logger.debug("work_folder_path={}".format(work_folder_path))
+        logger.debug("tsv file={}".format(file_path))
         with open( file_path, 'r') as infile:
             # Detection: 
             # - is the transcription passed as a filepath or as text?
@@ -559,10 +561,10 @@ class ChartersDataset(VisionDataset):
                 if not inline_transcription:
                     with open( work_folder_path.joinpath( gt_field ), 'r') as igt:
                         gt_field = '\n'.join( igt.readlines())
-                spl = { 'img': str(work_folder_path.joinpath( img_file )), 'transcription': gt_field,
+                spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
                         'height': int(height), 'width': int(width) }
                 if has_mask:
-                    spl['polygon_mask']=fields[4]
+                    spl['polygon_mask']=work_folder_path.joinpath(fields[4])
                 samples.append( spl )
                                
         return samples

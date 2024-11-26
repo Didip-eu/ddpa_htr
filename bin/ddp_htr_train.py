@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 import logging
 import random
+import itertools
 from typing import NamedTuple
 
 # 3rd-party
@@ -36,7 +37,7 @@ import character_classes as cc
 
 # local logger
 # root logger
-logging.basicConfig(stream=sys.stdout, level='DEBUG', format="%(asctime)s - %(funcName)s: %(message)s", force=True)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -44,15 +45,15 @@ p = {
     "appname": "htr_train",
     "batch_size": 2,
     "img_height": 128,
-    "img_width": 3200,
-    "max_epoch": 200,
-    "dataset_path_train": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
-    "dataset_path_validate": [str(root.joinpath('tests','data','polygons', 'monasterium_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    "img_width": 2048,
+    "max_epoch": 250,
+    "dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "ignored_chars": [ cc.subscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
-    "save_freq": 100,
+    "save_freq": 1,
     "resume_fname": 'model_save.mlmodel',
     "mode": ('train', 'validate', 'test'),
     "auxhead": [False, 'Combine output with CTC shortcut'],
