@@ -225,6 +225,19 @@ class Alphabet:
         return torch.tensor( [ self.get_code( t ) for t in self.tokenize( sample_s ) ], dtype=torch.int64)
 
 
+    def reduce(self, sample_s: str) -> str:
+        """Rewrite a string by mapping all chars of a charset to their representative.
+
+        Args:
+            sample_s (str): message string.
+
+        Returns:
+            str: the message, where all members of a given charset of been replaced by their 
+                representative.
+        """
+        return self.decode( self.encode( sample_s ))
+
+
     def encode_one_hot( self, sample_s: List[str]) -> Tensor:
         """One-hot encoding of a message string."""
         encode_int = self.encode( sample_s )

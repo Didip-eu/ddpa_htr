@@ -158,11 +158,10 @@ if __name__ == "__main__":
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
+            # reduce charset
+            transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
 
-            # predictions on encoded strings, not on raw GT
-            #predictions, transcriptions = [ [ model.alphabet.encode(ss) for ss in s ] for s in (predictions, transcriptions) ]
-            #batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions, word_separator=model.alphabet.get_code(' ') )
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
             wer += batch_wer
