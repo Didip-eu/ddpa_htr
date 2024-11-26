@@ -99,9 +99,9 @@ class ChartersDataset(VisionDataset):
         Args:
             root (str): Where the archive is to be downloaded and the subfolder containing
                 original files (pageXML documents and page images) is to be created. 
-                Default: subfolder `data/Monasterium' in this project's directory.
+                Default: subfolder `data/Charters' in this project's directory.
             work_folder (str): Where line images and ground truth transcriptions fitting a
-                particular task are to be created; default: '<root>/MonasteriumHandwritingDatasetHTR';
+                particular task are to be created; default: '<root>/ChartersHandwritingDatasetHTR';
                 if parameter is a relative path, the work folder is created under
                 <root>; an absolute path overrides this.
             subset (str): 'train' (default), 'validate' or 'test'.
@@ -141,7 +141,9 @@ class ChartersDataset(VisionDataset):
 
         # A dataset resource dictionary needed, unless we build from existing files
         if self.dataset_resource is None and not (from_page_xml_dir or from_line_tsv_file or from_work_folder):
-            raise FileNotFoundError("This dataset class cannot be instantiated without a valid resource dictionary")
+            raise FileNotFoundError("In order to create a dataset instance, you need either:" +
+                                    "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
+                                    "\n\t + one of the following options: -from_page_xml_dir, -from_work_folder, -from_line_tsv_file")
         
         trf = v2.PILToTensor()
         if transform:
@@ -149,10 +151,8 @@ class ChartersDataset(VisionDataset):
 
         super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
-        logger.debug( "from_page_xml_dir=", from_page_xml_dir )
-        logger.debug( "self.dataset_resource=", self.dataset_resource)
+        self.root = Path(root) if root else Path(__file__).parents[1].joinpath('data', self.root_folder_basename)
 
-        self.root = Path(root) if root else Path(__file__).parent.joinpath('data', self.root_folder_basename)
         logger.debug("Root folder: {}".format( self.root ))
         if not self.root.exists():
             self.root.mkdir( parents=True )
