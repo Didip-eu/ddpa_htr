@@ -110,6 +110,20 @@ Distinguish between:
    here that needs interpreting. Eg. abbreviations); the alphabet
    map them all to a single, default code, that stands for 'unknown'.
 
+Examples: how to deal with... ?
+
+* diacritics? Depending on the corpus, some accented letters such as 'Ê' may be rendered either as
+  a 1-byte character (from the extended Latin charset: in this case 0x00CA) or as the combination 
+  of a letter and a diacritic (in this case 0x0045 (E) + 0x0302 (̂ )).
+  
+  + at the alphabet level, the accented 1-byte glyph (say 'Ê') maps on its class representative's code (eg. 'E')
+  + at encoding time, the diacritic mark is either removed from the input string (simpler); 
+  
+  If we wanted the alphabet to handle the accented character as such, one could replace the 1-byte combination by its extended Latin 1-byte equivalent, but it is not always possible. A step further would be to include the combinations themselves into the alphabet(as compound symbols), but that is probably an overkill.
+ 
+
+
+
 .. toctree::
    :maxdepth: 3
    :caption: Contents:
