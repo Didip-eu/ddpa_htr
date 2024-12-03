@@ -808,7 +808,7 @@ class ChartersDataset(VisionDataset):
 
     def _extract_lines(self, raw_data_folder_path: Path,
                         work_folder_path: Path, 
-                        shape: str='bbox',
+                        shape: str='polygon',
                         text_only=False,
                         count=0,
                         padding_func=None) -> List[Dict[str, Union[Tensor,str,int]]]:
@@ -819,7 +819,7 @@ class ChartersDataset(VisionDataset):
             raw_data_folder_path (Path): root of the (read-only) expanded archive.
             work_folder_path (Path): Line images are extracted in this subfolder (relative to the
                 caller's pwd).
-            shape (str): Extract lines as bboxes (default) or as polygon-within-bbox.
+            shape (str): Extract lines as polygons-within-boxes ('polygon': default) or as bboxes ('bbox').
             text_only (bool): Store only the transcriptions (*.gt.txt files). (Default value = False)
             count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
             padding_func (Callable[[np.ndarray], np.ndarray]): For polygons, a function that
@@ -886,7 +886,11 @@ class ChartersDataset(VisionDataset):
                     transcription_element = textline_elt.find('./pc:TextEquiv', ns)
                     if transcription_element is None:
                         continue
-                    transcription = transcription_element.find('./pc:Unicode', ns).text
+                    transcription_text_element = transcription_element.find('./pc:Unicode', ns)
+                    if transcription_text_element is None:
+                        continue
+             
+                    transcription = transcription_text_element.text
 
                     if not transcription or re.match(r'\s+$', transcription):
                         continue
@@ -942,7 +946,7 @@ class ChartersDataset(VisionDataset):
                     sample = {'img': textline['img_path'], 'transcription': textline['transcription'], \
                                'height': textline['height'], 'width': textline['width'] }
                     #logger.debug("_extract_lines(): sample=", sample)
-                    if textline['mask_path'] is not None:
+                    if 'mask_path' in textline:
                         sample['polygon_mask'] = textline['mask_path'] #textline['polygon']
                     samples.append( sample )
 
@@ -1328,6 +1332,32 @@ class KoenigsfeldenDatasetAbbrev(ChartersDataset):
         super().__init__( *args, **kwargs)
 
         #self.target_transform = self.filter_transcription
+
+
+class NurembergLetterbooks(ChartersDataset):
+    """
+    Nuremberg letterbooks (15th century).
+    """
+
+    dataset_resource = {
+            'file': f"{os.getenv('HOME')}/tmp/data/nuremberg_letterbooks/nuremberg_letterbooks.tar.gz",
+            'tarball_filename': 'nuremberg_letterbooks.tar.gz',
+            'md5': '9326bc99f9035fb697e1b3f552748640',
+            'desc': 'Nuremberg letterbooks ground truth data',
+            'origin': 'local',
+            'tarball_root_name': 'nuremberg_letterbooks',
+            'comment': 'Numerous struck-through lines (masked)'
+    }
+
+    work_folder_name="NurembergLetterbooksDataset"
+    "This prefix will be used when creating a work folder."
+
+    root_folder_basename="NurembergLetterbooks"
+    "This is the root of the archive tree."
+
+    def __init__(self, *args, **kwargs ):
+
+        super().__init__( *args, **kwargs)
 
 
 
