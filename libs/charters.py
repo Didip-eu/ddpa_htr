@@ -89,7 +89,7 @@ class ChartersDataset(VisionDataset):
                 from_work_folder: str = '',
                 build_items: bool = True,
                 task: str = '',
-                shape: str = '',
+                shape: str = 'polygon',
                 count: int = 0,
                 line_padding_style: str = 'median',
                 resume_task: bool = False

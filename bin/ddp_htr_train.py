@@ -129,8 +129,8 @@ if __name__ == "__main__":
         def __lt__(self, other):
             return self.value <= other.value
         
-    best_cer, best_wer = Metric(1.0, -1), Metric(1.0, -1)
-    last_cer, last_wer = Metric(1.0, -1), Metric(1.0, -1)
+    best_cer, best_wer = Metric(1.0, 0), Metric(1.0, 0)
+    last_cer, last_wer = Metric(1.0, 0), Metric(1.0, 0)
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
@@ -227,25 +227,32 @@ if __name__ == "__main__":
     
         model.net.train()
 
-        for epoch in range(0, 0 if args.dry_run else args.max_epoch ):
+        epoch_start = len( model.train_epochs )
+        if epoch_start > 0: 
+            logger.info(f"Resuming training for epoch {epoch_start}")
+
+        for epoch in range(epoch_start, 0 if args.dry_run else args.max_epoch ):
             train_epoch( epoch )
 
-            # save model every time epoch completes and best CER has improved
             if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
+                model.save( args.resume_fname )
 
-                cer, wer = validate()
+            cer, wer = validate()
 
-                last_cer, last_wer = Metric( cer, epoch ), Metric( wer, epoch )
-                if last_cer <= best_cer:
-                    best_cer = last_cer
-                    model.save( args.resume_fname )
-                if last_wer <= best_wer:
-                    best_wer = last_wer
+            last_cer, last_wer = Metric( cer, epoch ), Metric( wer, epoch )
+            if last_cer <= best_cer:
+                best_cer = last_cer
+                model.save( args.resume_fname + '.best' )
+                # for easy check on the last best epoch
+                symlink_path = Path( args.resume_fname + f'.best.epoch-{epoch}' )
+                symlink_path.unlink( missing_ok=True )
+                symlink_path.symlink_to( args.resume_fname + '.best' )
+            if last_wer <= best_wer:
+                best_wer = last_wer
 
             writer.add_scalar("CER/validate", last_cer.value, epoch)
             writer.add_scalar("WER/validate", last_wer.value, epoch)
                 
-
             logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
