@@ -89,6 +89,7 @@ class ChartersDataset(VisionDataset):
                 from_work_folder: str = '',
                 build_items: bool = True,
                 task: str = '',
+                expansion_masks = True,
                 shape: str = 'polygon',
                 count: int = 0,
                 line_padding_style: str = 'median',
@@ -117,6 +118,8 @@ class ChartersDataset(VisionDataset):
                 segmentation = cropped TextRegion images, with corresponding PageXML files.
                 If '' (default), the dataset archive is extracted but no actual data get
                 built.
+            expansion_masks (bool): if True (default), add transcription expansion offsets
+                to the sample if it is present in the XML source line annotations.
             shape (str): Extract each line as bbox ('bbox': default), 
                 bbox+mask (2 files, 'mask'), or as padded polygons ('polygon')
             build_items (bool): if True (default), extract and store images for the task
@@ -356,7 +359,13 @@ class ChartersDataset(VisionDataset):
                 sample['width'], sample['height'] = img.size
             
             with open(gt_file_name, 'r') as gt_if:
-                sample['transcription']=gt_if.read().rstrip()
+                transcription=gt_if.read().rstrip()
+                expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', transcription)
+                if expansion_masks_match is not None:
+                    sample['transcription']=expansion_masks_match.group(1)
+                    sample['expansion_masks']=eval(expansion_masks_match.group(2))
+                else:
+                    sample['transcription']=transcription
 
             # optional mask
             mask_file_path = img_file_path.with_suffix('.mask.npy.gz')
@@ -512,6 +521,8 @@ class ChartersDataset(VisionDataset):
             for sample in samples:
                 img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
                 #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
+                if 'expansion_masks' in sample and sample['expansion_masks'] is not None:
+                    gt = gt + '<{}>'.format( sample['expansion_masks'] )
                 of.write( '{}\t{}\t{}\t{}'.format( img_path,
                                              gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'),
                                              int(height), int(width) ))
@@ -558,13 +569,21 @@ class ChartersDataset(VisionDataset):
             for tsv_line in infile:
                 fields = tsv_line[:-1].split('\t')
                 img_file, gt_field, height, width = fields[:4]
+                expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
+                
                 if not inline_transcription:
                     with open( work_folder_path.joinpath( gt_field ), 'r') as igt:
-                        gt_field = '\n'.join( igt.readlines())
+                        gt_field = '\n'.join( igt.readlines() )
+
+                elif expansion_masks_match is not None:
+                    gt_field = expansion_masks_match.group(1)
+
                 spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
                         'height': int(height), 'width': int(width) }
                 if has_mask:
                     spl['polygon_mask']=work_folder_path.joinpath(fields[4])
+                if expansion_masks_match is not None:
+                    spl['expansion_masks']=eval( expansion_masks_match.group(2))
                 samples.append( spl )
                                
         return samples
@@ -810,6 +829,7 @@ class ChartersDataset(VisionDataset):
                         work_folder_path: Path, 
                         shape: str='polygon',
                         text_only=False,
+                        expansion_masks=True,
                         count=0,
                         padding_func=None) -> List[Dict[str, Union[Tensor,str,int]]]:
         """Generate line images from the PageXML files and save them in a local subdirectory
@@ -821,6 +841,7 @@ class ChartersDataset(VisionDataset):
                 caller's pwd).
             shape (str): Extract lines as polygons-within-boxes ('polygon': default) or as bboxes ('bbox').
             text_only (bool): Store only the transcriptions (*.gt.txt files). (Default value = False)
+            expansion_masks (bool): retrieve offsets and lengths of the abbreviation expansions (if available)
             count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
             padding_func (Callable[[np.ndarray], np.ndarray]): For polygons, a function that
                 accepts a (C,H,W) Numpy array and returns the line BBox image, with padding
@@ -897,6 +918,9 @@ class ChartersDataset(VisionDataset):
                     transcription = transcription.strip().replace("\t",' ')
                     textline['transcription'] = transcription
 
+                    if expansion_masks and 'custom' in textline_elt.keys():
+                        textline['expansion_masks'] = [ (int(o), int(l)) for (o,l) in re.findall(r'expansion *{ *offset:(\d+); *length:(\d+);', textline_elt.get('custom')) ]
+
                     # skip lines that don't have a transcription
                     if not textline['transcription']:
                         continue
@@ -945,13 +969,17 @@ class ChartersDataset(VisionDataset):
 
                     sample = {'img': textline['img_path'], 'transcription': textline['transcription'], \
                                'height': textline['height'], 'width': textline['width'] }
+                    if 'expansion_masks' in textline:
+                        sample['expansion_masks'] = textline['expansion_masks']
                     #logger.debug("_extract_lines(): sample=", sample)
                     if 'mask_path' in textline:
                         sample['polygon_mask'] = textline['mask_path'] #textline['polygon']
                     samples.append( sample )
 
                     with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
-                        gt_file.write( textline['transcription'] )
+                        gt_file.write( textline['transcription'])
+                        if 'expansion_masks' in textline:
+                            gt_file.write( '<{}>'.format( textline['expansion_masks']))
                         gt_lengths.append(len( textline['transcription']))
 
                     cnt += 1
