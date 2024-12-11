@@ -65,7 +65,7 @@ def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], m
 
     char_errors_with_masks = [ edit_dist_with_mask(pred, target)/len(target) for (pred, target, mask) in zip (predicted_mesg, target_mesg, masks ) ]
     # difference = those errors that are due to masked parts
-    mask_error_ratio = (char_errors - char_errors_with_masks)/char_errors
+    mer = (sum(char_errors) - sum(char_errors_with_masks))/sum(char_errors)
 
     # WER
     pred_split, target_split = [ [ split_generic(seq, word_separator) for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
@@ -76,10 +76,10 @@ def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], m
         make_hashable = lambda x: tuple(x) if type(x) is list else x 
         enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
         enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
-        wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
+        wer += edit_dist( enc_pred, enc_target ) / len( enc_target)
     wer /= len(pairs)
 
-    return (cer, wer, mask_error_ratio, line_error)
+    return (cer, wer, mer, line_error)
 
 
 def split_generic( seq: Union[str,list], sep: Union[str,int] ) -> List[list]:

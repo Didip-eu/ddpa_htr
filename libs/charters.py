@@ -89,7 +89,7 @@ class ChartersDataset(VisionDataset):
                 from_work_folder: str = '',
                 build_items: bool = True,
                 task: str = '',
-                expansion_masks = True,
+                expansion_masks = False,
                 shape: str = 'polygon',
                 count: int = 0,
                 line_padding_style: str = 'median',
@@ -209,7 +209,8 @@ class ChartersDataset(VisionDataset):
             self._build_task( task, build_items=build_ok, from_line_tsv_file=from_line_tsv_file, 
                              subset=subset, subset_ratios=subset_ratios, 
                              work_folder=work_folder, count=count, 
-                             line_padding_style=line_padding_style,)
+                             line_padding_style=line_padding_style,
+                             expansion_masks=expansion_masks)
 
             if self.data and not from_line_tsv_file:
                 # Generate a TSV file with one entry per img/transcription pair
@@ -239,6 +240,7 @@ class ChartersDataset(VisionDataset):
                    work_folder: str='', 
                    crop=False,
                    line_padding_style='median',
+                   expansion_masks=False,
                    )->None:
         """From the read-only, uncompressed archive files, build the image/GT files required for the task at hand:
 
@@ -269,6 +271,7 @@ class ChartersDataset(VisionDataset):
             line_padding_style (str): When extracting line bounding boxes for an HTR task,
                 padding to be used around the polygon: 'median' (default) pads with the
                 median value of the polygon; 'noise' pads with random noise.
+            expansion_masks (List[Tuple[int,int]]): for HTR, masks for CER computation.
 
         Returns:
             None
@@ -288,7 +291,7 @@ class ChartersDataset(VisionDataset):
                 if tsv_path.exists():
                     self.work_folder_path = tsv_path.parent
                     # paths are assumed to be absolute
-                    self.data = self.load_from_tsv( tsv_path )
+                    self.data = self.load_from_tsv( tsv_path, expansion_masks )
                     logger.debug("data={}".format( self.data[:6]))
                     logger.debug("height: {} type={}".format( self.data[0]['height'], type(self.data[0]['height'])))
                     #logger.debug(self.data[0]['polygon_mask'])
@@ -312,7 +315,8 @@ class ChartersDataset(VisionDataset):
                 if build_items:
                     samples = self._extract_lines( self.raw_data_folder_path, self.work_folder_path, 
                                                     count=count, shape=self.shape,
-                                                    padding_func=self.bbox_noise_pad if line_padding_style=='noise' else self.bbox_median_pad)
+                                                    padding_func=self.bbox_noise_pad if line_padding_style=='noise' else self.bbox_median_pad,
+                                                    expansion_masks=expansion_masks,)
                 else:
                     logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
                     samples = self.load_line_items_from_dir( self.work_folder_path )
@@ -532,7 +536,7 @@ class ChartersDataset(VisionDataset):
                                             
 
     @staticmethod
-    def load_from_tsv(file_path: Path) -> List[dict]:
+    def load_from_tsv(file_path: Path, expansion_masks=False) -> List[dict]:
         """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
 
             <img file path> <transcription text> <height> <width> [<polygon points>]
@@ -582,7 +586,7 @@ class ChartersDataset(VisionDataset):
                         'height': int(height), 'width': int(width) }
                 if has_mask:
                     spl['polygon_mask']=work_folder_path.joinpath(fields[4])
-                if expansion_masks_match is not None:
+                if expansion_masks and expansion_masks_match is not None:
                     spl['expansion_masks']=eval( expansion_masks_match.group(2))
                 samples.append( spl )
                                

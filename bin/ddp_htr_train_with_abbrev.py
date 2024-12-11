@@ -68,6 +68,18 @@ def duration_estimate( iterations_past, iterations_total, current_duration ):
      '{} h '.format( time_left.tm_hour ) if time_left.tm_hour > 0 else '',
      '{} mn'.format( time_left.tm_min ) ])
 
+def collate_with_expansion_masks( data_list ):
+    """
+    Without a custom collate, the default collation function would try to stack the lists of masks.
+    """
+    batch_dict = {}
+    for k in ('img','mask'):
+        batch_dict[k] = torch.stack([ sample[k] for sample in data_list ], 0)
+    for k in ('height', 'width'):
+        batch_dict[k] = torch.tensor( [ sample[k] for sample in data_list])
+    for k in ('transcription', 'expansion_masks','id'):
+        batch_dict[k] = [ sample[k] for sample in data_list ]
+    return batch_dict
 
 if __name__ == "__main__":
 
@@ -100,21 +112,21 @@ if __name__ == "__main__":
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
     ds_train = ChartersDataset( task='htr', shape='polygons',
-        from_line_tsv_file=args.dataset_path_train,
+        from_line_tsv_file=args.dataset_path_train, expansion_masks=True,
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
         target_transform=filter_transcription,)
 
     logger.debug( str(ds_train) )
 
     ds_val = ChartersDataset( task='htr', shape='polygons',
-        from_line_tsv_file=args.dataset_path_validate,
+        from_line_tsv_file=args.dataset_path_validate, expansion_masks=True,
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
         target_transform=filter_transcription,)
 
     logger.debug( str(ds_val) )
 
-    train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
-    eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
+    train_loader = DataLoader( ds_train, batch_size=args.batch_size, collate_fn=collate_with_expansion_masks, shuffle=True) 
+    eval_loader = DataLoader( ds_val, batch_size=args.batch_size, collate_fn=collate_with_expansion_masks)
 
     # ------------ Training features ----------
 
@@ -160,12 +172,12 @@ if __name__ == "__main__":
 
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
-            img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
+            img, lengths, transcriptions, expansion_masks = ( batch[k] for k in ('img', 'width', 'transcription', 'expansion_masks') )
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
 
-            batch_cer, batch_wer, batch_mer, _ = metrics.cer_wer_ler_with_masks( predictions, transcriptions )
+            batch_cer, batch_wer, batch_mer, _ = metrics.cer_wer_ler_with_masks( predictions, transcriptions, expansion_masks )
             cer += batch_cer
             wer += batch_wer
             mer += batch_mer
@@ -258,7 +270,7 @@ if __name__ == "__main__":
             writer.add_scalar("WER/validate", last_wer.value, epoch)
             writer.add_scalar("MER/validate", last_mer.value, epoch)
                 
-            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={1.3f}. Estimated time until completion: {}'.format( 
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={:1.3f}. Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
                     last_cer.value, last_wer.value, last_mer.value,
