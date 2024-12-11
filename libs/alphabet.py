@@ -341,7 +341,7 @@ class Alphabet:
         Returns:
                str: a string
         """
-        return re.sub( r'\s+', ' ', mesg.strip())
+        return re.sub( r'\s+', ' ', mesg)
 
 
     @classmethod
