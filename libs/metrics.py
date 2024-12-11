@@ -22,7 +22,7 @@ def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separat
         raise ValueError("Input lists must have the same lengths!")
     #if type(predicted_mesg[0][0]) != type(word_separator):
     #    raise ValueError('Mismatch between sequence type ({}) and separator type ({})'.format( type(predicted_mesg[0]), type(word_separator)))
-    char_errors = [ Levenshtein.distance(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
+    char_errors = [ edit_dist(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
     cer = sum(char_errors) / len(target_mesg)
     line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
 
@@ -35,10 +35,51 @@ def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separat
         make_hashable = lambda x: tuple(x) if type(x) is list else x 
         enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
         enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
-        wer += Levenshtein.distance( enc_pred, enc_target ) / len( enc_target)
+        wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
     wer /= len(pairs)
 
     return (cer, wer, line_error)
+
+def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], masks: List[List[Tuple[int,int]]]=[], word_separator: Union[str,int]=' ') -> Tuple[float, float]:
+    """ Compute CER, WER, and LER for a batch.
+
+    The sequences to be compared can be either plain strings, or encoded (i.e. integer-labeled)
+    sequences.
+
+    Args:
+        predicted_mesg (List[str]): list of predicted strings.
+        target_mesg (List[str]): list of target strings.
+        masks (List[List[Tuple[int,int]]]): a list of masks for each message, i.e. array of 
+            pairs (<offset>,<length>)
+        word_separator (Union[str,int]): value of the separator (default: ' ')
+
+    Returns:
+        Tuple[float, float]: a 4-tuple with CER, WER, ratio (mask-bound errors)/errors, and LER (line error rate).
+    """
+    if len(predicted_mesg) != len(target_mesg):
+        raise ValueError("Input lists must have the same lengths!")
+
+    char_errors = [ edit_dist(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
+    cer = sum(char_errors) / len(target_mesg)
+    line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
+
+    char_errors_with_masks = [ edit_dist_with_mask(pred, target)/len(target) for (pred, target, mask) in zip (predicted_mesg, target_mesg, masks ) ]
+    # difference = those errors that are due to masked parts
+    mask_error_ratio = (char_errors - char_errors_with_masks)/char_errors
+
+    # WER
+    pred_split, target_split = [ [ split_generic(seq, word_separator) for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
+    pairs = list(zip( pred_split, target_split ))
+
+    wer = 0.0
+    for p in pairs:
+        make_hashable = lambda x: tuple(x) if type(x) is list else x 
+        enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
+        enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
+        wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
+    wer /= len(pairs)
+
+    return (cer, wer, mask_error_ratio, line_error)
 
 
 def split_generic( seq: Union[str,list], sep: Union[str,int] ) -> List[list]:
@@ -94,6 +135,9 @@ def edit_dist( x, y ):
         int: the Levenshtein edit distance, where each insertion, deletion and substitution 
             contributes for 1 to the distance.
     """
+    if len(x)==0 or len(y)==0:
+        return abs(len(x)-len(y))
+
     memo = [ [-1]*(len(y)+1) for r in range(len(x)+1) ]
     def dist_rec(i, j):
         if memo[i][j]>0:
@@ -146,9 +190,20 @@ def edit_dist_with_mask(x, y, masks=[]):
                                              ('La route tourne', 'Le roi court', 7),
                                              ('Le roi court', 'La route tourne', 7),
                                          ])
-def test_edit_dist(x, y, distance):
+def test_edit_dist_strings(x, y, distance):
     assert edit_dist(x, y) == distance
+    assert edit_dist(x, y) == Levenshtein.distance( x, y )
 
+@pytest.mark.parametrize("x, y, distance", [ ('', '', 0),
+                                             ('La route tourne', '', 15),
+                                             ('', 'Le roi court', 12),
+                                             ('La route tourne', 'Le roi court', 7),
+                                             ('Le roi court', 'La route tourne', 7),
+                                         ])
+def test_edit_dist_codes(x, y, distance):
+    x_codes, y_codes = [ord(c) for c in x ], [ ord(c) for c in y ]
+    assert edit_dist( x_codes, y_codes ) == distance
+    assert edit_dist(x, y) == Levenshtein.distance( x_codes, y_codes )
 
 @pytest.mark.parametrize("x, y, mask, distance", [ ('', '', [], 0),
                                                    ('La route tourne', '', [], 15),
