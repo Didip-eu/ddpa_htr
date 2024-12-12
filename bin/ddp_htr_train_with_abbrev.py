@@ -135,15 +135,10 @@ if __name__ == "__main__":
     
     writer = SummaryWriter()
     
-    class Metric(NamedTuple):
-        value: float 
-        epoch: int 
-        
-        def __lt__(self, other):
-            return self.value <= other.value
-        
-    best_cer, best_wer, best_mer = Metric(1.0, 0), Metric(1.0, 0), Metric(1.0, 0)
-    last_cer, last_wer, last_mer = Metric(1.0, 0), Metric(1.0, 0), Metric(1.0, 0)
+    
+    best_cer, best_wer, best_mer, best_cer_epoch = 1.0, 1.0, 1.0, -1
+    if model.validation_epochs:
+        best_cer, best_wer, best_mer, best_cer_epoch = [ model.validation_epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_mer', 'best_cer_epoch') ]
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
@@ -173,6 +168,7 @@ if __name__ == "__main__":
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
             img, lengths, transcriptions, expansion_masks = ( batch[k] for k in ('img', 'width', 'transcription', 'expansion_masks') )
+            logger.info(expansion_masks)
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
@@ -254,28 +250,32 @@ if __name__ == "__main__":
 
             cer, wer, mer = validate()
 
-            last_cer, last_wer, last_mer = Metric( cer, epoch ), Metric( wer, epoch ), Metric( mer, epoch )
-            if last_cer <= best_cer:
-                best_cer = last_cer
-                best_mer = last_mer # only make sense wr/ CER under consideration
+            if cer <= best_cer:
+                best_cer, best_cer_epoch = cer, epoch
+
+                best_mer = mer # only make sense wr/ CER under consideration
                 model.save( args.resume_fname + '.best' )
                 # for easy check on the last best epoch
-                symlink_path = Path( args.resume_fname + f'.best.epoch-{epoch}' )
-                symlink_path.unlink( missing_ok=True )
-                symlink_path.symlink_to( args.resume_fname + '.best' )
-            if last_wer <= best_wer:
-                best_wer = last_wer
+                #symlink_path = Path( args.resume_fname + f'.best.epoch-{epoch}' )
+                #symlink_path.unlink( missing_ok=True )
+                #symlink_path.symlink_to( args.resume_fname + '.best' )
+            if wer <= best_wer:
+                best_wer = wer
 
-            writer.add_scalar("CER/validate", last_cer.value, epoch)
-            writer.add_scalar("WER/validate", last_wer.value, epoch)
-            writer.add_scalar("MER/validate", last_mer.value, epoch)
+            model.validation_epochs.append({'cer': cer, 'best_cer': best_cer, 'best_cer_epoch': best_cer_epoch,
+                                            'wer': wer, 'best_wer': best_wer, 
+                                            'last_mer': mer, 'best_mer': best_mer})
+
+            writer.add_scalar("CER/validate", cer, epoch)
+            writer.add_scalar("WER/validate", wer, epoch)
+            writer.add_scalar("MER/validate", mer, epoch)
                 
-            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={:1.3f}. Estimated time until completion: {}'.format( 
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={:1.6f}. Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
-                    last_cer.value, last_wer.value, last_mer.value,
+                    cer, wer, mer,
                     duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
-            logger.info('Best epoch={} with CER={} (with MER={})'.format( best_cer.epoch, best_cer.value, best_mer.value))
+            logger.info('Best epoch={} with CER={} (with MER={})'.format( best_cer_epoch, best_cer, best_mer))
 
             scheduler.step()
 
