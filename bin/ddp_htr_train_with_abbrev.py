@@ -49,7 +49,7 @@ p = {
     "max_epoch": 250,
     "dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
-    #"ignored_chars": [ cc.subscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    #"ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "ignored_chars": [[], "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
