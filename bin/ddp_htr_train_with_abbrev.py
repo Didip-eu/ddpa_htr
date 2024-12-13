@@ -136,9 +136,9 @@ if __name__ == "__main__":
     writer = SummaryWriter()
     
     
-    best_cer, best_wer, best_mer, best_cer_epoch = 1.0, 1.0, 1.0, -1
+    best_cer, best_wer, best_mer, best_mec, best_cer_epoch = 1.0, 1.0, 1.0, 0.0, -1
     if model.validation_epochs:
-        best_cer, best_wer, best_mer, best_cer_epoch = [ model.validation_epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_mer', 'best_cer_epoch') ]
+        best_cer, best_wer, best_mer, best_mec, best_cer_epoch = [ model.validation_epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_mer', 'best_mec' 'best_cer_epoch') ]
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
@@ -163,25 +163,27 @@ if __name__ == "__main__":
         batches = iter( eval_loader )
         cer = 0.0
         wer = 0.0
-        mer = 0.0 # mask error ratio = proportion of errors due to masked part (i.e. expanded abbreviations)
+        mer = 0.0 # cer that does not consider masked parts.
+        mec = 0.0 # contribution of the masked part to the character errors.
 
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
             img, lengths, transcriptions, expansion_masks = ( batch[k] for k in ('img', 'width', 'transcription', 'expansion_masks') )
-            logger.info(expansion_masks)
+            
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             predictions = model.inference_task( img, lengths, split_output=args.auxhead )
 
-            batch_cer, batch_wer, batch_mer, _ = metrics.cer_wer_ler_with_masks( predictions, transcriptions, expansion_masks )
+            batch_cer, batch_wer, _, batch_mer, batch_mec = metrics.cer_wer_ler_with_masks( predictions, transcriptions, expansion_masks )
             cer += batch_cer
             wer += batch_wer
             mer += batch_mer
+            mec += batch_mec
 
-        mean_cer, mean_wer, mean_mer = cer/len(batches), wer/len(batches), mer/len(batches)
+        mean_cer, mean_wer, mean_mer, mean_mec = cer/len(batches), wer/len(batches), mer/len(batches), mec/len(batches)
 
         model.net.train()
-        return (mean_cer, mean_wer, mean_mer)
+        return (mean_cer, mean_wer, mean_mer, mean_mec)
 
     def train_epoch(epoch ):
         """ Training step.
@@ -248,10 +250,10 @@ if __name__ == "__main__":
             if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
                 model.save( args.resume_fname )
 
-            cer, wer, mer = validate()
+            cer, wer, mer, mec = validate()
 
             if cer <= best_cer:
-                best_cer, best_cer_epoch = cer, epoch
+                best_cer, best_cer_epoch, best_mer, best_mec = cer, epoch, mer, mec
 
                 best_mer = mer # only make sense wr/ CER under consideration
                 model.save( args.resume_fname + '.best' )
@@ -264,24 +266,24 @@ if __name__ == "__main__":
 
             model.validation_epochs.append({'cer': cer, 'best_cer': best_cer, 'best_cer_epoch': best_cer_epoch,
                                             'wer': wer, 'best_wer': best_wer, 
-                                            'last_mer': mer, 'best_mer': best_mer})
+                                            'mer': mer, 'best_mer': best_mer, 'mec': mec, 'best_mec': best_mec})
 
             writer.add_scalar("CER/validate", cer, epoch)
             writer.add_scalar("WER/validate", wer, epoch)
             writer.add_scalar("MER/validate", mer, epoch)
                 
-            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={:1.6f}. Estimated time until completion: {}'.format( 
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}, MER={:1.3f} (contribution: {:1.3f}). Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
-                    cer, wer, mer,
+                    cer, wer, mer, mec,
                     duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
-            logger.info('Best epoch={} with CER={} (with MER={})'.format( best_cer_epoch, best_cer, best_mer))
+            logger.info('Best epoch={} with CER={} (with MER={} (contribution: {:1.3f})'.format( best_cer_epoch, best_cer, best_mer, best_mec ))
 
             scheduler.step()
 
     elif args.mode == 'validate':
         cer, wer, mer = validate()
-        logger.info('CER={:1.3f}, WER={:1.3f}, MER={:1.3f}'.format( cer, wer, mer ))
+        logger.info('CER={:1.3f}, WER={:1.3f}, MER={:1.3f} (contribution: {:1.3f})'.format( cer, wer, mer, mec ))
 
     elif args.mode == 'test':
         pass

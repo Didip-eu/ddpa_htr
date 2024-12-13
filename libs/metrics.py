@@ -22,23 +22,23 @@ def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separat
         raise ValueError("Input lists must have the same lengths!")
     #if type(predicted_mesg[0][0]) != type(word_separator):
     #    raise ValueError('Mismatch between sequence type ({}) and separator type ({})'.format( type(predicted_mesg[0]), type(word_separator)))
-    char_errors = [ edit_dist(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
-    cer = sum(char_errors) / len(target_mesg)
-    line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
+    batch_cers = [ edit_dist(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
+    batch_cer = sum(batch_cers) / len(target_mesg)
+    line_error = len( [ err for err in batch_cers if err > 0 ] ) / len(target_mesg)
 
     # WER
     pred_split, target_split = [ [ split_generic(seq, word_separator) for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
     pairs = list(zip( pred_split, target_split ))
 
-    wer = 0.0
+    batch_wer = 0.0
     for p in pairs:
         make_hashable = lambda x: tuple(x) if type(x) is list else x 
         enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
         enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
-        wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
-    wer /= len(pairs)
+        batch_wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
+    batch_wer /= len(pairs)
 
-    return (cer, wer, line_error)
+    return (batch_cer, batch_wer, line_error)
 
 def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], masks: List[List[Tuple[int,int]]]=[], word_separator: Union[str,int]=' ') -> Tuple[float, float]:
     """ Compute CER, WER, and LER for a batch.
@@ -54,32 +54,40 @@ def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], m
         word_separator (Union[str,int]): value of the separator (default: ' ')
 
     Returns:
-        Tuple[float, float]: a 4-tuple with CER, WER, ratio (mask-bound errors)/errors, and LER (line error rate).
+        Tuple[float, float]: a 4-tuple with 
+            + CER
+            + WER
+            + LER (line error rate)
+            + MER (CER, not considering masked bits)
+            + contribution of masked bits to the error rate
     """
     if len(predicted_mesg) != len(target_mesg):
         raise ValueError("Input lists must have the same lengths!")
 
-    char_errors = [ edit_dist(pred, target)/len(target) for (pred, target) in zip (predicted_mesg, target_mesg ) ]
-    cer = sum(char_errors) / len(target_mesg)
-    line_error = len( [ err for err in char_errors if err > 0 ] ) / len(char_errors)
+    batch_char_error_counts = [ edit_dist(pred, target) for (pred, target) in zip (predicted_mesg, target_mesg ) ] 
+    batch_cers = [ bcec/len(target) for (bcec, target) in zip (batch_char_error_counts, target_mesg ) ]
+    batch_cer = sum(batch_cers) / len(target_mesg)
+    line_error = len( [ err for err in batch_cers if err > 0 ] ) / len(target_mesg)
 
-    char_errors_with_masks = [ edit_dist_with_mask(pred, target)/len(target) for (pred, target, mask) in zip (predicted_mesg, target_mesg, masks ) ]
+    masked_char_error_counts = [ edit_dist_with_mask(pred, target, mask) for (pred, target, mask) in zip (predicted_mesg, target_mesg, masks ) ]
+    masked_cers = [ mcec/len(target) for (mcec,target) in zip (masked_char_error_counts, target_mesg) ]
+    masked_cer = sum(masked_cers) / len(target_mesg)
     # difference = those errors that are due to masked parts
-    mer = (sum(char_errors) - sum(char_errors_with_masks))/sum(char_errors)
+    masked_contribution = (sum(batch_char_error_counts) - sum(masked_char_error_counts))/sum(batch_char_error_counts)
 
     # WER
     pred_split, target_split = [ [ split_generic(seq, word_separator) for seq in mesg ] for mesg in (predicted_mesg, target_mesg) ] 
     pairs = list(zip( pred_split, target_split ))
 
-    wer = 0.0
+    batch_wer = 0.0
     for p in pairs:
         make_hashable = lambda x: tuple(x) if type(x) is list else x 
         enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
         enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
-        wer += edit_dist( enc_pred, enc_target ) / len( enc_target)
-    wer /= len(pairs)
+        batch_wer += edit_dist( enc_pred, enc_target ) / len( enc_target)
+    batch_wer /= len(pairs)
 
-    return (cer, wer, mer, line_error)
+    return (batch_cer, batch_wer, line_error, masked_cer, masked_contribution)
 
 
 def split_generic( seq: Union[str,list], sep: Union[str,int] ) -> List[list]:
