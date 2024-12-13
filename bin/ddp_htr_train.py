@@ -122,15 +122,9 @@ if __name__ == "__main__":
     
     writer = SummaryWriter()
     
-    class Metric(NamedTuple):
-        value: float 
-        epoch: int 
-        
-        def __lt__(self, other):
-            return self.value <= other.value
-        
-    best_cer, best_wer = Metric(1.0, 0), Metric(1.0, 0)
-    last_cer, last_wer = Metric(1.0, 0), Metric(1.0, 0)
+    best_cer, best_wer, best_cer_epoch = 1.0, 1.0, -1
+    if model.validation_epochs:
+        best_cer, best_wer, best_cer_epoch = [ model.validation_epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_cer_epoch') ]
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
@@ -239,26 +233,23 @@ if __name__ == "__main__":
 
             cer, wer = validate()
 
-            last_cer, last_wer = Metric( cer, epoch ), Metric( wer, epoch )
-            if last_cer <= best_cer:
-                best_cer = last_cer
+            if cer <= best_cer:
+                best_cer, best_cer_epoch = cer, epoch
                 model.save( args.resume_fname + '.best' )
-                # for easy check on the last best epoch
-                symlink_path = Path( args.resume_fname + f'.best.epoch-{epoch}' )
-                symlink_path.unlink( missing_ok=True )
-                symlink_path.symlink_to( args.resume_fname + '.best' )
-            if last_wer <= best_wer:
-                best_wer = last_wer
+            if wer <= best_wer:
+                best_wer = wer
 
-            writer.add_scalar("CER/validate", last_cer.value, epoch)
-            writer.add_scalar("WER/validate", last_wer.value, epoch)
+            model.validation_epochs.append({'cer': cer, 'best_cer': best_cer, 'best_cer_epoch': best_cer_epoch,
+                                            'wer': wer, 'best_wer': best_wer,})
+            writer.add_scalar("CER/validate", cer, epoch)
+            writer.add_scalar("WER/validate", wer, epoch)
                 
             logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
-                    last_cer.value, last_wer.value, 
+                    cer, wer, 
                     duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
-            logger.info('Best epoch={} with CER={}.'.format( best_cer.epoch, best_cer.value))
+            logger.info('Best epoch={} with CER={}.'.format( best_cer_epoch, best_cer))
 
             scheduler.step()
 
