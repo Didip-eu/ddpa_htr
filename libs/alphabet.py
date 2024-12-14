@@ -164,7 +164,7 @@ class Alphabet:
         """
         if all:
             return [ s for (s,c) in self._utf_2_code.items() if c==code ]
-        return self._code_2_utf[ code ] if code in self._code_2_utf else self.default_symbol
+        return self._code_2_utf[ code ] if code in self._code_2_utf else self.unknown_symbol
 
     def get_code( self, symbol ) -> int:
         """Return the code on which the given symbol maps.
@@ -320,7 +320,7 @@ class Alphabet:
         keep_idx = np.logical_and( keep_idx, msg != self.null_value )
 
         return ''.join( self.get_symbol( c ) for c in msg[ keep_idx ] )
-        
+
 
     @staticmethod
     def normalize_spaces(mesg: str) -> str:

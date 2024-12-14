@@ -41,6 +41,7 @@ p = {
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
     "output_format": [ ("json", "stdout", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
+    #"output_data": [ ("pred", "logits"), "By default, the application yields character predictions; 'logits' have it returns logits instead."],
     "padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
@@ -57,6 +58,8 @@ class InferenceDataset( VisionDataset ):
             img_path (Union[Path,str]): charter image path
 
             segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
+            
+            transform (Callable): Image transform.
 
             padding_style (str): How to pad the bounding box around the polygons, when 
                 building the initial, raw dataset (before applying any transform):
@@ -142,8 +145,8 @@ if __name__ == "__main__":
             continue
         dataset = InferenceDataset( img_path, segmentation_file_path,
                                     transform = Compose([ ToTensor(),
-                                                          tsf.ResizeToHeight(128,3200),
-                                                          tsf.PadToWidth(3200),]),
+                                                          tsf.ResizeToHeight(128,2048),
+                                                          tsf.PadToWidth(2048),]),
                                     padding_style=args.padding_style)
         logger.info("Charter mini-dataset: " + str(dataset))
         
@@ -156,11 +159,12 @@ if __name__ == "__main__":
         predictions = []
 
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
-            predictions.append( {"line_id": line, "transcription": model.inference_task( sample['img'], sample['width'] ) } )
+            predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
+            predictions.append( {"line_id": line, "transcription": predicted_string, 'scores': line_scores} )
 
         # 3. Output
         if args.output_format == 'stdout':
-            print( '\n'.join( str(ld) for ld in predictions ) )
+            print( '\n'.join( str(p) for p in predictions) )
 
         elif args.output_format in ('json', 'tsv'):
 
@@ -168,7 +172,7 @@ if __name__ == "__main__":
             output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
             with open( output_file_name, 'w') as htr_outfile:
                 if args.output_format == 'json':
-                    json.dump( predictions, htr_outfile, indent=4)
+                    json.dump( str(predictions), htr_outfile, indent=4)
                 elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
                 logger.info(f"Output transcriptions in file {output_file_name}")

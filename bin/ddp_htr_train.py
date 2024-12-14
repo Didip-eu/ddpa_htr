@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
         b = next(iter(eval_loader))
    
-        msg_strings = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
+        msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings = b['transcription'][:cut]
         logger.info('epoch {}'.format( epoch ))
         for (img_name, gt_string, decoded_string ) in zip(  b['id'][:cut], b['transcription'][:cut], msg_strings ):
@@ -141,7 +141,6 @@ if __name__ == "__main__":
 
     def validate():
         """ Validation step: runs inference on the validation set.
-
         """
 
         model.net.eval()
@@ -155,7 +154,7 @@ if __name__ == "__main__":
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
-            predictions = model.inference_task( img, lengths, split_output=args.auxhead )
+            predictions, _ = model.inference_task( img, lengths, split_output=args.auxhead )
 
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer

@@ -5,12 +5,12 @@ import logging
 from typing import Union,Tuple,List
 import re
 import warnings
+import itertools
 
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 import numpy as np
-import Levenshtein
 
 # local
 from kraken.vgsl import TorchVGSLModel
@@ -167,7 +167,7 @@ class HTR_Model():
         return list(zip(labels, scores))
 
 
-    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False) -> List[str]:
+    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], List[List[Tuple[str,float]]]]:
         """ Make predictions on a batch of images.
 
         Args:
@@ -178,7 +178,9 @@ class HTR_Model():
             split_output (bool): if True, only keep first half of the output channels (for pseudo-parallel nets).
         
         Returns:
-             List[str]: a list of human-readable strings.
+             Tuple[List[str], List[List[Tuple[str,float]]]: A pair of lists: 
+                + the human-readable predicted strings, post CTC-decoding
+                + for diagnosis: messages as lists of pairs (<symbol>, <score>)
         """
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
@@ -187,13 +189,17 @@ class HTR_Model():
         # raw outputs
         outputs_ncw, output_widths = self.forward( img_nchw, widths_n, split_output=split_output ) 
 
-        # decoding labels and scores
-        # [[(l1,s1), ...],[(l1,s1), ... ], ...]
-        decoded_msgs = self.decode_batch( outputs_ncw, output_widths )
-        
-        # decoding symbols from labels
-        return [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_msgs ]
+        # decoding: lists of pairs (<integer label>, <score>): [[(l1,s1),(l2,s2), ...],[(l1,s1), ... ], ...]
+        decoded_labels_and_scores = self.decode_batch( outputs_ncw, output_widths )
 
+        # fast ctc-decoding
+        mesgs = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
+        # (char, max score) for each non-null char
+        reduced_label_lists = [ itertools.groupby( decoded, key=lambda x: x[0] ) for decoded in decoded_labels_and_scores ]
+        ctc_scores = [[(self.alphabet.get_symbol(k), max(s)[1]) for k,s in itertools.filterfalse(lambda x: x[0]==0, rll) ] for rll in reduced_label_lists ]
+        assert len(mesgs)==len(ctc_scores)
+
+        return (mesgs, ctc_scores)
 
 
     def save(self, file_name: str):
