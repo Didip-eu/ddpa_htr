@@ -159,8 +159,9 @@ if __name__ == "__main__":
         predictions = []
 
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
+            # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
-            predictions.append( {"line_id": line, "transcription": predicted_string, 'scores': line_scores} )
+            predictions.append( {"line_id": line, "transcription": predicted_string, 'scores': line_scores.tolist() } )
 
         # 3. Output
         if args.output_format == 'stdout':

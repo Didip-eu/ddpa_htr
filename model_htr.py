@@ -167,7 +167,7 @@ class HTR_Model():
         return list(zip(labels, scores))
 
 
-    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], List[List[Tuple[str,float]]]]:
+    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
         """ Make predictions on a batch of images.
 
         Args:
@@ -178,9 +178,10 @@ class HTR_Model():
             split_output (bool): if True, only keep first half of the output channels (for pseudo-parallel nets).
         
         Returns:
-             Tuple[List[str], List[List[Tuple[str,float]]]: A pair of lists: 
+             Tuple[List[str], np.ndarray]: A pair of lists: 
                 + the human-readable predicted strings, post CTC-decoding
-                + for diagnosis: messages as lists of pairs (<symbol>, <score>)
+                + for diagnosis: a (N,W) array where each row is a sequence of logits; each logit is the max. score
+                  for each, null-separated output subsequence.
         """
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
@@ -194,12 +195,17 @@ class HTR_Model():
 
         # fast ctc-decoding
         mesgs = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
-        # (char, max score) for each non-null char
-        reduced_label_lists = [ itertools.groupby( decoded, key=lambda x: x[0] ) for decoded in decoded_labels_and_scores ]
-        ctc_scores = [[(self.alphabet.get_symbol(k), max(s)[1]) for k,s in itertools.filterfalse(lambda x: x[0]==0, rll) ] for rll in reduced_label_lists ]
-        assert len(mesgs)==len(ctc_scores)
+        # max score for each non-null char
+        grouped_label_lists = [ itertools.groupby( lst, key=lambda x: x[0] ) for lst in decoded_labels_and_scores ]
+        filtered_label_lists = [ itertools.filterfalse(lambda x: x[0]==self.alphabet.null_value, lst ) for lst in grouped_label_lists ]
+        ctc_scores = [[ max(s)[1] for k,s in lst ] for lst in filtered_label_lists ]
 
-        return (mesgs, ctc_scores)
+        assert all( len(mesg)==len(ctc_score) for (mesg,ctc_score) in zip(mesgs, ctc_scores) )
+
+        max_width = max( len(msg) for msg in mesgs) 
+        ctc_scores_nw = np.stack([ np.pad( np.array( lst ), (0,max_width-len(lst))) for lst in ctc_scores ])
+
+        return (mesgs, ctc_scores_nw)
 
 
     def save(self, file_name: str):
