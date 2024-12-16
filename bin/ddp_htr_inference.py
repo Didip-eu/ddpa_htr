@@ -26,13 +26,14 @@ root = str( Path(__file__).parents[1] )
 sys.path.append( root ) 
 from model_htr import HTR_Model
 from libs import seglib, transforms as tsf
+from libs import list_utils as lu
 
 logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
 p = {
-    "appname": "ddpa_htr",
+    "appname": "ddpa_htr_inference",
     "model_path": "/tmp/model_monasterium-2024-10-28.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
     "img_paths": set([]),
     "charter_dirs": set(["./"]),
@@ -114,10 +115,13 @@ if __name__ == "__main__":
     for charter_dir in args.charter_dirs:
         charter_dir_path = Path( charter_dir )
         logger.debug(f"Charter Dir: {charter_dir}")
-        if charter_dir_path.is_dir() and charter_dir_path.joinpath("CH_cei.xml").exists():
+        if charter_dir_path.is_dir() and charter_dir_path.joinpath("CH.cei.xml").exists():
             charter_images = [str(f) for f in charter_dir_path.glob("*.img.*")]
             print(charter_images)
             all_img_paths += charter_images
+        else:
+            logger.error("Skipping directory {}: check that it is an existing charter directory and that it contains a {} file.".format( charter_dir_path, "CH.cei.xml"))
+
         args.img_paths = list(all_img_paths)
 
     logger.debug(args)
@@ -161,7 +165,8 @@ if __name__ == "__main__":
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
-            predictions.append( {"line_id": line, "transcription": predicted_string, 'scores': line_scores.tolist() } )
+            # since batch is 1, flattening batch values
+            predictions.append( {"line_id": line, "transcription": predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) } )
 
         # 3. Output
         if args.output_format == 'stdout':

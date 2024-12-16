@@ -13,13 +13,13 @@ def predictions_over_scores( strings: List[str], scores: List[List[float]]):
 
     Args:
         strings (List[str]): list of predicted strings.
-        scores (List[float]): lists of scores (all lists have the same length as the string of max. length).
+        scores (List[float]): lists of scores 
     """
 
     fig, ax = plt.subplots()
 
     max_width = max( len(l) for l in strings)
-    im = ax.imshow( np.array( scores ))
+    im = ax.imshow( np.stack([ np.pad( np.array(sl), (0,max_width-len(sl)) ) for sl in scores] ))
     data = im.get_array()
     ax.set_yticks( np.arange(len(strings)) )
     threshold = im.norm( data.max())/2.
