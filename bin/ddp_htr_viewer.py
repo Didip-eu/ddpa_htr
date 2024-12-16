@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-HTR inference on page, with segmentation provided.
+HTR viewer on page, with HTR results provided.
 """
 
 # stdlib
