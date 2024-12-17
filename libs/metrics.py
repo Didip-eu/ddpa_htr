@@ -227,7 +227,7 @@ def align(x, y):
         elif memo[i][j-1] >= memo[i][j] and memo[i][j-1] >= memo[i-1][j]:
             j -= 1
     
-    alignments = tuple(zip(*reversed(pairs)))
+    alignments = tuple(zip(*reversed(pairs))) # unzipping :)
  
     return alignments
 

@@ -113,3 +113,14 @@ def groups_from_groups(list_of_lists: List[Union[list,str]], atoms: set = None, 
 
     return [ l[0] if len(l)==1 else l for l in list_of_lists_new ] + list(unknown_atoms)
 
+def unzip(seq: Union[List[tuple],Tuple[tuple]] )->List[tuple]:
+    """ Unzip a list of sequences. Eg.
+
+    ```
+    >>> unzip( [(1, 3, 5), (2, 4, 6))] )
+    [(1, 2), (3, 4), (5, 6)]
+
+    ```
+    """
+    return list(zip(*seq))
+

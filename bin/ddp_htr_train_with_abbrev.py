@@ -32,7 +32,7 @@ sys.path.append( str(root) )
 from libs import metrics, transforms as tsf, list_utils as lu
 from model_htr import HTR_Model
 from kraken import vgsl
-from libs.charters import ChartersDataset
+from libs.charters_htr import ChartersDataset
 import character_classes as cc
 
 # local logger
