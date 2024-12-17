@@ -93,12 +93,12 @@ def cer_wer_ler_with_masks( predicted_mesg: List[str], target_mesg: List[str], m
 def split_generic( seq: Union[str,list], sep: Union[str,int] ) -> List[list]:
     """ Split a sequence into subsequences, along a separator value.
 
-    :param seq: a list of strings or integers
-    :type seq: Union[str,list]
-    :param sep: a separator value.
-    :type sep: Union[str, int]
+    Args:
+        seq (Union[str,list]): a list of strings or integers
+        sep (Union[str,int): a separator value.
 
-    :returns: a list of subsequences.
+    Returns:
+        List[list]: a list of subsequences.
     """
 #    def split_rec( sq, sp, accum ):
 #        """ Split a sequence, functional style,
@@ -141,7 +141,7 @@ def edit_dist( x, y ):
 
     Returns:
         int: the Levenshtein edit distance, where each insertion, deletion and substitution 
-            contributes for 1 to the distance.
+            contributes 1 to the distance.
     """
     if len(x)==0 or len(y)==0:
         return abs(len(x)-len(y))
@@ -191,6 +191,56 @@ def edit_dist_with_mask(x, y, masks=[]):
     return memo[-1][-1]
 
 
+def align(x, y):
+    """ Compute a LCS-based alignment between strings x and y.
+
+    Args:
+        x (str): start string
+        y (str): target string
+
+    Returns:
+        Tuple[list,list]: a pair of lists storing the aligned indices in x and y, respectively.
+    """
+    if not x or not y:
+        return ()
+    memo = [ [0]*(len(y)+1) for r in range(len(x)+1) ]
+    for i in range(len(x)+1):
+        memo[i][0]=0
+        for j in range(1,len(y)+1):
+            if i==0:
+                memo[0][j]=0
+            elif x[i-1]==y[j-1]:
+                memo[i][j] = memo[i-1][j-1]+1
+            else:
+                memo[i][j]=max( memo[i-1][j], memo[i][j-1]) 
+    
+    # ugly, but efficient
+    i,j=len(x), len(y)
+    pairs = []
+    while i>0 and j>0:
+        if x[i-1]==y[j-1]:
+            pairs.append((i-1, j-1))
+            i -= 1
+            j -= 1
+        elif memo[i-1][j] >= memo[i][j] and memo[i-1][j] >= memo[i][j-1]:
+            i -= 1
+        elif memo[i][j-1] >= memo[i][j] and memo[i][j-1] >= memo[i-1][j]:
+            j -= 1
+    
+    alignments = tuple(zip(*reversed(pairs)))
+ 
+    return alignments
+
+     
+
+@pytest.mark.parametrize("x, y, alignment", [ ('', '', ()),
+                                             ('La route tourne', '', ()),
+                                             ('', 'Le roi court', ()),
+                                             ('La route tourne', 'Le roi court', ((0,2,3,4,8,10,11,12),(0,2,3,4,6,8,9,10))),
+                                             ('Le roi court', 'La route tourne', ((0,2,3,4,6,8,9,10), (0,2,3,4,8,10,11,12))),
+                                         ])
+def test_alignment(x, y, alignment):
+    assert align(x, y) == alignment
 
 @pytest.mark.parametrize("x, y, distance", [ ('', '', 0),
                                              ('La route tourne', '', 15),
@@ -225,6 +275,5 @@ def test_edit_dist_codes(x, y, distance):
                                                    ('La route tourne', 'Le roi court', [(0,2),(3,5),(8,3)], 1), ])
 def test_edit_dist_with_mask(x, y, mask, distance):
     assert edit_dist_with_mask(x, y, mask) == distance
-
 
 

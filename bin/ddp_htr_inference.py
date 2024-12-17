@@ -146,6 +146,7 @@ if __name__ == "__main__":
 
         dataset = None
         if not segmentation_file_path.exists():
+            logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
             continue
         dataset = InferenceDataset( img_path, segmentation_file_path,
                                     transform = Compose([ ToTensor(),
