@@ -191,7 +191,50 @@ def edit_dist_with_mask(x, y, masks=[]):
     return memo[-1][-1]
 
 
-def align(x, y):
+def align_dist(x, y):
+    """ Compute an edit-distance-based alignment between strings x and y.
+
+    Args:
+        x (str): start string
+        y (str): target string
+
+    Returns:
+        Tuple[list,list]: a pair of lists storing the aligned indices in x and y, respectively.
+    """
+    if not x or not y:
+        return ()
+    memo = [ [0]*(len(y)+1) for r in range(len(x)+1) ]
+    for i in range(len(x)+1):
+        memo[i][0]=i                # if Y_j=ϵ, distance = i
+        for j in range(1,len(y)+1):
+            if i==0:
+                memo[0][j]=j        # X_i=ϵ, dist = j
+            elif x[i-1]==y[j-1]:    
+                memo[i][j] = memo[i-1][j-1]
+            else:
+                memo[i][j]=min( memo[i-1][j-1], memo[i-1][j], memo[i][j-1]) + 1
+    
+    # ugly, but efficient
+    i,j=len(x), len(y)
+    pairs = []
+    while i>0 and j>0:
+        if x[i-1]==y[j-1]:
+            pairs.append((i-1, j-1))
+            i -= 1
+            j -= 1
+        elif memo[i-1][j-1] <= memo[i-1][j] and memo[i-1][j-1] <= memo[i][j-1]:
+            i -= 1
+            j -= 1
+        elif memo[i-1][j] <= memo[i][j] and memo[i-1][j] <= memo[i][j-1]:
+            i -= 1
+        elif memo[i][j-1] <= memo[i][j] and memo[i][j-1] <= memo[i-1][j]:
+            j -= 1
+    
+    alignments = tuple(zip(*reversed(pairs))) # unzipping :)
+ 
+    return alignments
+
+def align_lcs(x, y):
     """ Compute a LCS-based alignment between strings x and y.
 
     Args:
@@ -231,7 +274,13 @@ def align(x, y):
  
     return alignments
 
-     
+
+
+
+
+
+
+
 
 @pytest.mark.parametrize("x, y, alignment", [ ('', '', ()),
                                              ('La route tourne', '', ()),
