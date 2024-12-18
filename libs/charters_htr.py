@@ -26,7 +26,6 @@ import torchvision
 from torchvision.datasets import VisionDataset
 import torchvision.transforms as transforms
 
-from . import download_utils as du
 
 #from . import alphabet, character_classes.py
 
@@ -241,6 +240,7 @@ class ChartersDataset(VisionDataset):
         Raises:
             OSError: the base folder does not exist.
         """
+        from . import download_utils as du
         output_file_path = None
         print(fl_meta)
         # downloadable archive
@@ -280,7 +280,6 @@ class ChartersDataset(VisionDataset):
                    subset_ratios: Tuple[float,float,float]=(.7, 0.1, 0.2),
                    count: int=0, 
                    work_folder: str='', 
-                   crop=False,
                    line_padding_style='median',
                    expansion_masks=False,
                    )->None:
@@ -318,9 +317,6 @@ class ChartersDataset(VisionDataset):
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
         """
              
-        if crop:
-            self.logger.warning("Warning: the 'crop' [to WritingArea] option ignored for HTR dataset.")
-        
         # create from existing TSV files - passed directory that contains:
         # + image to GT mapping (TSV)
         if from_line_tsv_file != '':
@@ -351,7 +347,7 @@ class ChartersDataset(VisionDataset):
             # samples: all of them! (Splitting into subsets happens in an ulterior step.)
             if build_items:
                 samples = self._extract_lines( self.raw_data_folder_path, self.work_folder_path, 
-                                                count=count, shape=self.shape,
+                                                on_disk=build_items, count=count, shape=self.shape,
                                                 padding_func=self.bbox_noise_pad if line_padding_style=='noise' else self.bbox_median_pad,
                                                 expansion_masks=expansion_masks,)
             else:
@@ -467,7 +463,7 @@ class ChartersDataset(VisionDataset):
     def _extract_lines(self, raw_data_folder_path: Path,
                         work_folder_path: Path, 
                         shape: str='polygon',
-                        text_only=False,
+                        on_disk=False,
                         expansion_masks=True,
                         count=0,
                         padding_func=None) -> List[Dict[str, Union[Tensor,str,int]]]:
@@ -479,8 +475,9 @@ class ChartersDataset(VisionDataset):
             work_folder_path (Path): Line images are extracted in this subfolder (relative to the
                 caller's pwd).
             shape (str): Extract lines as polygons-within-boxes ('polygon': default) or as bboxes ('bbox').
-            text_only (bool): Store only the transcriptions (*.gt.txt files). (Default value = False)
-            expansion_masks (bool): retrieve offsets and lengths of the abbreviation expansions (if available)
+            on_disk (bool): If False (default), samples are only built in memory; otherwise line images 
+                and transcriptions are written into the work folder.
+            expansion_masks (bool): Retrieve offsets and lengths of the abbreviation expansions (if available)
             count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
             padding_func (Callable[[np.ndarray], np.ndarray]): For polygons, a function that
                 accepts a (C,H,W) Numpy array and returns the line BBox image, with padding
@@ -503,129 +500,123 @@ class ChartersDataset(VisionDataset):
         # filtering out Godzilla-sized images (a couple of them)
         warnings.simplefilter("error", Image.DecompressionBombWarning)
 
-        Path( work_folder_path ).mkdir(exist_ok=True, parents=True) # always create the subfolder if not already there
+        Path( work_folder_path ).mkdir(exist_ok=True, parents=True) 
 
         if not self.resume_task:
-            self._purge( work_folder_path ) # ensure there are no pre-existing line items in the target directory
+            self._purge( work_folder_path ) 
 
-        gt_lengths = []
-        img_sizes = []
         cnt = 0 # for testing purpose
-
-        samples = [] # each sample is a dictionary {'img': <img file path> , 'transcription': str,
-                     #                              'height': int, 'width': int}
+        samples = [] 
 
         for page in tqdm(self.pagexmls):
 
-            xml_id = Path( page ).stem
-            img_path = Path( raw_data_folder_path, f'{xml_id}.jpg')
-            logger.debug( img_path )
+            #img_path = Path( raw_data_folder_path, f'{xml_id}.jpg')
+            #logger.debug( img_path )
 
-            with open(page, 'r') as page_file:
+            line_samples = self.extract_lines_from_pagexml(page, shape=shape, 
+                        on_disk_folder=work_folder_path if on_disk else None, 
+                        resume_task=self.resume_task, expansion_masks=expansion_masks)
+            if line_samples:
+                samples.extend( line_samples )
+                cnt += 1
+                if count and cnt == count:
+                    break
+        return samples
 
-                page_tree = ET.parse( page_file )
+    @classmethod
+    def extract_lines_from_pagexml(cls, page: Union[str,Path], 
+            shape="polygon", on_disk_folder: Union[Path,str]=None, 
+            padding_func=None, resume_task=False, expansion_masks=False):
 
-                ns = { 'pc': "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"}
+        samples = []
+        xml_id = Path( page ).stem
+        if padding_func is None:
+            padding_func = cls.bbox_median_pad
 
-                page_root = page_tree.getroot()
+        with open(page, 'r') as page_file:
 
-                if not text_only:
+            page_tree = ET.parse( page_file )
+            ns = { 'pc': "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"}
+            page_root = page_tree.getroot()
+            page_elt = page_root.find('.//pc:Page', ns)
+            imageFilename = page_elt.get('imageFilename')
 
-                    try:
-                        page_image = Image.open( img_path, 'r')
-                    except Image.DecompressionBombWarning as dcb:
-                        logger.debug( f'{dcb}: ignoring page' )
-                        continue
+            img_path = Path(page).parent.joinpath( imageFilename )
 
-                for textline_elt in page_root.findall( './/pc:TextLine', ns ):
-                    if count and cnt == count:
-                        return samples
+            page_image = None
 
-                    textline = dict()
-                    textline['id']=textline_elt.get("id")
-                    transcription_element = textline_elt.find('./pc:TextEquiv', ns)
-                    if transcription_element is None:
-                        continue
-                    transcription_text_element = transcription_element.find('./pc:Unicode', ns)
-                    if transcription_text_element is None:
-                        continue
-             
-                    transcription = transcription_text_element.text
+            if on_disk_folder:
+                try:
+                    page_image = Image.open( img_path, 'r')
+                except Image.DecompressionBombWarning as dcb:
+                    logger.debug( f'{dcb}: ignoring page' )
+                    return None
+            
+            for textline_elt in page_root.findall( './/pc:TextLine', ns ):
 
-                    if not transcription or re.match(r'\s+$', transcription):
-                        continue
-                    transcription = transcription.strip().replace("\t",' ')
-                    textline['transcription'] = transcription
+                sample = dict()
+                textline_id=textline_elt.get("id")
+                transcription_element = textline_elt.find('./pc:TextEquiv', ns)
+                if transcription_element is None:
+                    continue
+                transcription_text_element = transcription_element.find('./pc:Unicode', ns)
+                if transcription_text_element is None:
+                    continue
+                transcription = transcription_text_element.text
+                if not transcription or re.match(r'\s+$', transcription):
+                    continue
+                transcription = transcription.replace("\t",' ')
+                sample['transcription'] = transcription
 
-                    if expansion_masks and 'custom' in textline_elt.keys():
-                        textline['expansion_masks'] = [ (int(o), int(l)) for (o,l) in re.findall(r'expansion *{ *offset:(\d+); *length:(\d+);', textline_elt.get('custom')) ]
+                if expansion_masks and 'custom' in textline_elt.keys():
+                    sample['expansion_masks'] = [ (int(o), int(l)) for (o,l) in re.findall(r'expansion *{ *offset:(\d+); *length:(\d+);', textline_elt.get('custom')) ]
 
-                    # skip lines that don't have a transcription
-                    if not textline['transcription']:
-                        continue
+                polygon_string=textline_elt.find('./pc:Coords', ns).get('points')
+                coordinates = [ tuple(map(int, pt.split(','))) for pt in polygon_string.split(' ') ]
+                textline_bbox = ImagePath.Path( coordinates ).getbbox()
+            
+                x_left, y_up, x_right, y_low = textline_bbox
+                sample['width'], sample['height'] = x_right-x_left, y_low-y_up
+            
+                img_path_prefix = on_disk_folder.joinpath( f"{xml_id}-{textline_id}" ) if on_disk_folder is not None else f"{xml_id}-{textline_id}"
+                sample['img'] = Path(img_path_prefix).with_suffix('.png')
 
-                    polygon_string=textline_elt.find('./pc:Coords', ns).get('points')
-                    coordinates = [ tuple(map(int, pt.split(','))) for pt in polygon_string.split(' ') ]
-                    textline['bbox'] = ImagePath.Path( coordinates ).getbbox()
-                    
-                    x_left, y_up, x_right, y_low = textline['bbox']
-                    textline['width'], textline['height'] = x_right-x_left, y_low-y_up
-                    
-                    img_path_prefix = work_folder_path.joinpath( f"{xml_id}-{textline['id']}" )
-                    textline['img_path'] = img_path_prefix.with_suffix('.png')
+                if on_disk_folder is not None:
+                    if not Path(on_disk_folder).is_dir():
+                        raise FileNotFoundError("Abort. Check that directory {} exists.")
 
-                    textline['polygon'] = None
+                    bbox_img = page_image.crop( textline_bbox )
+                    if shape=='bbox':
+                        if not (self.resume_task and sample['img'].exists()):
+                            bbox_img.save( sample['img'] )
+                    else:
+                        # Image -> (C,H,W) array
+                        img_chw = np.array( bbox_img ).transpose(2,0,1)
+                        # 2D Boolean polygon mask, from points
+                        leftx, topy = textline_bbox[:2]
+                        transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in coordinates ], dtype='int')[:,::-1]
 
-                    #logger.debug("_extract_lines():", samples[-1])
-                    if not text_only: 
-                        bbox_img = page_image.crop( textline['bbox'] )
-
-                        if shape=='bbox':
-                            if not (self.resume_task and textline['img_path'].exists()):
-                                bbox_img.save( textline['img_path'] )
-
-                        else:
-                            # Image -> (C,H,W) array
-                            img_chw = np.array( bbox_img ).transpose(2,0,1)
-                            # 2D Boolean polygon mask, from points
-                            leftx, topy = textline['bbox'][:2]
-                            transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in coordinates ], dtype='int')[:,::-1]
-                            textline['polygon']=transposed_coordinates.tolist()
-
-                            if not (self.resume_task and textline['img_path'].exists()):
-                                boolean_mask = ski.draw.polygon2mask( img_chw.shape[1:], transposed_coordinates )
-                                
-                                if shape=='polygon':
-                                    # Pad around the polygon
-                                    img_chw = padding_func( img_chw, boolean_mask )
-                                    Image.fromarray( img_chw.transpose(1,2,0) ).save( Path( textline['img_path'] ))
-                                elif shape=='mask':
-                                    textline['mask_path']=img_path_prefix.with_suffix('.mask.npy.gz')
-                                    bbox_img.save( textline['img_path'] )
-                                    with gzip.GzipFile(textline['mask_path'], 'w') as zf:
-                                        np.save( zf, boolean_mask ) 
-
-
-                    sample = {'img': textline['img_path'], 'transcription': textline['transcription'], \
-                               'height': textline['height'], 'width': textline['width'] }
-                    if 'expansion_masks' in textline:
-                        sample['expansion_masks'] = textline['expansion_masks']
-                    #logger.debug("_extract_lines(): sample=", sample)
-                    if 'mask_path' in textline:
-                        sample['polygon_mask'] = textline['mask_path'] #textline['polygon']
-                    samples.append( sample )
+                        if not (resume_task and sample['img'].exists()):
+                            boolean_mask = ski.draw.polygon2mask( img_chw.shape[1:], transposed_coordinates )
+                            if shape=='polygon':
+                                # Pad around the polygon
+                                img_chw = padding_func( img_chw, boolean_mask )
+                                Image.fromarray( img_chw.transpose(1,2,0) ).save( Path( sample['img'] ))
+                            elif shape=='mask':
+                                sample['polygon_mask']=img_path_prefix.with_suffix('.mask.npy.gz')
+                                bbox_img.save( sample['img'] )
+                                with gzip.GzipFile(sample['polygon_mask'], 'w') as zf:
+                                    np.save( zf, boolean_mask ) 
 
                     with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
-                        gt_file.write( textline['transcription'])
-                        if 'expansion_masks' in textline:
-                            gt_file.write( '<{}>'.format( textline['expansion_masks']))
-                        gt_lengths.append(len( textline['transcription']))
+                        gt_file.write( sample['transcription'])
+                        if 'expansion_masks' in sample:
+                            gt_file.write( '<{}>'.format( sample['expansion_masks']))
 
-                    cnt += 1
+                samples.append( sample )
 
         return samples
     
-
 
     @staticmethod
     def dump_data_to_tsv(samples: List[dict], file_path: str='', all_path_style=False) -> None:
