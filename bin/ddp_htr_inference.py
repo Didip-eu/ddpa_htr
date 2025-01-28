@@ -36,13 +36,14 @@ p = {
     "appname": "ddpa_htr_inference",
     "model_path": "/tmp/model_monasterium-2024-10-28.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
     "img_paths": set([]),
-    "charter_dirs": set(["./"]),
+    #"charter_dirs": set(["./"]),
+    "charter_dirs": set([]),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
     "segmentation_file_suffix": "lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
     "output_format": [ ("json", "stdout", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
-    #"output_data": [ ("pred", "logits"), "By default, the application yields character predictions; 'logits' have it returns logits instead."],
+    "output_data": [ ("pred", "logits", "all"), "By default, the application yields character predictions; 'logits' have it returns logits instead."],
     "padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
@@ -132,7 +133,8 @@ if __name__ == "__main__":
 
         # remove any dot-prefixed substring from the file name
         # (Path.suffix() only removes the last suffix)
-        stem = re.sub(r'\..+', '',  img_path.name )
+        #stem = re.sub(r'\..+', '',  img_path.name )
+        stem = img_path.name.replace('.img.jpg','')
 
         segmentation_dir = img_path.parent
 
@@ -143,6 +145,7 @@ if __name__ == "__main__":
                 raise FileNotFoundError(f"Provided segmentation directory {args.segmentation_dir} does not exists!")
 
         segmentation_file_path = segmentation_dir.joinpath(f'{stem}.{args.segmentation_file_suffix}')
+        print(segmentation_file_path)
 
         dataset = None
         if not segmentation_file_path.exists():
@@ -167,7 +170,12 @@ if __name__ == "__main__":
             # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
             # since batch is 1, flattening batch values
-            predictions.append( {"line_id": line, "transcription": predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) } )
+            line_dict = {"line_id": line}
+            if args.output_data == 'all' or args.output_data == 'pred':
+                line_dict['pred'] = predicted_string[0]
+            if args.output_data == 'all' or args.output_data == 'logits':
+                line_dict['scores'] = lu.flatten(line_scores.tolist())
+            predictions.append( line_dict )
 
         # 3. Output
         if args.output_format == 'stdout':
