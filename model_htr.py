@@ -218,7 +218,7 @@ class HTR_Model():
 
 
     @staticmethod
-    def resume( file_name: str, **kwargs):
+    def resume( file_name: str, reset_epochs=False, **kwargs):
         """ Resume a training task
 
         Args:
@@ -238,8 +238,10 @@ class HTR_Model():
         
             model = HTR_Model( **constructor_params )
             model.net.load_state_dict( state_dict )
-            model.train_epochs = train_epochs
-            model.validation_epochs = validation_epochs
+
+            if not reset_epochs:
+                model.train_epochs = train_epochs
+                model.validation_epochs = validation_epochs 
 
             # switch net to train/eval mode
             model.net.train( mode=train_mode )

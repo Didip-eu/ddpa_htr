@@ -55,6 +55,7 @@ p = {
     "validation_freq": 100,
     "save_freq": 1,
     "resume_fname": 'model_save.mlmodel',
+    "reset_epochs": False,
     "mode": ('train', 'validate', 'test'),
     "auxhead": [False, 'Combine output with CTC shortcut'],
 }
@@ -84,6 +85,7 @@ if __name__ == "__main__":
     model = HTR_Model.resume( args.resume_fname, 
                              #height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
+                             reset_epochs=args.reset_epochs,
                              add_output_layer=True ) 
 
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
