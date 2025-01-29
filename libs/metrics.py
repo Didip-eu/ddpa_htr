@@ -1,7 +1,6 @@
 from typing import List, Union, Tuple
 import itertools
 import pytest
-import Levenshtein
 
 
 def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separator: Union[str,int]=' ') -> Tuple[float, float]:
@@ -35,7 +34,7 @@ def cer_wer_ler( predicted_mesg: List[str], target_mesg: List[str], word_separat
         make_hashable = lambda x: tuple(x) if type(x) is list else x 
         enc = { make_hashable(w):v for (v,w) in enumerate( p[0] + p[1] ) } 
         enc_pred, enc_target = [ enc[ make_hashable(w)] for w in p[0] ], [enc[make_hashable(w)] for w in p[1] ]
-        batch_wer += edit_distance( enc_pred, enc_target ) / len( enc_target)
+        batch_wer += edit_dist( enc_pred, enc_target ) / len( enc_target)
     batch_wer /= len(pairs)
 
     return (batch_cer, batch_wer, line_error)
