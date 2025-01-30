@@ -49,7 +49,9 @@ p = {
     "max_epoch": 250,
     "dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
-    "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    "dataset_path_test": [str(root.joinpath('data','current_working_set', 'charters_ds_test.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    #"ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    "ignored_chars": [],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 100,
@@ -64,7 +66,7 @@ p = {
 def duration_estimate( iterations_past, iterations_total, current_duration ):
     time_left = time.gmtime((iterations_total - iterations_past) * current_duration)
     return ''.join([
-     '{} d '.format( time_left.tm_mday ) if time_left.tm_mday > 0 else '',
+     '{} d '.format( time_left.tm_mday ) if time_left.tm_mday > 1 else '',
      '{} h '.format( time_left.tm_hour ) if time_left.tm_hour > 0 else '',
      '{} mn'.format( time_left.tm_min ) ])
 
@@ -115,7 +117,7 @@ if __name__ == "__main__":
     logger.debug( str(ds_val) )
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
-    eval_loader = DataLoader( ds_val, batch_size=args.batch_size)
+    val_loader = DataLoader( ds_val, batch_size=args.batch_size)
 
     # ------------ Training features ----------
 
@@ -131,7 +133,7 @@ if __name__ == "__main__":
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
 
-        b = next(iter(eval_loader))
+        b = next(iter(val_loader))
    
         msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings = b['transcription'][:cut]
@@ -141,13 +143,13 @@ if __name__ == "__main__":
 
         model.net.train()
 
-    def validate():
-        """ Validation step: runs inference on the validation set.
+    def validate( data_loader ):
+        """ Test/validation step
         """
 
         model.net.eval()
         
-        batches = iter( eval_loader )
+        batches = iter( data_loader )
         cer = 0.0
         wer = 0.0
 
@@ -217,7 +219,8 @@ if __name__ == "__main__":
         writer.add_scalar("Loss/train", mean_loss, epoch)
         model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
-
+    
+    ########### TRAIN ################
     if args.mode == 'train':
     
         model.net.train()
@@ -232,7 +235,7 @@ if __name__ == "__main__":
             if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
                 model.save( args.resume_fname )
 
-            cer, wer = validate()
+            cer, wer = validate(val_loader)
 
             if cer <= best_cer:
                 best_cer, best_cer_epoch = cer, epoch
@@ -254,12 +257,21 @@ if __name__ == "__main__":
 
             scheduler.step()
 
+
+    ############# VALIDATE / TEST ############
     elif args.mode == 'validate':
-        cer, wer = validate()
+        cer, wer = validate(val_loader)
         logger.info('CER={:1.3f}, WER={:1.3f}'.format( cer, wer ))
 
     elif args.mode == 'test':
-        pass
+        
+        ds_test = ChartersDataset(shape='polygons',
+            from_line_tsv_file=args.dataset_path_test,
+            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+            target_transform=filter_transcription,)
+        test_loader = DataLoader( ds_test, batch_size=args.batch_size)
+        cer, wer = validate(test_loader)
+        logger.info('CER={:1.3f}, WER={:1.3f}'.format( cer, wer ))
 
 
     writer.flush()
