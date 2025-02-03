@@ -10,6 +10,8 @@ import re
 import os
 from pathlib import *
 from typing import *
+import inspect
+import functools
 
 # 3rd-party
 from tqdm import tqdm
@@ -26,6 +28,7 @@ import torchvision
 from torchvision.datasets import VisionDataset
 import torchvision.transforms as transforms
 
+from . import download_utils as du
 
 #from . import alphabet, character_classes.py
 
@@ -89,6 +92,8 @@ class ChartersDataset(VisionDataset):
                 build_items: bool = True,
                 expansion_masks = False,
                 shape: str = 'polygon',
+                channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
+                save_binary_mask: bool = False,
                 count: int = 0,
                 line_padding_style: str = 'median',
                 resume_task: bool = False
@@ -114,8 +119,11 @@ class ChartersDataset(VisionDataset):
                 with matching name and checksum.
             expansion_masks (bool): if True (default), add transcription expansion offsets
                 to the sample if it is present in the XML source line annotations.
-            shape (str): Extract each line as bbox ('bbox': default), 
-                bbox+mask (2 files, 'mask'), or as padded polygons ('polygon')
+            shape (str): line shape is either 'bbox' (entire b.box image) or
+                'polygon', i.e. line polygon against a background of choice.
+            channel_func (Callable): function that takes image and binary polygon mask as inputs,
+                and generates an additional channel in the sample. Default: None.
+            save_binary_mask (bool): save the polygon mask on-disk. Default: False.
             build_items (bool): if True (default), extract and store images for the task
                 from the pages; otherwise, just extract the original data from the archive.
             from_line_tsv_file (str): if set, the data are to be loaded from the given file
@@ -141,10 +149,12 @@ class ChartersDataset(VisionDataset):
             raise FileNotFoundError("In order to create a dataset instance, you need either:" +
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
                                     "\n\t + one of the following options: -from_page_xml_dir, -from_work_folder, -from_line_tsv_file")
-        
-        trf = v2.PILToTensor()
+
+        trf = v2.Compose( [v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True) ]) 
+        if channel_func is not None:
+            trf =  v2.Compose( [trf, AddChannel()] )
         if transform:
-            trf = v2.Compose( [ v2.PILToTensor(), transform ] )
+            trf = v2.Compose( [ trf, transform ] ) 
 
         super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
@@ -188,24 +198,36 @@ class ChartersDataset(VisionDataset):
             # used only by __str__ method
             self.from_line_tsv_file = from_line_tsv_file
 
-        # bbox or polygons
-        self.shape = shape
+        # bbox or polygons and/or masks
+        self.config = {
+                'shape': shape,
+                'channel_func': channel_func,
+                'line_padding_style': line_padding_style,
+                'count': count,
+                'resume_task': resume_task,
+                'from_line_tsv_file': from_line_tsv_file,
+                'subset': subset,
+                'subset_ratios': subset_ratios,
+                'expansion_masks': expansion_masks,
+                'save_binary_mask': save_binary_mask,
+        }
+
 
         self.data = []
 
-        self.resume_task = resume_task
-        
         build_ok = False if (from_line_tsv_file!='' or from_work_folder!='' ) else build_items
         
-        self._build_task(build_items=build_ok, from_line_tsv_file=from_line_tsv_file, 
-                         subset=subset, subset_ratios=subset_ratios, 
-                         work_folder=work_folder, count=count, 
-                         line_padding_style=line_padding_style,
-                         expansion_masks=expansion_masks)
+        self._build_task(build_items=build_ok, work_folder=work_folder )
 
         if self.data and not from_line_tsv_file:
             # Generate a TSV file with one entry per img/transcription pair
             self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{subset}.tsv")) )
+            channel_function_def = None
+            if type(channel_func) is functools.partial:
+                channel_function_def = inspect.getsource(channel_func.func) + str( channel_func.keywords)
+            else:
+                channel_function_def = inspect.getsource( channel_func )
+
             self._generate_readme("README.md", 
                     { 'subset': subset,
                       'subset_ratios': subset_ratios, 
@@ -217,6 +239,8 @@ class ChartersDataset(VisionDataset):
                       'work_folder': work_folder, 
                       'line_padding_style': line_padding_style,
                       'shape': shape,
+                      'channel_func': channel_function_def,
+                      'save_binary_mask': save_binary_mask,
                      } )
 
 
@@ -240,9 +264,7 @@ class ChartersDataset(VisionDataset):
         Raises:
             OSError: the base folder does not exist.
         """
-        from . import download_utils as du
         output_file_path = None
-        print(fl_meta)
         # downloadable archive
         if 'url' in fl_meta:
             output_file_path = root.joinpath( fl_meta['tarball_filename'])
@@ -275,13 +297,7 @@ class ChartersDataset(VisionDataset):
 
     def _build_task( self, 
                    build_items: bool=True, 
-                   from_line_tsv_file: str='',
-                   subset: str='train', 
-                   subset_ratios: Tuple[float,float,float]=(.7, 0.1, 0.2),
-                   count: int=0, 
                    work_folder: str='', 
-                   line_padding_style='median',
-                   expansion_masks=False,
                    )->None:
         """From the read-only, uncompressed archive files, build the image/GT files required for the task at hand:
 
@@ -293,22 +309,8 @@ class ChartersDataset(VisionDataset):
         Args:
             build_items (bool): if True (default), extract and store
                 images for the task from the pages;
-            from_line_tsv_file (str): TSV file from which the data are
-                to be loaded (containing folder is assumed to be the work folder, superceding
-                the work_folder option). (Default value = '')
-            subset (str): 'train', 'validate' or 'test'. (Default value
-                = 'train')
-            subset_ratios (Tuple[float,float,float]): ratios for
-                respective ('train', 'validate', ...) subsets (Default
-                value = (.7, 0.1, 0.2))
-            count (int): Stops after extracting {count} image items (for
-                testing purpose only). (Default value = 0)
             work_folder (str): Where line images and ground truth transcriptions fitting a particular task
                 are to be created; default: './MonasteriumHandwritingDatasetHTR'.
-            line_padding_style (str): When extracting line bounding boxes for an HTR task,
-                padding to be used around the polygon: 'median' (default) pads with the
-                median value of the polygon; 'noise' pads with random noise.
-            expansion_masks (List[Tuple[int,int]]): for HTR, masks for CER computation.
 
         Returns:
             None
@@ -316,7 +318,7 @@ class ChartersDataset(VisionDataset):
         Raises:
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
         """
-             
+        from_line_tsv_file, line_padding_style, expansion_masks = [ self.config[k] for k in ('from_line_tsv_file', 'line_padding_style', 'expansion_masks')]
         # create from existing TSV files - passed directory that contains:
         # + image to GT mapping (TSV)
         if from_line_tsv_file != '':
@@ -326,8 +328,7 @@ class ChartersDataset(VisionDataset):
                 # paths are assumed to be absolute
                 self.data = self.load_from_tsv( tsv_path, expansion_masks )
                 logger.debug("data={}".format( self.data[:6]))
-                logger.debug("height: {} type={}".format( self.data[0]['height'], type(self.data[0]['height'])))
-                #logger.debug(self.data[0]['polygon_mask'])
+                #logger.debug("height: {} type={}".format( self.data[0]['height'], type(self.data[0]['height'])))
             else:
                 raise FileNotFoundError(f'File {tsv_path} does not exist!')
 
@@ -346,15 +347,14 @@ class ChartersDataset(VisionDataset):
 
             # samples: all of them! (Splitting into subsets happens in an ulterior step.)
             if build_items:
-                samples = self._extract_lines( self.raw_data_folder_path, self.work_folder_path, 
-                                                on_disk=build_items, count=count, shape=self.shape,
-                                                padding_func=self.bbox_noise_pad if line_padding_style=='noise' else self.bbox_median_pad,
-                                                expansion_masks=expansion_masks,)
+                samples = self._extract_lines( self.raw_data_folder_path, self.work_folder_path, on_disk=build_items, )
+                                                
+                                                
             else:
                 logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
                 samples = self.load_line_items_from_dir( self.work_folder_path )
 
-            self.data = self._split_set( samples, ratios=subset_ratios, subset=subset)
+            self.data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=self.config['subset'])
             logger.info(f"Subset contains {len(self.data)} samples.")
 
 
@@ -365,8 +365,8 @@ class ChartersDataset(VisionDataset):
         line images and line transcriptions
 
         Args:
-            work_folder_path (Union[Path,str]): a folder containing images (`*.png`) and
-            transcription files (`*.gt.txt`)
+            work_folder_path (Union[Path,str]): a folder containing images (`*.png`),
+            transcription files (`*.gt.txt`) and optional binary polygon masks ('*.mask.npy.gz')
 
         Returns:
             List[dict]: a list of samples.
@@ -395,7 +395,7 @@ class ChartersDataset(VisionDataset):
             # optional mask
             mask_file_path = img_file_path.with_suffix('.mask.npy.gz')
             if mask_file_path.exists():
-                sample['polygon_mask']=mask_file_path
+                sample['img_mask']=mask_file_path
 
             samples.append( sample )
 
@@ -411,6 +411,7 @@ class ChartersDataset(VisionDataset):
 
         Args:
             file_path (Path): A file path (relative to the caller's pwd).
+            expansion_masks (bool): Load expansion mask field.
 
         Returns:
             List[dict]: A list of dictionaries of the form::
@@ -419,7 +420,7 @@ class ChartersDataset(VisionDataset):
              'transcription': <transcription text>,
              'height': <original height>,
              'width': <original width>,
-            ['polygon_mask': <1-D binary mask> ]
+            ['img_mask': <2D binary mask> ]
             }
 
         """
@@ -453,7 +454,7 @@ class ChartersDataset(VisionDataset):
                 spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
                         'height': int(height), 'width': int(width) }
                 if has_mask:
-                    spl['polygon_mask']=work_folder_path.joinpath(fields[4])
+                    spl['img_mask']=work_folder_path.joinpath(fields[4])
                 if expansion_masks and expansion_masks_match is not None:
                     spl['expansion_masks']=eval( expansion_masks_match.group(2))
                 samples.append( spl )
@@ -462,11 +463,7 @@ class ChartersDataset(VisionDataset):
 
     def _extract_lines(self, raw_data_folder_path: Path,
                         work_folder_path: Path, 
-                        shape: str='polygon',
-                        on_disk=False,
-                        expansion_masks=True,
-                        count=0,
-                        padding_func=None) -> List[Dict[str, Union[Tensor,str,int]]]:
+                        on_disk=False,) -> List[Dict[str, Union[Tensor,str,int]]]:
         """Generate line images from the PageXML files and save them in a local subdirectory
         of the consumer's program.
 
@@ -474,13 +471,8 @@ class ChartersDataset(VisionDataset):
             raw_data_folder_path (Path): root of the (read-only) expanded archive.
             work_folder_path (Path): Line images are extracted in this subfolder (relative to the
                 caller's pwd).
-            shape (str): Extract lines as polygons-within-boxes ('polygon': default) or as bboxes ('bbox').
             on_disk (bool): If False (default), samples are only built in memory; otherwise line images 
                 and transcriptions are written into the work folder.
-            expansion_masks (bool): Retrieve offsets and lengths of the abbreviation expansions (if available)
-            count (int): Stops after extracting {count} images (for testing purpose). (Default value = 0)
-            padding_func (Callable[[np.ndarray], np.ndarray]): For polygons, a function that
-                accepts a (C,H,W) Numpy array and returns the line BBox image, with padding
                 around the polygon.
 
         Returns:
@@ -493,16 +485,12 @@ class ChartersDataset(VisionDataset):
         """
         logger.debug("_extract_lines()")
 
-        if padding_func is None:
-            padding_func = self.bbox_median_pad
-        logger.debug('padding_func={}'.format( padding_func ))
-
         # filtering out Godzilla-sized images (a couple of them)
         warnings.simplefilter("error", Image.DecompressionBombWarning)
 
         Path( work_folder_path ).mkdir(exist_ok=True, parents=True) 
 
-        if not self.resume_task:
+        if not self.config['resume_task']:
             self._purge( work_folder_path ) 
 
         cnt = 0 # for testing purpose
@@ -513,25 +501,25 @@ class ChartersDataset(VisionDataset):
             #img_path = Path( raw_data_folder_path, f'{xml_id}.jpg')
             #logger.debug( img_path )
 
-            line_samples = self.extract_lines_from_pagexml(page, shape=shape, 
-                        on_disk_folder=work_folder_path if on_disk else None, 
-                        resume_task=self.resume_task, expansion_masks=expansion_masks)
+            line_samples = self.extract_lines_from_pagexml(page, 
+                        on_disk_folder=work_folder_path if on_disk else None, config=self.config) 
+                        
             if line_samples:
                 samples.extend( line_samples )
                 cnt += 1
-                if count and cnt == count:
+                if self.config['count'] and cnt == self.config['count']:
                     break
         return samples
 
     @classmethod
-    def extract_lines_from_pagexml(cls, page: Union[str,Path], 
-            shape="polygon", on_disk_folder: Union[Path,str]=None, 
-            padding_func=None, resume_task=False, expansion_masks=False):
+    def extract_lines_from_pagexml(cls, page: Union[str,Path], on_disk_folder: Union[Path,str]=None, config:dict={}):
+
+        assert all([ k in config for k in ('line_padding_style', 'channel_func', 'shape', 'resume_task', 'expansion_masks')])
 
         samples = []
         xml_id = Path( page ).stem
-        if padding_func is None:
-            padding_func = cls.bbox_median_pad
+
+        padding_func = cls.bbox_noise_pad if config['line_padding_style']=='noise' else cls.bbox_median_pad
 
         with open(page, 'r') as page_file:
 
@@ -568,7 +556,7 @@ class ChartersDataset(VisionDataset):
                 transcription = transcription.replace("\t",' ')
                 sample['transcription'] = transcription
 
-                if expansion_masks and 'custom' in textline_elt.keys():
+                if config['expansion_masks'] and 'custom' in textline_elt.keys():
                     sample['expansion_masks'] = [ (int(o), int(l)) for (o,l) in re.findall(r'expansion *{ *offset:(\d+); *length:(\d+);', textline_elt.get('custom')) ]
 
                 polygon_string=textline_elt.find('./pc:Coords', ns).get('points')
@@ -586,27 +574,33 @@ class ChartersDataset(VisionDataset):
                         raise FileNotFoundError("Abort. Check that directory {} exists.")
 
                     bbox_img = page_image.crop( textline_bbox )
-                    if shape=='bbox':
-                        if not (self.resume_task and sample['img'].exists()):
-                            bbox_img.save( sample['img'] )
-                    else:
-                        # Image -> (C,H,W) array
-                        img_chw = np.array( bbox_img ).transpose(2,0,1)
+
+                    if not (config['resume_task'] and sample['img'].exists()):
+                        # Image -> (H,W,C)-uint8 array
+                        img_hwc = np.array( bbox_img )
                         # 2D Boolean polygon mask, from points
                         leftx, topy = textline_bbox[:2]
                         transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in coordinates ], dtype='int')[:,::-1]
-
-                        if not (resume_task and sample['img'].exists()):
-                            boolean_mask = ski.draw.polygon2mask( img_chw.shape[1:], transposed_coordinates )
-                            if shape=='polygon':
-                                # Pad around the polygon
-                                img_chw = padding_func( img_chw, boolean_mask )
-                                Image.fromarray( img_chw.transpose(1,2,0) ).save( Path( sample['img'] ))
-                            elif shape=='mask':
-                                sample['polygon_mask']=img_path_prefix.with_suffix('.mask.npy.gz')
-                                bbox_img.save( sample['img'] )
-                                with gzip.GzipFile(sample['polygon_mask'], 'w') as zf:
-                                    np.save( zf, boolean_mask ) 
+                        boolean_mask = ski.draw.polygon2mask( img_hwc.shape[:2], transposed_coordinates )
+                        if config['save_binary_mask']:
+                            with gzip.GzipFile( img_path_prefix.with_suffix('.bool.npy.gz'), 'w') as zf:
+                                np.save( zf, boolean_mask ) 
+                    
+                        # plain line image: save the bounding box
+                        if config['shape'] == 'bbox':
+                            bbox_img.save( sample['img'] )
+                        # Pad around the polygon
+                        else:
+                            img_hwc = padding_func( img_hwc, boolean_mask, channel_dim=2 )
+                            Image.fromarray(img_hwc).save( Path( sample['img'] ))
+                        # construct an additional, flat channel
+                        if config['channel_func'] is not None:
+                            img_mask_hw = config['channel_func']( img_hwc, boolean_mask)
+                            #sample['img_mask']=img_path_prefix.with_suffix('.mask.npy.gz')
+                            sample['img_mask']=img_path_prefix.with_suffix('.mask.npy')
+                            #with gzip.GzipFile(sample['img_mask'], 'w') as zf:
+                            #    np.save( zf, img_mask_hw ) 
+                            np.save( sample['img_mask'], img_mask_hw)
 
                     with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
                         gt_file.write( sample['transcription'])
@@ -647,8 +641,8 @@ class ChartersDataset(VisionDataset):
                 of.write( '{}\t{}\t{}\t{}'.format( img_path,
                                              gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'),
                                              int(height), int(width) ))
-                if 'polygon_mask' in sample and sample['polygon_mask'] is not None:
-                    of.write('\t{}'.format( sample['polygon_mask'].name ))
+                if 'img_mask' in sample and sample['img_mask'] is not None:
+                    of.write('\t{}'.format( sample['img_mask'].name ))
                 of.write('\n')
                                             
 
@@ -697,7 +691,7 @@ class ChartersDataset(VisionDataset):
         
         with open( filepath, "w") as of:
             print('Task was built with the following options:\n\n\t+ ' + 
-                  '\n\t+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
+                  '\n+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
                   file=of)
             print( repr(self), file=of)
 
@@ -759,8 +753,6 @@ class ChartersDataset(VisionDataset):
         """
         img_path = self.data[index]['img']
         
-        #polygon_mask = self.data[index]['polygon_mask'] if 'polygon_mask' in self.data[index] else None
-
         assert isinstance(img_path, Path) or isinstance(img_path, str)
 
         # In the sample, image filename replaced with 
@@ -772,14 +764,21 @@ class ChartersDataset(VisionDataset):
         sample['transcription']=self.target_transform( sample['transcription'] )
         sample['img'] = Image.open( img_path, 'r')
 
-        if 'polygon_mask' in self.data[index]:
-            with gzip.GzipFile(self.data[index]['polygon_mask'], 'r') as mask_in:
-                sample['polygon_mask'] = torch.tensor( np.load( mask_in ))
+        # optional mask is concatenated to the image tensor by the transform
+        # in an ulterior step - it needs to be made into a Tensor here, because the v2.transform
+        # only converts the Image sample['img'], the other members being pass-through
+        # see https://pytorch.org/vision/main/auto_examples/transforms/plot_transforms_getting_started.html
+        if 'img_mask' in self.data[index]:
+            mask_t = None
+            if self.data[index]['img_mask'].suffix == '.gz':
+                with gzip.GzipFile(self.data[index]['img_mask'], 'r') as mask_in:
+                    mask_t = torch.tensor( np.load( mask_in )/255 )
+            else:
+                mask_t = torch.tensor( np.load( self.data[index]['img_mask'] )/255 )
+            sample['img_mask'] = mask_t
 
-        # if resized, should store new height and width
         sample = self.transform( sample )
         sample['id'] = Path(img_path).name
-        logger.debug('sample='.format(index), sample)
         return sample
 
     def __getitems__(self, indexes: list ) -> List[dict]:
@@ -824,7 +823,7 @@ class ChartersDataset(VisionDataset):
         summary = '\n'.join([
                     f"Root folder:\t{self.root}",
                     f"Files extracted in:\t{self.raw_data_folder_path}",
-                    f"Line shape: {self.shape}",
+                    f"Line shape: {self.config['shape']}",
                     f"Work folder:\t{self.work_folder_path}",
                     f"Data points:\t{len(self.data)}",
                     "Stats:",
@@ -930,6 +929,18 @@ class ChartersDataset(VisionDataset):
         return img_out.transpose(1,2,0) if channel_dim == 2 else img_out
 
 
+class AddChannel():
+    """Take the sample's flat channel value and add it to the sample's image
+    """
+    def __call__(self, sample: dict) -> dict:
+        """The image is assumed to be a tensor already, i.e. 0-1 float type; the channel is assumed
+        to have the same type.
+        """
+        transformed_sample = sample.copy()
+        del transformed_sample['img_mask']
+        transformed_sample['img']=torch.cat( [sample['img'], sample['img_mask'][None,:,:]] )
+
+        return transformed_sample
 
 class PadToWidth():
     """Pad an image to desired length."""
@@ -939,8 +950,6 @@ class PadToWidth():
 
     def __call__(self, sample: dict) -> dict:
         """Transform a sample: only the image is modified, not the nominal height and width.
-        A mask covers the unpadded part of the image.
-
         """
         t_chw, w = [ sample[k] for k in ('img', 'width' ) ]
         if w > self.max_w:
