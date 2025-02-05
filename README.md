@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ```
 
 
-### Training HTR data
+### Data
 
 A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1daefdK2fztid1vTJ5baIMBEIEmgy7cpg).
 
@@ -75,7 +75,7 @@ At this point, all sample data have been generated. To obtain the validation and
 ```python
 >>> charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise', subset='validate')
 >>> charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise', subset='test')
-``̀ 
+```
 
 [Note that the channel and padding options have been kept, even if they have no effect anymore on the data: it allows for proper self-documentation of the dataset parameters in the generated README.md.]
 
