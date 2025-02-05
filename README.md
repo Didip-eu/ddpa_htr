@@ -54,9 +54,17 @@ export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_
 
 #### Recommended: preprocess first, then train
 
-The `libs/charters_htr.py` class provides generic functionalities for downloading existing charters datasets and compiling them into line samples, on-disk and in-memory. However, because this preprocessing step is costly, the 
+The `libs/charters_htr.py` class provides generic functionalities for downloading existing charters datasets and compiling them into line samples, on-disk and in-memory. For instance, the following Python call compiles line samples from an existing directory containing page images and their meta-data; the resulting work folder (it is created if it does not exist) stores line images where the polygon-of-interest is padded with noise; an extra flat, gray channel is stored, for use at loading time.
+
+```python
+>>> sys.path.append('.')
+>>> from libs import charters_htr, maskutils as msk
+>>> charters_htr.ChartersDataset(sysfrom_page_xml_dir='/home/nicolas/tmp/data/Monasterium/MonasteriumTekliaGTDataset', work_folder='/home/nicolas/graz/htr/vre/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise')
+```
+
+However, because this preprocessing step is costly and in order to avoid unwanted complexity into the training logic, the 
 current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one of each of the training, validation, and test subsets.
-The training script only uses `libs/charters_htr.py` module to load the sample from this location. If the directory contains an extra channel for a given image (*.npy.gz) -also listed in the TSV-it is automatically concatenated to the tensor at loading time.
+The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the directory contains an extra channel for a given image (*.npy.gz) -also listed in the TSV-it is automatically concatenated to the tensor at loading time.
 
 A sample TSV:
 

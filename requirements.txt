@@ -1,13 +1,14 @@
 coremltools
+defusedxml
 fargv
+gdown
+matplotlib
 numpy
 Pillow
 protobuf
 pytest
-scipy
 setuptools
 scikit-image
 torch
 torchvision
 tqdm
-python-Levenshtein
