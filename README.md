@@ -80,13 +80,13 @@ At this point, all sample data have been generated. To obtain the validation and
 
 [Note that the channel and padding options have been kept, even if they have no effect anymore on the data: it allows for proper self-documentation of the dataset parameters in the generated README.md.]
 
-It is also possible to generate all 3 TSV files from a folder containing line images and transcriptions (and an optional channel file), or to generate subsets with different ratios. For this and all possibilities offered by the `libs/charters_htr.py` module, look at the embedded documentation.
+It is also possible to generate all 3 TSV files from a folder containing only the line images and transcriptions (and an optional channel file), or to generate subsets with different ratios. For this and all possibilities offered by the `libs/charters_htr.py` module, look at the embedded documentation.
 
 
 #### Training from compiled line samples
 
 Because the preprocessing step is costly and in order to avoid unwanted complexity into the training logic, the 
-current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one of each of the training, validation, and test subsets.
+current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one for each of the training, validation, and test subsets.
 The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the directory contains an extra channel for a given image (*.npy.gz) -also listed in the TSV-it is automatically concatenated to the tensor at loading time.
 
 For a charter dataset to play with, look at the [Data section](#Data) above.
@@ -168,3 +168,6 @@ The following scripts are one-offs, that are not meant for public consumption:
 
 + `bin/ddp_htr_train_with_abbrev.py`: (for experiments) training script that uses abbreviation masks on the GT transcriptions, as well as a custom edit distance function, in order to evaluate the abbreviations contribution to the CER.
 + `bin/ddp_htr_viewer.py`: visualizing confidence scores for a given HTR (color + transcription overlay)
++ some of the local modules are not part of the core HTR dependencies. For example:
+  * pre-processing/compilation step: `charters_htr.py` and its dependencies (`seglib.py`, `download__utils.py`)
+  * for convenience only: `maskutils.py`, `visuals.py`
