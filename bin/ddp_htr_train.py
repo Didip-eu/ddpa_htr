@@ -46,7 +46,7 @@ p = {
     "batch_size": 2,
     "img_height": 128,
     "img_width": 2048,
-    "max_epoch": 250,
+    "max_epoch": 200,
     "dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_test": [str(root.joinpath('data','current_working_set', 'charters_ds_test.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
@@ -54,12 +54,12 @@ p = {
     "ignored_chars": [],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
-    "validation_freq": 100,
+    "validation_freq": 1,
     "save_freq": 1,
-    "resume_fname": 'model_save.mlmodel',
-    "reset_epochs": False,
+    "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
+    "reset_epochs": [ False, "Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
     "mode": ('train', 'validate', 'test'),
-    "auxhead": [False, 'Combine output with CTC shortcut'],
+    "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
 }
 
 
