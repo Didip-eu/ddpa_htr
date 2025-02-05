@@ -13,6 +13,7 @@ TODO:
 + online retrieval of charters images
 + decoding options
 + proper testing (the existing testing modules are obsoletes)
++ ...
 
 ## Installing
 
