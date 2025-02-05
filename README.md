@@ -14,6 +14,30 @@ TODO:
 + decoding options
 + proper testing (the existing testing modules are obsoletes)
 
+## Installing
+
+### Code
+
+```bash
+git clone git@github.com:Didip-eu/ddpa_htr.git
+cd ddpa_htr
+pip install -r requirements.txt
+```
+
+
+### Training HTR data
+
+A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1daefdK2fztid1vTJ5baIMBEIEmgy7cpg).
+
+Alternatively, run the following commands:
+
+```bash
+pip install gdown
+cd ./data
+gdown https://drive.google.com/uc?id=1daefdK2fztid1vTJ5baIMBEIEmgy7cpg
+unzip MonasteriumTeklia_htr_precompiled.zip
+```
+
 
 
 ## How to use
@@ -55,12 +79,27 @@ export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_
 
 #### Recommended: preprocess first, then train
 
-The `libs/charters_htr.py` module provides generic functionalities for handling charters datasets, including downloading/compiling a few specific datasets into line samples, on-disk and in-memory. For instance, the following Python call compiles line samples from an existing directory containing page images and their meta-data; the resulting work folder (it is created if it does not exist) stores line images where the polygon-of-interest is padded with noise; an extra flat, gray channel is stored, for use at loading time. By default, the TSV file that is generated lists the training subset, with 70% of the total number of samples:
+The `libs/charters_htr.py` module provides generic functionalities for handling charters datasets, including downloading/compiling a few specific datasets into line samples, on-disk and in-memory. 
+For instance, the following Python call compiles line samples from an existing directory containing page images and their meta-data:
+
 
 ```python
 >>> sys.path.append('.')
 >>> from libs import charters_htr, maskutils as msk
 >>> charters_htr.ChartersDataset(sysfrom_page_xml_dir='/home/nicolas/tmp/data/Monasterium/MonasteriumTekliaGTDataset', work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise')
+```
+
+the resulting work folder (it is created if it does not exist) stores 
+
++ the line images where the polygon-of-interest is padded with noise; 
++ an extra flat, gray channel for use at loading time. 
++ a TSV file 'charters_ds_train.tsv' that lists all samples in the training subset, with 70% of the total number of samples, as shown below:
+
+```tsv
+Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.png     Üllein Müllner von Gemünd       133     770     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.channel.npy.gz
+Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.png     Els Witbelein sein Swester      132     733     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.channel.npy.gz
+Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.png     der Öheim von Gemünd    134     681     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.channel.npy.gz
+...
 ```
 
 At this point, all sample data have been generated. To obtain the validation and test sets, we simply read from the existing work folder:
@@ -70,21 +109,13 @@ At this point, all sample data have been generated. To obtain the validation and
 >>> charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise', subset='test')
 ``̀ 
 
-Note that channel and padding options have been kept, even if they have no effect anymore on the data: it allows for proper self-documentation of the dataset parameters in the generated README.md.
+[Note that the channel and padding options have been kept, even if they have no effect anymore on the data: it allows for proper self-documentation of the dataset parameters in the generated README.md.]
 
 
 However, because this preprocessing step is costly and in order to avoid unwanted complexity into the training logic, the 
 current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one of each of the training, validation, and test subsets.
 The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the directory contains an extra channel for a given image (*.npy.gz) -also listed in the TSV-it is automatically concatenated to the tensor at loading time.
 
-A sample TSV:
-
-```tsv
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.png     Üllein Müllner von Gemünd       133     770     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.channel.npy.gz
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.png     Els Witbelein sein Swester      132     733     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.channel.npy.gz
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.png     der Öheim von Gemünd    134     681     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.channel.npy.gz
-...
-```
 
 #### Syntax
 
