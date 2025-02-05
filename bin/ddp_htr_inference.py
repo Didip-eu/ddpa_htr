@@ -28,7 +28,7 @@ from model_htr import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
 
-logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
