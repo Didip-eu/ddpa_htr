@@ -28,14 +28,14 @@ pip install -r requirements.txt
 
 ### Data
 
-A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1daefdK2fztid1vTJ5baIMBEIEmgy7cpg).
+A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ)
 
 Alternatively, run the following commands:
 
 ```bash
 pip install gdown
 cd ./data
-gdown https://drive.google.com/uc?id=1daefdK2fztid1vTJ5baIMBEIEmgy7cpg
+gdown https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ
 unzip MonasteriumTeklia_htr_precompiled.zip
 ```
 
