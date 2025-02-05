@@ -42,38 +42,6 @@ unzip MonasteriumTeklia_htr_precompiled.zip
 
 ## How to use
 
-### Inference
-
-```bash
-python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
-```
-
-where optional flags are one or more of the following:
-
-```bash
--appname=<class 'str'>  Default 'ddpa_htr_inference' . Passed 'ddpa_htr_inference'
--model_path=<class 'str'>  Default '/tmp/model_monasterium-2024-10-28.mlmodel' . Passed '/tmp/model_monasterium-2024-10-28.mlmodel'
--img_paths=<class 'set'>  Default set() . Passed set()
--charter_dirs=<class 'set'>  Default set() . Passed set()
--segmentation_dir=<class 'str'> Alternate location to search for the image segmentation data files (for testing). Default '' . Passed ''
--segmentation_file_suffix=<class 'str'>  Default 'lines.pred.json' . Passed 'lines.pred.json'
--output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default '' . Passed ''
--htr_file_suffix=<class 'str'>  Default 'htr.pred' . Passed 'htr.pred'
--output_format=<class 'tuple'> Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively. Default ('json', 'stdout', 'tsv') . Passed 'json'
--output_data=<class 'tuple'> By default, the application yields character predictions; 'logits' have it returns logits instead. Default ('pred', 'logits', 'all') . Passed 'pred'
--padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none') . Passed 'median'
--help=<class 'bool'> Print help and exit. Default False . Passed False
--bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False . Passed False
--h=<class 'bool'> Print help and exit Default False . Passed True
--v=<class 'int'> Set verbosity level. Default 1 . Passed 1
-```
-
-#### Example:
-
-```bash
-export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
-```
-
 
 ### Training
 
@@ -158,6 +126,38 @@ where optional flags are one or more of the following:
 ```bash	
 python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1
 ```
+### Inference
+
+```bash
+python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
+```
+
+where optional flags are one or more of the following:
+
+```bash
+-appname=<class 'str'>  Default 'ddpa_htr_inference' . Passed 'ddpa_htr_inference'
+-model_path=<class 'str'>  Default '/tmp/model_monasterium-2024-10-28.mlmodel' . Passed '/tmp/model_monasterium-2024-10-28.mlmodel'
+-img_paths=<class 'set'>  Default set() . Passed set()
+-charter_dirs=<class 'set'>  Default set() . Passed set()
+-segmentation_dir=<class 'str'> Alternate location to search for the image segmentation data files (for testing). Default '' . Passed ''
+-segmentation_file_suffix=<class 'str'>  Default 'lines.pred.json' . Passed 'lines.pred.json'
+-output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default '' . Passed ''
+-htr_file_suffix=<class 'str'>  Default 'htr.pred' . Passed 'htr.pred'
+-output_format=<class 'tuple'> Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively. Default ('json', 'stdout', 'tsv') . Passed 'json'
+-output_data=<class 'tuple'> By default, the application yields character predictions; 'logits' have it returns logits instead. Default ('pred', 'logits', 'all') . Passed 'pred'
+-padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none') . Passed 'median'
+-help=<class 'bool'> Print help and exit. Default False . Passed False
+-bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False . Passed False
+-h=<class 'bool'> Print help and exit Default False . Passed True
+-v=<class 'int'> Set verbosity level. Default 1 . Passed 1
+```
+
+#### Example:
+
+```bash
+export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
+```
+
 
 ### Additional scripts
 
