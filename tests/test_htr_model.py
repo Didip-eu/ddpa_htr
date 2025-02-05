@@ -4,7 +4,6 @@ import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 from pathlib import Path
-from didip_handwriting_datasets import monasterium, alphabet
 from torchvision.transforms.v2 import Compose
 import numpy as np
 
@@ -13,6 +12,7 @@ sys.path.append( str( Path(__file__).parents[1] ) )
 
 import model_htr
 import metrics
+import charters_htr
 
 MAX_HEIGHT=64
 MAX_WIDTH=2048

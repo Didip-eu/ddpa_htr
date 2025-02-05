@@ -1,12 +1,7 @@
 import pytest
 import sys
 import torch
-from torch import Tensor
-from torch.utils.data import DataLoader
 from pathlib import Path
-from didip_handwriting_datasets import monasterium, alphabet
-from torchvision.transforms import PILToTensor, ToPILImage, Compose
-import numpy as np
 
 # Append app's root directory to the Python search path
 sys.path.append( str( Path(__file__).parents[1] ) )
