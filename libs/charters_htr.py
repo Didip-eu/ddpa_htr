@@ -91,11 +91,9 @@ class ChartersDataset(VisionDataset):
                 from_work_folder: str = '',
                 build_items: bool = True,
                 expansion_masks = False,
-                shape: str = 'polygon',
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
-                save_binary_mask: bool = False,
                 count: int = 0,
-                line_padding_style: str = 'median',
+                line_padding_style: str = None,
                 resume_task: bool = False
                 ) -> None:
         """Initialize a dataset instance.
@@ -119,11 +117,8 @@ class ChartersDataset(VisionDataset):
                 with matching name and checksum.
             expansion_masks (bool): if True (default), add transcription expansion offsets
                 to the sample if it is present in the XML source line annotations.
-            shape (str): line shape is either 'bbox' (entire b.box image) or
-                'polygon', i.e. line polygon against a background of choice.
             channel_func (Callable): function that takes image and binary polygon mask as inputs,
                 and generates an additional channel in the sample. Default: None.
-            save_binary_mask (bool): save the polygon mask on-disk. Default: False.
             build_items (bool): if True (default), extract and store images for the task
                 from the pages; otherwise, just extract the original data from the archive.
             from_line_tsv_file (str): if set, the data are to be loaded from the given file
@@ -136,8 +131,10 @@ class ChartersDataset(VisionDataset):
             count (int): Stops after extracting {count} image items (for testing 
                 purpose only).
             line_padding_style (str): When extracting line bounding boxes, padding to be 
-                used around the polygon: 'median' (default) pads with the median value of
-                the polygon; 'noise' pads with random noise.
+                used around the polygon: 'median' pads with the median value of
+                the polygon; 'noise' pads with random noise; with either choice, the 
+                polygon boolean mask is automatically saved on/retrieved from the disk;
+                None is the default.
             resume_task (bool): If True, the work folder is not purged. Only those page
                 items (lines, regions) that not already in the work folder are extracted.
                 (Partially implemented: works only for lines.)
@@ -150,12 +147,9 @@ class ChartersDataset(VisionDataset):
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
                                     "\n\t + one of the following options: -from_page_xml_dir, -from_work_folder, -from_line_tsv_file")
 
-        trf = v2.Compose( [v2.PILToTensor()]) #, v2.ToDtype(torch.float32, scale=True) ]) 
-        if channel_func is not None:
-            trf =  v2.Compose( [trf, AddChannel()] )
-        if transform:
+        trf = v2.Compose( [ v2.ToDtype(torch.float32, scale=True) ])  
+        if transform is not None:
             trf = v2.Compose( [ trf, transform ] ) 
-
         super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
         self.root = Path(root) if root else Path(__file__).parents[1].joinpath('data', self.root_folder_basename)
@@ -200,7 +194,6 @@ class ChartersDataset(VisionDataset):
 
         # bbox or polygons and/or masks
         self.config = {
-                'shape': shape,
                 'channel_func': channel_func,
                 'line_padding_style': line_padding_style,
                 'count': count,
@@ -209,7 +202,6 @@ class ChartersDataset(VisionDataset):
                 'subset': subset,
                 'subset_ratios': subset_ratios,
                 'expansion_masks': expansion_masks,
-                'save_binary_mask': save_binary_mask,
         }
 
 
@@ -240,9 +232,7 @@ class ChartersDataset(VisionDataset):
                       'from_work_folder': from_work_folder,
                       'work_folder': work_folder, 
                       'line_padding_style': line_padding_style,
-                      'shape': shape,
                       'channel_func': channel_function_def,
-                      'save_binary_mask': save_binary_mask,
                      } )
 
 
@@ -436,20 +426,19 @@ class ChartersDataset(VisionDataset):
             first_line = next( infile )[:-1]
             img_path, file_or_text, height, width = first_line.split('\t')[:4]
             inline_transcription = False if Path(file_or_text).exists() else True
-            # - Is there a mask field?
+            # - Is there a field for an extra channel
             has_channel = len(first_line.split('\t')) > 4
             infile.seek(0)
 
-            # Note: polygons are not read
             for tsv_line in infile:
                 fields = tsv_line[:-1].split('\t')
                 img_file, gt_field, height, width = fields[:4]
+                binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
+
                 expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
-                
                 if not inline_transcription:
                     with open( work_folder_path.joinpath( gt_field ), 'r') as igt:
                         gt_field = '\n'.join( igt.readlines() )
-
                 elif expansion_masks_match is not None:
                     gt_field = expansion_masks_match.group(1)
 
@@ -459,6 +448,9 @@ class ChartersDataset(VisionDataset):
                     spl['img_channel']=work_folder_path.joinpath(fields[4])
                 if expansion_masks and expansion_masks_match is not None:
                     spl['expansion_masks']=eval( expansion_masks_match.group(2))
+                if binary_mask_file.exists():
+                    spl['binary_mask']=binary_mask_file
+
                 samples.append( spl )
                                
         return samples
@@ -516,12 +508,10 @@ class ChartersDataset(VisionDataset):
     @classmethod
     def extract_lines_from_pagexml(cls, page: Union[str,Path], on_disk_folder: Union[Path,str]=None, config:dict={}):
 
-        assert all([ k in config for k in ('line_padding_style', 'channel_func', 'shape', 'resume_task', 'expansion_masks')])
+        assert all([ k in config for k in ('line_padding_style', 'channel_func', 'resume_task', 'expansion_masks')])
 
         samples = []
         xml_id = Path( page ).stem
-
-        padding_func = cls.bbox_noise_pad if config['line_padding_style']=='noise' else cls.bbox_median_pad
 
         with open(page, 'r') as page_file:
 
@@ -584,17 +574,14 @@ class ChartersDataset(VisionDataset):
                         leftx, topy = textline_bbox[:2]
                         transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in coordinates ], dtype='int')[:,::-1]
                         boolean_mask = ski.draw.polygon2mask( img_hwc.shape[:2], transposed_coordinates )
-                        if config['save_binary_mask']:
-                            with gzip.GzipFile( img_path_prefix.with_suffix('.bool.npy.gz'), 'w') as zf:
+                        
+                        if config['line_padding_style'] is not None:
+                            sample['binary_mask']=img_path_prefix.with_suffix('.bool.npy.gz')
+                            with gzip.GzipFile( sample['binary_mask'], 'w') as zf:
                                 np.save( zf, boolean_mask ) 
                     
-                        # plain line image: save the bounding box
-                        if config['shape'] == 'bbox':
-                            bbox_img.save( sample['img'] )
-                        # Pad around the polygon
-                        else:
-                            img_hwc = padding_func( img_hwc, boolean_mask, channel_dim=2 )
-                            Image.fromarray(img_hwc).save( Path( sample['img'] ))
+                        bbox_img.save( sample['img'] )
+                         
                         # construct an additional, flat channel
                         if config['channel_func'] is not None:
                             img_channel_hw = config['channel_func']( img_hwc, boolean_mask)
@@ -745,7 +732,9 @@ class ChartersDataset(VisionDataset):
 
 
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
-        """Callback function for the iterator.
+        """Callback function for the iterator. Assumption: the raw sample always contains
+        the bounding box image + binary polygon mask. Any combined image (ex. noise-background)
+        is constructed from those, _before_ any transform that is passed to the DS constructor.
 
         Args:
             index (int): item index.
@@ -764,23 +753,32 @@ class ChartersDataset(VisionDataset):
         # 
         sample = self.data[index].copy()
         sample['transcription']=self.target_transform( sample['transcription'] )
-        sample['img'] = Image.open( img_path, 'r')
+        img_array_hwc = ski.io.imread( img_path )
 
-        # optional channel is concatenated to the image tensor by the transform
-        # in an ulterior step - it needs to be made into a Tensor here, because the v2.transform
-        # only converts the Image sample['img'], the other members being pass-through
-        # see https://pytorch.org/vision/main/auto_examples/transforms/plot_transforms_getting_started.html
+        if self.config['line_padding_style'] is not None and 'binary_mask' in sample and sample['binary_mask'].exists():
+            with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
+                binary_mask_hw = np.load( mask_in )
+                padding_func = self.bbox_noise_pad if self.config['line_padding_style']=='noise' else self.bbox_median_pad
+                img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
+                print(img_array_hwc.shape)
+
+        # np.ndarrays are not picked up by v2.transforms when in dict: hence the conversion
+        sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)
+        logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
+
         if 'img_channel' in self.data[index]:
             channel_t = None
             if self.data[index]['img_channel'].suffix == '.gz':
                 with gzip.GzipFile(self.data[index]['img_channel'], 'r') as channel_in:
-                    channel_t = torch.tensor( np.load( channel_in )/255 )
+                    channel_t = torch.from_numpy( np.load( channel_in ) )/255
             else:
-                channel_t = torch.tensor( np.load( self.data[index]['img_channel'] )/255 )
-            sample['img_channel'] = channel_t
+                channel_t = np.load(self.data[index]['img_channel'])/255
+            sample['img']=torch.cat( [sample['img'], channel_t[None,:,:]] )
 
         sample = self.transform( sample )
         sample['id'] = Path(img_path).name
+
+        logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
         return sample
 
     def __getitems__(self, indexes: list ) -> List[dict]:
@@ -825,7 +823,6 @@ class ChartersDataset(VisionDataset):
         summary = '\n'.join([
                     f"Root folder:\t{self.root}",
                     f"Files extracted in:\t{self.raw_data_folder_path}",
-                    f"Line shape: {self.config['shape']}",
                     f"Work folder:\t{self.work_folder_path}",
                     f"Data points:\t{len(self.data)}",
                     "Stats:",
@@ -930,19 +927,6 @@ class ChartersDataset(VisionDataset):
         img_out = img * mask_chw
         return img_out.transpose(1,2,0) if channel_dim == 2 else img_out
 
-
-class AddChannel():
-    """Take the sample's flat channel value and add it to the sample's image
-    """
-    def __call__(self, sample: dict) -> dict:
-        """The image is assumed to be a tensor already, i.e. 0-1 float type; the channel is assumed
-        to have the same type.
-        """
-        transformed_sample = sample.copy()
-        del transformed_sample['img_channel']
-        transformed_sample['img']=torch.cat( [sample['img'], sample['img_channel'][None,:,:]] )
-
-        return transformed_sample
 
 class PadToWidth():
     """Pad an image to desired length."""

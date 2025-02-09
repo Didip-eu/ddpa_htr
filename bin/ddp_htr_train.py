@@ -102,15 +102,17 @@ if __name__ == "__main__":
 
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
-    ds_train = ChartersDataset(shape='polygons',
+    ds_train = ChartersDataset(
         from_line_tsv_file=args.dataset_path_train,
+        line_padding_style='mean',
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
         target_transform=filter_transcription,)
 
     logger.debug( str(ds_train) )
 
-    ds_val = ChartersDataset(shape='polygons',
+    ds_val = ChartersDataset(
         from_line_tsv_file=args.dataset_path_validate,
+        line_padding_style='mean',
         transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
         target_transform=filter_transcription,)
 
