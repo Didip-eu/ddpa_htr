@@ -92,6 +92,7 @@ class ChartersDataset(VisionDataset):
                 build_items: bool = True,
                 expansion_masks = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
+                channel_suffix: str='',
                 count: int = 0,
                 line_padding_style: str = None,
                 resume_task: bool = False
@@ -119,6 +120,8 @@ class ChartersDataset(VisionDataset):
                 to the sample if it is present in the XML source line annotations.
             channel_func (Callable): function that takes image and binary polygon mask as inputs,
                 and generates an additional channel in the sample. Default: None.
+            channel_suffix (str): when loading items from a work folder, which suffix
+                to read for the channel file. Default: '' (=ignore channel file).
             build_items (bool): if True (default), extract and store images for the task
                 from the pages; otherwise, just extract the original data from the archive.
             from_line_tsv_file (str): if set, the data are to be loaded from the given file
@@ -195,6 +198,7 @@ class ChartersDataset(VisionDataset):
         # bbox or polygons and/or masks
         self.config = {
                 'channel_func': channel_func,
+                'channel_suffix': channel_suffix,
                 'line_padding_style': line_padding_style,
                 'count': count,
                 'resume_task': resume_task,
@@ -233,6 +237,7 @@ class ChartersDataset(VisionDataset):
                       'work_folder': work_folder, 
                       'line_padding_style': line_padding_style,
                       'channel_func': channel_function_def,
+                      'channel_suffix': channel_suffix,
                      } )
 
 
@@ -344,7 +349,7 @@ class ChartersDataset(VisionDataset):
                                                 
             else:
                 logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
-                samples = self.load_line_items_from_dir( self.work_folder_path )
+                samples = self.load_line_items_from_dir( self.work_folder_path, self.config['channel_suffix'] )
 
             self.data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=self.config['subset'])
             logger.info(f"Subset contains {len(self.data)} samples.")
@@ -352,13 +357,14 @@ class ChartersDataset(VisionDataset):
 
 
     @staticmethod
-    def load_line_items_from_dir( work_folder_path: Union[Path,str] ) -> List[dict]:
+    def load_line_items_from_dir( work_folder_path: Union[Path,str], channel_suffix:str='' ) -> List[dict]:
         """Construct a list of samples from a directory that has been populated with
         line images and line transcriptions
 
         Args:
             work_folder_path (Union[Path,str]): a folder containing images (`*.png`),
-            transcription files (`*.gt.txt`) and optional extra channel ('*.channel.npy.gz')
+            transcription files (`*.gt.txt`) and optional extra channel 
+            channel_suffix (str): default suffix for the extra channel ('*.channel.npy.gz')
 
         Returns:
             List[dict]: a list of samples.
@@ -385,7 +391,7 @@ class ChartersDataset(VisionDataset):
                     sample['transcription']=transcription
 
             # optional mask
-            channel_file_path = img_file_path.with_suffix('.channel.npy.gz')
+            channel_file_path = img_file_path.with_suffix( channel_suffix )
             if channel_file_path.exists():
                 sample['img_channel']=channel_file_path
 
