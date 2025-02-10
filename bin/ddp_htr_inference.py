@@ -61,11 +61,8 @@ class InferenceDataset( VisionDataset ):
 
         Args:
             img_path (Union[Path,str]): charter image path
-
             segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
-            
             transform (Callable): Image transform.
-
             padding_style (str): How to pad the bounding box around the polygons, when 
                 building the initial, raw dataset (before applying any transform):
                 + 'median'= polygon's median value,
@@ -197,7 +194,7 @@ if __name__ == "__main__":
             output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
             with open( output_file_name, 'w') as htr_outfile:
                 if args.output_format == 'json':
-                    json.dump( str(dataset.pagedict), htr_outfile, indent=4)
+                    json.dump( dataset.pagedict, htr_outfile, indent=4)
                 elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
                 logger.info(f"Output transcriptions in file {output_file_name}")
