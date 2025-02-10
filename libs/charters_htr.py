@@ -134,9 +134,8 @@ class ChartersDataset(VisionDataset):
             count (int): Stops after extracting {count} image items (for testing 
                 purpose only).
             line_padding_style (str): When extracting line bounding boxes, padding to be 
-                used around the polygon: 'median' pads with the median value of
-                the polygon; 'noise' pads with random noise; with either choice, the 
-                polygon boolean mask is automatically saved on/retrieved from the disk;
+                used around the polygon: 'median'=median value of the polygon; 'noise'=random;
+                'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
                 None is the default.
             resume_task (bool): If True, the work folder is not purged. Only those page
                 items (lines, regions) that not already in the work folder are extracted.
@@ -761,12 +760,18 @@ class ChartersDataset(VisionDataset):
         sample['transcription']=self.target_transform( sample['transcription'] )
         img_array_hwc = ski.io.imread( img_path )
 
-        if self.config['line_padding_style'] is not None and 'binary_mask' in sample and sample['binary_mask'].exists():
+        if self.config['line_padding_style'] is not None:
+            assert 'binary_mask' in sample and sample['binary_mask'].exists()
             with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
                 binary_mask_hw = np.load( mask_in )
-                padding_func = self.bbox_noise_pad if self.config['line_padding_style']=='noise' else self.bbox_median_pad
+                padding_func = lambda x, m, channel_dim=2: x
+                if self.config['line_padding_style']=='noise':
+                    padding_func = self.bbox_noise_pad
+                elif self.config['line_padding_style']=='zero':
+                    padding_func = self.bbox_zero_pad
+                elif self.config['line_padding_style']=='median':
+                    padding_func = self.bbox_median_pad
                 img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
-                print(img_array_hwc.shape)
 
         # np.ndarrays are not picked up by v2.transforms when in dict: hence the conversion
         sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)

@@ -16,8 +16,10 @@ import logging
 
 # 3rd party
 from PIL import Image
+import torch
 from torch.utils.data.dataset import Dataset
 from torch.utils.data import DataLoader
+from torchvision.transforms import v2
 from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
 
@@ -44,7 +46,7 @@ p = {
     "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
     "output_format": [ ("json", "stdout", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
     "output_data": [ ("pred", "logits", "all"), "By default, the application yields character predictions; 'logits' have it returns logits instead."],
-    "padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
+    "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
 
@@ -55,6 +57,7 @@ class InferenceDataset( VisionDataset ):
                  transform: Callable=None,
                  padding_style=None) -> None:
         """ A minimal dataset class for inference on a single charter (no transcription in the sample).
+        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
 
         Args:
             img_path (Union[Path,str]): charter image path
@@ -71,7 +74,9 @@ class InferenceDataset( VisionDataset ):
                 + None (default) = no padding, i.e. raw bounding box
         """
 
-        trf = transform if transform else ToTensor()
+        trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+        if transform is not None: 
+            trf = v2.Compose( [trf, transform] )
         super().__init__(root, transform=trf )
 
         img_path = Path( img_path ) if type(img_path) is str else img_path
@@ -87,16 +92,23 @@ class InferenceDataset( VisionDataset ):
             line_padding_func = tsf.bbox_median_pad
         elif padding_style == 'zero':
             line_padding_func = tsf.bbox_zero_pad
-        print(line_padding_func)
 
+        self.pagedict = line_extraction_func( img_path, segmentation_data )
         self.data = []
-
-        for (img_hwc, mask_hwc) in line_extraction_func( img_path, segmentation_data ):
+        for (img_hwc, mask_hwc, linedict) in self.pagedict['lines']:
             mask_hw = mask_hwc[:,:,0]
             self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #tsf.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
+                                'line_id': str(linedict['id']),
                                } )
+        # restoring original line dictionaries into the page data
+        self.pagedict['lines'] = [ triplet[2] for triplet in self.pagedict['lines'] ]
+        self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.pagedict['lines']) }
+        
+
+    def update_pagedict_line(self, line_id:str, kv: dict ):
+        self.pagedict['lines'][ self.line_id_to_index[ line_id ]].update( kv )
 
     def __getitem__(self, index: int):
         sample = self.data[index].copy()
@@ -152,11 +164,7 @@ if __name__ == "__main__":
             logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
             continue
         dataset = InferenceDataset( img_path, segmentation_file_path,
-                                    transform = Compose([ ToTensor(),
-                                                          tsf.ResizeToHeight(128,2048),
-                                                          tsf.PadToWidth(2048),]),
-                                    padding_style=args.padding_style)
-        logger.info("Charter mini-dataset: " + str(dataset))
+                                    transform = Compose([ tsf.ResizeToHeight(128,2048), tsf.PadToWidth(2048),]),)
         
         if dataset is None:
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")
@@ -170,12 +178,14 @@ if __name__ == "__main__":
             # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
             # since batch is 1, flattening batch values
-            line_dict = {"line_id": line}
+            
+            line_id = sample['line_id'][0] # for some reason, the transform wraps the id into an array
+            line_dict = { 'id': line_id }
             if args.output_data == 'all' or args.output_data == 'pred':
-                line_dict['pred'] = predicted_string[0]
+                line_dict['text'] = predicted_string[0]
             if args.output_data == 'all' or args.output_data == 'logits':
                 line_dict['scores'] = lu.flatten(line_scores.tolist())
-            predictions.append( line_dict )
+            dataset.update_pagedict_line( line_id, line_dict )
 
         # 3. Output
         if args.output_format == 'stdout':
@@ -187,7 +197,7 @@ if __name__ == "__main__":
             output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
             with open( output_file_name, 'w') as htr_outfile:
                 if args.output_format == 'json':
-                    json.dump( str(predictions), htr_outfile, indent=4)
+                    json.dump( str(dataset.pagedict), htr_outfile, indent=4)
                 elif args.output_format == 'tsv':
                     print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
                 logger.info(f"Output transcriptions in file {output_file_name}")

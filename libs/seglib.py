@@ -138,8 +138,7 @@ def line_binary_mask_from_segmentation_dict( segmentation_dict: dict ) -> Tensor
     the mask_from_polygon_map_functional() function below.
 
     Args:
-        segmentation_dict (dict): a dictionary, typically constructed
-            from a JSON file.
+        segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
 
     Returns:
         Tensor: a flat boolean tensor with size (H,W)
@@ -161,17 +160,17 @@ def line_binary_mask_from_segmentation_dict( segmentation_dict: dict ) -> Tensor
 
 
 def line_images_from_img_xml_files(img: str, page_xml: str ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """From an image file path and a segmentation JSON file describing polygons, return
-    a list of pairs (<line cropped BB>, <polygon mask>).
+    """From an image file path and a PageXML file describing polygons, return
+    a list of triplets (<line cropped BB>, <polygon mask>, <segmentation data>).
 
     Args:
         img (str): the input image's file path
-        page_xml: :type page_xml: str a Page XML file describing the
-            lines.
+        page_xml: :type page_xml: str a Page XML file describing the lines.
 
     Returns:
-        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask:
-        np.ndarray (HW))
+        dict: a dictionary where the page-wide data ("type", "imagename": ...) are left untouched
+            but the "lines" field is a list of triplets of the form
+            (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HWC), <line segmentation data>: dict)
     """
     with Image.open(img, 'r') as img_wh:
         segmentation_dict = segmentation_dict_from_xml( page_xml )
@@ -179,37 +178,40 @@ def line_images_from_img_xml_files(img: str, page_xml: str ) -> List[Tuple[np.nd
 
 
 def line_images_from_img_json_files( img: str, segmentation_json: str ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """From an image file path and a segmentation JSON file describing polygons, return
-    a list of pairs (<line cropped BB>, <polygon mask>).
+    """From an image file path and a JSON file describing polygons, return
+    a list of triplets (<line cropped BB>, <polygon mask>, <segmentation data>).
 
     Args:
         img (str): the input image's file path
         segmentation_json (str): path of a JSON file
 
     Returns:
-        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
+        dict: a dictionary where the page-wide data ("type", "imagename": ...) are left untouched
+            but the "lines" field is a list of triplets of the form
+            (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HWC), <line segmentation data>: dict)
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
         return line_images_from_img_segmentation_dict( img_wh, json.load( json_file ))
 
 def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """From a segmentation dictionary describing polygons, return a boolean mask where any pixel belonging
-    to a polygon is 1 and the other pixels 0.
+    """From a segmentation dictionary describing polygons, return a list of line items with BBox, 3D-mask, and segmentation data.
 
     Args:
         img_whc (Image.Image): the input image (needed for the size information).
         segmentation_dict: :type segmentation_dict: dict a dictionary, typically constructed from a JSON file.
 
     Returns:
-        List[Tuple[np.ndarray, np.ndarray]]: a list of pairs (<line
-        image BB>: np.ndarray (HWC), mask: np.ndarray (HWC))
+        dict: a dictionary where the page-wide data ("type", "imagename": ...) are left untouched
+            but the "lines" field is a list of triplets of the form
+            (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HWC), <line segmentation data>: dict)
     """
-    polygon_boundaries = [ line['boundary'] for line in segmentation_dict['lines'] ]
     img_hwc = np.asarray( img_whc )
 
-    pairs_line_bb_and_mask = []# [None] * len(polygon_boundaries)
+    triplets_line_bb_and_mask = []# [None] * len(polygon_boundaries)
 
-    for lbl, polyg in enumerate( polygon_boundaries ):
+    for lbl, line in enumerate( segmentation_dict['lines']):
+
+        polyg = line['boundary']
 
         # polygon's points ( x <-> y )
         points = np.array( polyg )[:,::-1]
@@ -221,13 +223,13 @@ def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_di
         bb_label_mask_hwc = page_polyg_mask[y_min:y_max+1, x_min:x_max+1]
 
         #pairs_line_bb_and_mask[lbl]=( line_bbox, bb_label_mask )
-        pairs_line_bb_and_mask.append( (line_bbox, bb_label_mask_hwc) )
+        triplets_line_bb_and_mask.append( (line_bbox, bb_label_mask_hwc, line) )
 
-    return pairs_line_bb_and_mask
+    segmentation_dict["lines"]=triplets_line_bb_and_mask
+    return segmentation_dict
 
 def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tensor) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """From a tensor storing polygons, return a boolean mask where any pixel belonging
-    to a polygon is 1 and the other pixels 0.
+    """From a tensor storing polygons, return a list of line items with BBox and 3D-mask.
 
     Args:
         img_whc (Image.Image): the input image (needed for the size information).
@@ -236,7 +238,6 @@ def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tenso
     Returns:
         List[Tuple[np.ndarray, np.ndarray]]: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
-
     max_label = torch.max( polygon_map_chw )
     img_hwc = np.array( img_wh )
 
