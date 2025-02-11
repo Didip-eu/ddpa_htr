@@ -517,7 +517,9 @@ class ChartersDataset(VisionDataset):
         assert all([ k in config for k in ('line_padding_style', 'channel_func', 'resume_task', 'expansion_masks')])
 
         samples = []
-        page_id = Path( page ).stem
+        line_tuples = []
+        #page_id = Path( page ).stem
+        page_id = Path(re.sub( r'\..+$', '', str(page.name)))
 
         ###################### Case #1: PageXML ###################
         with open(page, 'r') as page_file:
@@ -559,11 +561,11 @@ class ChartersDataset(VisionDataset):
 
                     polygon_string=textline_elt.find('./pc:Coords', ns).get('points')
                     polygon_coordinates = [ tuple(map(int, pt.split(','))) for pt in polygon_string.split(' ') ]
+                    line_tuples.append( (sample, textline_id, polygon_coordinates, transcription))
 
             ################ Case #2: JSON ############################
             elif 'json' in config['gt_suffix']:
                 page_dict = json.load( page_file )
-                print("page_dict has type", type(page_dict), page_dict)
                 img_path = Path(page).parent.joinpath( page_dict['imagename'] )
                 page_image = None
 
@@ -573,51 +575,55 @@ class ChartersDataset(VisionDataset):
                     except Image.DecompressionBombWarning as dcb:
                         logger.debug( f'{dcb}: ignoring page' )
                         return None
+
                 for tl in page_dict['lines']:
                     sample = dict()
                     textline_id, transcription=tl['id'], tl['text']
                     polygon_coordinates = [ tuple(pair) for pair in tl['boundary'] ]
+                    line_tuples.append( (sample, textline_id, polygon_coordinates, transcription) )
+
+            for (sample, textline_id, polyg_coordinates, transcription) in line_tuples:
                 
+                transcription = transcription.replace("\t",' ')
+                sample['transcription'] = transcription
+                textline_bbox = ImagePath.Path( polygon_coordinates ).getbbox()
+                
+                x_left, y_up, x_right, y_low = textline_bbox
+                sample['width'], sample['height'] = x_right-x_left, y_low-y_up
+                
+                img_path_prefix = on_disk_folder.joinpath( f"{page_id}-{textline_id}" ) if on_disk_folder is not None else f"{page_id}-{textline_id}"
+                sample['img'] = Path(img_path_prefix).with_suffix('.png')
 
-            transcription = transcription.replace("\t",' ')
-            sample['transcription'] = transcription
-            textline_bbox = ImagePath.Path( polygon_coordinates ).getbbox()
-            x_left, y_up, x_right, y_low = textline_bbox
-            sample['width'], sample['height'] = x_right-x_left, y_low-y_up
-            
-            img_path_prefix = on_disk_folder.joinpath( f"{page_id}-{textline_id}" ) if on_disk_folder is not None else f"{page_id}-{textline_id}"
-            sample['img'] = Path(img_path_prefix).with_suffix('.png')
+                if on_disk_folder is not None:
+                    if not Path(on_disk_folder).is_dir():
+                        raise FileNotFoundError("Abort. Check that directory {} exists.")
 
-            if on_disk_folder is not None:
-                if not Path(on_disk_folder).is_dir():
-                    raise FileNotFoundError("Abort. Check that directory {} exists.")
+                    bbox_img = page_image.crop( textline_bbox)
+                    if not (config['resume_task'] and sample['img'].exists()):
+                        img_hwc = np.array( bbox_img )
+                        leftx, topy = textline_bbox[:2]
+                        transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in polygon_coordinates ], dtype='int')[:,::-1]
 
-                bbox_img = page_image.crop( textline_bbox)
-                if not (config['resume_task'] and sample['img'].exists()):
-                    img_hwc = np.array( bbox_img )
-                    leftx, topy = textline_bbox[:2]
-                    transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in polygon_coordinates ], dtype='int')[:,::-1]
+                        boolean_mask = ski.draw.polygon2mask( img_hwc.shape[:2], transposed_coordinates )
+                        sample['binary_mask']=img_path_prefix.with_suffix('.bool.npy.gz')
+                        with gzip.GzipFile( sample['binary_mask'], 'w') as zf:
+                            np.save( zf, boolean_mask )
 
-                    boolean_mask = ski.draw.polygon2mask( img_hwc.shape[:2], transposed_coordinates )
-                    sample['binary_mask']=img_path_prefix.with_suffix('.bool.npy.gz')
-                    with gzip.GzipFile( sample['binary_mask'], 'w') as zf:
-                        np.save( zf, boolean_mask )
+                        bbox_img.save( sample['img'] )
 
-                    bbox_img.save( sample['img'] )
+                        # construct an additional, flat channel
+                        if config['channel_func'] is not None:
+                            img_channel_hw = config['channel_func']( img_hwc, boolean_mask)
+                            sample['img_channel']=img_path_prefix.with_suffix( config['channel_suffix'] )
+                            with gzip.GzipFile(sample['img_channel'], 'w') as zf:
+                                np.save( zf, img_channel_hw ) 
 
-                    # construct an additional, flat channel
-                    if config['channel_func'] is not None:
-                        img_channel_hw = config['channel_func']( img_hwc, boolean_mask)
-                        sample['img_channel']=img_path_prefix.with_suffix( config['channel_suffix'] )
-                        with gzip.GzipFile(sample['img_channel'], 'w') as zf:
-                            np.save( zf, img_channel_hw ) 
+                    with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
+                        gt_file.write( sample['transcription'])
+                        if 'expansion_masks' in sample:
+                            gt_file.write( '<{}>'.format( sample['expansion_masks']))
 
-                with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
-                    gt_file.write( sample['transcription'])
-                    if 'expansion_masks' in sample:
-                        gt_file.write( '<{}>'.format( sample['expansion_masks']))
-
-                samples.append( sample )
+                    samples.append( sample )
         return samples
 
     @staticmethod
