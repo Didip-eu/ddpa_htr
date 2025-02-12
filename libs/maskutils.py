@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 import gzip
+from PIL import Image
+from typing import Union,List,Tuple
 
 
 # 2D-channel functions, to be used in combination with either the BB image or the polygon/background image,
@@ -87,4 +89,11 @@ def show_img_three_plus_one(img_chw):
     mask_array = np.stack( [ mask_array, mask_array, mask_array ]).transpose(1,2,0)
     plt.imshow( img_array * mask_array )
     plt.show()
+
+
+def gray_channel_gz_to_png( channel_npy_gz: Union[Path,str], out_file: Union[Path,str], target_dir=Path('.')): 
+    fileprefix = Path(re.sub(r'\..+', '', channel_file.name ))
+    with gzip.GzipFile(channel_npy_gz, 'r') as channel_hw_f:
+        channel_hw = np.load( channel_hw_f )
+        Image.fromarray( np.stack([channel_hw, channel_hw, channel_hw], axis=2)).save( fileprefix.with_suffix('.png'))
 

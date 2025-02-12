@@ -368,7 +368,7 @@ class ChartersDataset(VisionDataset):
             data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=subset)
             logger.info(f"Subset '{subset}' contains {len(data)} samples.")
 
-            return data
+        return data
 
 
 
@@ -806,6 +806,7 @@ class ChartersDataset(VisionDataset):
                 elif self.config['line_padding_style']=='median':
                     padding_func = self.bbox_median_pad
                 img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
+        del sample['binary_mask']
 
         # np.ndarrays are not picked up by v2.transforms when in dict: hence the conversion
         sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)
@@ -989,12 +990,8 @@ class PadToWidth():
         new_t_chw = torch.zeros( t_chw.shape[:2] + (self.max_w,))
         new_t_chw[:,:,:w] = t_chw
 
-        # add a field
-        mask = torch.zeros( new_t_chw.shape, dtype=torch.bool)
-        mask[:,:,:w] = 1
-
         transformed_sample = sample.copy()
-        transformed_sample.update( {'img': new_t_chw, 'mask': mask } )
+        transformed_sample.update( {'img': new_t_chw } )
         return transformed_sample
 
 
