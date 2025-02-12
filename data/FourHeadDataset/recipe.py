@@ -77,13 +77,13 @@ if not Path('no_links').exists():
 
     print("Creating hard links to files in {}".format( fsdb_aligned_folder ))
     for file in fsdb_aligned_folder.glob('*'):
-        if file.suffix in ['.tsv', '.md']:
+        if file.suffix in ['.tsv', '.md'] or file.is_dir():
             continue
         os.link( file, file.name)
 
     print("Creating hard links to files in {}".format( MonasteriumTeklia_folder ))
     for file in MonasteriumTeklia_folder.glob('*'):
-        if file.suffix in ['.tsv', '.md']:
+        if file.suffix in ['.tsv', '.md'] or file.is_dir():
             continue
         os.link(file, file.name)
 
