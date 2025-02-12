@@ -215,10 +215,18 @@ class ChartersDataset(VisionDataset):
 
         self.data = []
 
-        build_ok = False if (from_line_tsv_file!='' or from_work_folder!='' ) else build_items
+        if (from_line_tsv_file!='' or from_work_folder!=''):
+            build_items = False
         
-        self._build_task(build_items=build_ok, work_folder=work_folder )
+        # when loading a set from compiled samples, just build all 3 CSV files
+        if from_work_folder and not from_line_tsv_file:
+            for ss in ('train', 'validate', 'test'):
+                if ss==subset:
+                    continue
+                data = self._build_task(build_items=False, work_folder=work_folder, subset=ss )
+                self.dump_data_to_tsv(data, Path(self.work_folder_path.joinpath(f"charters_ds_{ss}.tsv")) )
 
+        self.data = self._build_task(build_items=build_items, work_folder=work_folder, subset=subset )
         if self.data and not from_line_tsv_file:
             # Generate a TSV file with one entry per img/transcription pair
             self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{subset}.tsv")) )
@@ -299,7 +307,8 @@ class ChartersDataset(VisionDataset):
     def _build_task( self, 
                    build_items: bool=True, 
                    work_folder: str='', 
-                   )->None:
+                   subset: str='train',
+                   )->List[dict]:
         """From the read-only, uncompressed archive files, build the image/GT files required for the task at hand:
 
         + only creates the files needed for a particular task (train, validate, or test): if more than one subset
@@ -312,9 +321,10 @@ class ChartersDataset(VisionDataset):
                 images for the task from the pages;
             work_folder (str): Where line images and ground truth transcriptions fitting a particular task
                 are to be created; default: './MonasteriumHandwritingDatasetHTR'.
+            subset (str): 'train' (default), 'validate' or 'test'.
 
         Returns:
-            None
+            List[dict]: a list of dictionaries.
 
         Raises:
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
@@ -327,9 +337,9 @@ class ChartersDataset(VisionDataset):
             if tsv_path.exists():
                 self.work_folder_path = tsv_path.parent
                 # paths are assumed to be absolute
-                self.data = self.load_from_tsv( tsv_path, expansion_masks )
-                logger.debug("data={}".format( self.data[:6]))
-                #logger.debug("height: {} type={}".format( self.data[0]['height'], type(self.data[0]['height'])))
+                data = self.load_from_tsv( tsv_path, expansion_masks )
+                logger.debug("data={}".format( data[:6]))
+                #logger.debug("height: {} type={}".format( data[0]['height'], type(data[0]['height'])))
             else:
                 raise FileNotFoundError(f'File {tsv_path} does not exist!')
 
@@ -355,8 +365,10 @@ class ChartersDataset(VisionDataset):
                 logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
                 samples = self.load_line_items_from_dir( self.work_folder_path, self.config['channel_suffix'] )
 
-            self.data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=self.config['subset'])
-            logger.info(f"Subset contains {len(self.data)} samples.")
+            data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=subset)
+            logger.info(f"Subset '{subset}' contains {len(data)} samples.")
+
+            return data
 
 
 
@@ -518,8 +530,10 @@ class ChartersDataset(VisionDataset):
 
         samples = []
         line_tuples = []
-        #page_id = Path( page ).stem
-        page_id = Path(re.sub( r'\..+$', '', str(page.name)))
+
+        # replace extra dots in some names (everything that is not in the suffix)
+        page_id = re.match(r'(.+).{}'.format(config['gt_suffix']), page.name).group(1)
+        page_id = page_id.replace('.', '_')
 
         ###################### Case #1: PageXML ###################
         with open(page, 'r') as page_file:
