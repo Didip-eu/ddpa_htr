@@ -599,6 +599,8 @@ class ChartersDataset(VisionDataset):
             for (sample, textline_id, polyg_coordinates, transcription) in line_tuples:
                 
                 transcription = transcription.replace("\t",' ')
+                if len(transcription) == 0:
+                    continue
                 sample['transcription'] = transcription
                 textline_bbox = ImagePath.Path( polygon_coordinates ).getbbox()
                 
