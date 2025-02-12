@@ -16,10 +16,10 @@ Training sample counts:
 
 | Dataset           | Actual     | Combined set   | 
 | :---              |       ---: |          ---:  |
-Nuremberg           |     26130  |          3750  |
-Koenigsfelden       |     26167  |         14000  | 
-Monasterium/Teklia  |      8423  |          8423  | 
-FSDB_aligned        |     11170  |         11170  |
+Nuremberg           |     26130  |          3760  | 11258/3
+Koenigsfelden       |     26167  |         14050  | 37.52/30 * 11258
+Monasterium/Teklia  |      8423  |          8423  | Fixed
+FSDB_aligned        |     11258  |         11258  | Fixed
 
 Recipe:
 
@@ -39,8 +39,8 @@ koenigsfelden_folder = Path('../koenigsfelden_matrix')
 fsdb_aligned_folder = Path('../fsdb_aligned_matrix')
 MonasteriumTeklia_folder = Path('../MonasteriumTeklia_matrix')
 
-koenigsfelden_count = 14000
-nuremberg_count=3750
+koenigsfelden_count = 14050
+nuremberg_count=3760
 
 def purge(folder: str, include_suffix:list=['.npy', '.txt', '.jpg', '.png', '.gz', '.tsv']) -> int:
     cnt = 0

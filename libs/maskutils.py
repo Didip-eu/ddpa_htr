@@ -39,7 +39,7 @@ def bbox_blurry_channel(img_hwc: np.ndarray, ignored=None, kernel_size=10) -> np
     # note: skimage functions typically return 0-1 floats, no matter the input
     return ski.filters.rank.mean( ski.util.img_as_ubyte(ski.color.rgb2gray(img_hwc)), np.full((kernel_size,kernel_size),1))
 
-def bbox_blurry_channel_file_from_img(img_file_path:str, kernel_size=10, suffix=".mask.npy", compress=True) -> None:
+def bbox_blurry_channel_file_from_img(img_file_path:str, kernel_size=10, suffix=".blurry_channel.npy", compress=True) -> None:
     img_file_path = Path( img_file_path)
     img_hwc = ski.io.imread( img_file_path )
     channel_hw = bbox_blurry_channel( img_hwc, kernel_size=kernel_size)
@@ -63,7 +63,7 @@ def bbox_gray_channel(img_hwc: np.ndarray, ignored=None) -> np.ndarray:
     return ski.util.img_as_ubyte( ski.color.rgb2gray(img_hwc))
 
 
-def bbox_gray_channel_file_from_img(img_file_path:str, kernel_size=10, suffix=".mask.npy", compress=True) -> None:
+def bbox_gray_channel_file_from_img(img_file_path:str, suffix=".gray_channel.npy", compress=True) -> None:
     img_file_path = Path( img_file_path)
     img_hwc = ski.io.imread( img_file_path )
     channel_hw = bbox_gray_channel( img_hwc )
