@@ -164,6 +164,8 @@ class ChartersDataset(VisionDataset):
         self.raw_data_folder_path = None
         self.work_folder_path = None # task-dependent
 
+        if line_padding_style and line_padding_style not in ['noise', 'zero', 'median', 'none']:
+            raise ValueError(f"Incorrect padding style: '{line_padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
         self.from_line_tsv_file = ''
         if from_line_tsv_file == '':
             # Local file system with data samples, no archive
