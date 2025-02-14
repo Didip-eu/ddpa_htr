@@ -91,7 +91,7 @@ For further options in  `libs/charters_htr.py` module, look at the embedded docu
 
 Because the preprocessing step is costly and in order to avoid unwanted complexity into the training logic, the 
 current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one for each of the training, validation, and test subsets.
-The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the directory contains an extra channel for a given image (*.npy.gz) -also listed in the TSV-it is automatically concatenated to the tensor at loading time.
+The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the TSV list has an extra field for a flat channel file (`*.npy.gz`), it is automatically concatenated to the tensor at loading time.
 
 For a charter dataset to play with, look at the [Data section](#Data) above.
 
@@ -166,12 +166,13 @@ export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_
 ```
 
 
-### Additional scripts
+### Additional scripts and modules
+
 
 The following scripts are one-offs, that are not meant for public consumption:
 
 + `bin/ddp_htr_train_with_abbrev.py`: (for experiments) training script that uses abbreviation masks on the GT transcriptions, as well as a custom edit distance function, in order to evaluate the abbreviations contribution to the CER.
 + `bin/ddp_htr_viewer.py`: visualizing confidence scores for a given HTR (color + transcription overlay)
 + some of the local modules are not part of the core HTR dependencies. For example:
-  * pre-processing/compilation step: `charters_htr.py` and its dependencies (`seglib.py`, `download__utils.py`)
+  * pre-processing/compilation step: `seglib.py`, `download__utils.py`
   * for convenience only: `maskutils.py`, `visuals.py`
