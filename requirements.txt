@@ -11,4 +11,5 @@ setuptools
 scikit-image
 torch
 torchvision
+tensorboard
 tqdm
