@@ -53,15 +53,17 @@ For instance, the following Python call compiles line samples from an existing d
 
 
 ```python
->>> sys.path.append('.')
->>> from libs import charters_htr, maskutils as msk
->>> charters_htr.ChartersDataset(sysfrom_page_xml_dir='/home/nicolas/tmp/data/Monasterium/MonasteriumTekliaGTDataset', work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise')
+sys.path.append('.')
+from libs import charters_htr, maskutils as msk
+charters_htr.ChartersDataset(from_page_dir=f'{os.environ["HOME"]}/tmp/data/Monasterium/MonasteriumTekliaGTDataset', work_folder='./data/MonasteriumTeklia', channel_func=msk.bbox_blurry_channel)
 ```
 
 The resulting work folder (it is created if it does not exist) stores 
 
-+ the line images where the polygon-of-interest is padded with noise; 
-+ an extra flat, gray channel that is to be concatenated to the image tensor at loading time;
++ the line images  (`*.png`)
++ the transcription ground truth files (`*.gt.txt`)
++ binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice
++ in this particular case, for each line image,  an extra flat, gray channel that is to be concatenated to the image tensor at loading time
 + a TSV file `charters_ds_train.tsv` that lists all samples in the training subset, with 70% of the total number of samples, as shown below:
 
 ```tsv
@@ -71,16 +73,18 @@ Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.png     der Öheim von Gemünd    134  
 ...
 ```
 
-At this point, all sample data have been generated. To obtain the validation and test sets, we simply read from the existing work folder:
+At this point, all sample data have been generated. To obtain the validation and test sets, we simply read from the existing work folder. The  command generates 3 TSV files for the training, validation, and test subsets, respectively:
 
 ```python
->>> charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise', subset='validate')
->>> charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia_noise_padded_blurry_channel', channel_func=msk.bbox_blurry_channel, line_padding_style='noise', subset='test')
+>>> myTrainingSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset_ratios={.8, .1, .1})
+```
+The `line_padding_style` keyword specifies how the polygon mask should be used at loading time (other options: `median`, `zero`, or `none`).
+By default, the constructor above returns a training set object, but any particular live subset can be loaded:
+```python
+>>> myTestSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset='test')
 ```
 
-[Note that the channel and padding options have been kept, even if they have no effect anymore on the data: it allows for proper self-documentation of the dataset parameters in the generated README.md.]
-
-It is also possible to generate all 3 TSV files from a folder containing only the line images and transcriptions (and an optional channel file), or to generate subsets with different ratios. For this and all possibilities offered by the `libs/charters_htr.py` module, look at the embedded documentation.
+For further options in  `libs/charters_htr.py` module, look at the embedded documentation or at the mother repo [DiDip_handwriting_datasets](https://github.com/Didip-eu/didip_handwriting_datasets).
 
 
 #### Training from compiled line samples

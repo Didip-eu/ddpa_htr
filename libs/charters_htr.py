@@ -61,15 +61,13 @@ class ChartersDataset(VisionDataset):
             dataset_resource (dict): meta-data (URL, archive name, type of repository).
 
             work_folder_name (str): The work folder is where a task-specific instance of the data is created; if it not
-                passed to the constructor, a default path is constructed, using this default name.
+                passed to the constructor, a default path `data/<work_folder_name>` is created in the
+                current directory.
 
             root_folder_basename (str): A basename for the root folder, that contains
-                * the archive
-                * the subfolder that is created from it.
-                * work folders for specific tasks
-                By default, a folder named ``data/<root_folder_basename>`` is created in the *project directory*,
-                if no other path is passed to the constructor.
-
+                * the archive, if the dataset is to be downloaded
+                * the subfolder that is created from it (with page data)
+                * the work folders for specific tasks (where line items are to be compiled)
     """
 
     dataset_resource = None
@@ -105,9 +103,7 @@ class ChartersDataset(VisionDataset):
                 original files (pageXML documents and page images) is to be created. 
                 Default: subfolder `data/Charters' in this project's directory.
             work_folder (str): Where line images and ground truth transcriptions fitting a
-                particular task are to be created; default: '<root>/ChartersHandwritingDatasetHTR';
-                if parameter is a relative path, the work folder is created under
-                <root>; an absolute path overrides this.
+                particular task are to be created; default: './data/ChartersHandwritingDatasetHTR';
             subset (str): 'train' (default), 'validate' or 'test'.
             subset_ratios (Tuple[float, float, float]): ratios for respective ('train', 
                 'validate', ...) subsets
@@ -345,11 +341,10 @@ class ChartersDataset(VisionDataset):
 
         else:
             if work_folder=='':
-                self.work_folder_path = Path(self.root, self.work_folder_name+'HTR') 
+                self.work_folder_path = Path('data', self.work_folder_name+'HTR') 
                 logger.debug("Setting default location for work folder: {}".format( self.work_folder_path ))
             else:
-                # if work folder is an absolute path, it overrides the root
-                self.work_folder_path = self.root.joinpath( work_folder )
+                self.work_folder_path = Path(work_folder)
                 logger.debug("Work folder: {}".format( self.work_folder_path ))
 
             if not self.work_folder_path.is_dir():
