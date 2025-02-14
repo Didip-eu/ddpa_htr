@@ -76,12 +76,12 @@ Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.png     der Öheim von Gemünd    134  
 At this point, all sample data have been generated. To obtain the validation and test sets, we simply read from the existing work folder. The  command generates 3 TSV files for the training, validation, and test subsets, respectively:
 
 ```python
->>> myTrainingSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset_ratios={.8, .1, .1})
+myTrainingSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset_ratios={.8, .1, .1})
 ```
 The `line_padding_style` keyword specifies how the polygon mask should be used at loading time (other options: `median`, `zero`, or `none`).
 By default, the constructor above returns a training set object, but any particular live subset can be loaded:
 ```python
->>> myTestSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset='test')
+myTestSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset='test')
 ```
 
 For further options in  `libs/charters_htr.py` module, look at the embedded documentation or at the mother repo [DiDip_handwriting_datasets](https://github.com/Didip-eu/didip_handwriting_datasets).
