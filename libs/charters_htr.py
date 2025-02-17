@@ -593,7 +593,7 @@ class ChartersDataset(VisionDataset):
                     polygon_coordinates = [ tuple(pair) for pair in tl['boundary'] ]
                     line_tuples.append( (sample, textline_id, polygon_coordinates, transcription) )
 
-            for (sample, textline_id, polyg_coordinates, transcription) in line_tuples:
+            for (sample, textline_id, polygon_coordinates, transcription) in line_tuples:
                 
                 transcription = transcription.replace("\t",' ')
                 if len(transcription) == 0:
@@ -627,7 +627,7 @@ class ChartersDataset(VisionDataset):
                         # construct an additional, flat channel
                         if config['channel_func'] is not None:
                             img_channel_hw = config['channel_func']( img_hwc, boolean_mask)
-                            sample['img_channel']=img_path_prefix.with_suffix( config['channel_suffix'] )
+                            sample['img_channel']=img_path_prefix.with_suffix( '.channel.npy.gz' )
                             with gzip.GzipFile(sample['img_channel'], 'w') as zf:
                                 np.save( zf, img_channel_hw ) 
 
