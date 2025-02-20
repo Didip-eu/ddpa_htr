@@ -162,6 +162,11 @@ if __name__ == "__main__":
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             predictions, _ = model.inference_task( img, lengths, split_output=args.auxhead )
 
+            print(transcriptions)
+            print(predictions)
+            print("transcription lengths=", [len(tr) for tr in transcriptions ])
+            print("prediction lengths=", [len(pr) for pr in predictions ])
+
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
             wer += batch_wer
@@ -267,7 +272,7 @@ if __name__ == "__main__":
 
     elif args.mode == 'test':
         
-        ds_test = ChartersDataset(shape='polygons',
+        ds_test = ChartersDataset(
             from_line_tsv_file=args.dataset_path_test,
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
             target_transform=filter_transcription,)
