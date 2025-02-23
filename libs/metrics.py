@@ -173,11 +173,11 @@ def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
         y (str): target string
 
     Returns:
-        Tuple[int, np.ndarray]: a pair with the edit distance and an a integer matrix M, where where 
-            each index stands for a character (with 0 being the nullchar) and M[i,j] is the number of
-            times char[i] is substituted with char[j]. Insertions and deletions correspond to 
-            substitutions of and by the nullchar, respectively. All lines guaranteed to have a non-zero
-            sum, allowing for easy normalization.
+        Tuple[int, np.ndarray]: a pair with the edit distance and an a integer matrix M, 
+            where each index stands for a character (with 0 being the nullchar) and M[i,j]
+            is the number of times char[i] is substituted with char[j]. Insertions and deletions
+            correspond to substitutions of and by the nullchar, respectively. All lines 
+            guaranteed to have a non-zero sum, allowing for easy normalization.
     """
     alpha = alphabet( x + y )
     memo = [ [0]*(len(y)+1) for r in range(len(x)+1) ]
