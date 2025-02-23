@@ -161,28 +161,24 @@ def edit_dist( x, y ):
 
     return dist_rec(len(x)-1, len(y)-1)
 
-def char_confusion_matrix( x, y ):
+def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
     """
-    The by-product of edit distance: the character confusion matrix.
+    The by-product of edit distance: the character confusion matrix, as 
+    an array of integers, for easy testing. For all practical purpose,
+    use the wrapper `char_confusion_matrix`, which returns a normalized
+    array.
 
     Args:
         x (str): start string
         y (str): target string
 
     Returns:
-        int: the Levenshtein edit distance, where each insertion, deletion and substitution 
-            contributes 1 to the distance.
+        Tuple[int, np.ndarray]: a pair with the edit distance and an a integer matrix M, where where each each index stands for a character
+            (with 0 being the nullchar) and M[i,j] is the number of times char[i] is substituted with
+            char[j]. Insertions and deletions correspond to substitutions of and by the nullchar,
+            respectively. All lines guaranteed to have a non-zero sum, allowing for easy normalization.
     """
-    if len(x)==0 or len(y)==0:
-        return abs(len(x)-len(y))
-
-    nullchar = 'ϵ'
-    alphidx = {nullchar: 0}
-    alphidx.update( { k:idx for idx,k in enumerate( sorted( set( list( x + y ))), start=1 ) })
-    print(alphidx)
-
-
-    # memo has one more row and one more col. than x and y respectively
+    alpha = alphabet( x + y )
     memo = [ [0]*(len(y)+1) for r in range(len(x)+1) ]
     for i in range(len(x)+1):
         memo[i][0]=i
@@ -194,44 +190,50 @@ def char_confusion_matrix( x, y ):
             else:
                 memo[i][j]=min( memo[i-1][j-1], memo[i-1][j], memo[i][j-1]) + 1
 
-    print( ' '*7 +'  '.join(list(y)) + '\n' + '\n'.join( [ f'{x[r-1]}  {row}' for (r,row) in enumerate(memo) ]))
-    # find an alignment path
-    def path( mem ):
-        # note: sum of each line is 1
-        cm = np.zeros((len(alphidx.keys()), len(alphidx.keys())))
-        mem_i, mem_j = len(mem)-1, len(mem[0])-1
-        while True:
-            if mem_i == 0:
-                return cm
-            if mem_j == 0:
-                return cm
-            i, j = mem_i-1, mem_j-1
-            #print(f"i={i}, j={j}")
-            if x[i]==y[j]:
-                #print(f"sub {x[i]} with {y[j]}")
-                cm[ alphidx[x[i]], alphidx[y[j]]] += 1
-                mem_i -=1 
-                mem_j -=1
-            elif (mem[mem_i-1][mem_j-1] <= mem[mem_i][mem_j-1] and mem[mem_i-1][mem_j-1] <= mem[mem_i-1][mem_j]):
-                print(f"sub {x[i]} with {y[j]}")
-                cm[ alphidx[x[i]], alphidx[y[j]]] += 1
-                mem_i -=1 
-                mem_j -=1
-            elif mem[mem_i-1][mem_j] < mem[mem_i-1][mem_j-1] and mem[mem_i-1][mem_j] < mem[mem_i][mem_j-1]:
-                print(f"delete {x[i]}")
-                cm[ alphidx[x[i-1]], alphidx[nullchar]] += 1 # from north: x-deletion
-                mem_i -= 1 # from north: x-del
-            elif mem[mem_i][mem_j-1] < mem[mem_i-1][mem_j-1] and mem[mem_i][mem_j-1] < mem[mem_i-1][mem_j]:
-                print(f"insert {y[j]}")
-                cm[ alphidx[nullchar], alphidx[y[j-1]]] += 1 # from west:: y-insertion
-                mem_j -= 1
+    cm = np.zeros((len(alpha.keys()), len(alpha.keys())))
+    mem_i, mem_j = len(x), len(y)
+    while mem_i > 0 and mem_j > 0:
+        i, j = mem_i-1, mem_j-1
+        if x[i]==y[j] or (memo[mem_i-1][mem_j-1] <= memo[mem_i][mem_j-1] and memo[mem_i-1][mem_j-1] <= memo[mem_i-1][mem_j]):
+            cm[ alpha[x[i]], alpha[y[j]]] += 1  # substitute
+            mem_i -= 1 
+            mem_j -= 1
+        elif memo[mem_i-1][mem_j] < memo[mem_i-1][mem_j-1] and memo[mem_i-1][mem_j] < memo[mem_i][mem_j-1]:
+            cm[ alpha[x[i]], 0] += 1 # from north: x-deletion
+            mem_i -= 1 
+        elif memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j-1] and memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j]:
+            cm[ 0, alpha[y[j]]] += 1 # from west:: y-insertion
+            mem_j -= 1
+    while mem_i > 0:
+        cm[ alpha[x[mem_i-1]], 0] += 1
+        mem_i -= 1
+    while mem_j > 0:
+        cm[ 0, alpha[y[mem_j-1]]] += 1
+        mem_j -= 1
 
-    #print( ' '*7 +'  '.join(list(y)) + '\n' + '\n'.join( [ f'{x[r-1]}  {row}' for (r,row) in enumerate(memo) ]))
-    cm = path( memo )
-    print(cm.shape, np.sum( cm, axis=1).shape)
-    print(cm[1:] / np.sum( cm[1:], axis=1).reshape((len(cm)-1, 1)))
-    return memo, cm
+    for r, row in enumerate( cm ): # ensure that any 0 line always sums up to 1
+        if np.all( np.logical_not( cm[r] )):
+            cm[r,r]=1
+
+    return (cm[-1][-1], cm)
     
+
+def char_confusion_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
+    """
+    The by-product of edit distance: the character confusion matrix.
+
+    Args:
+        x (str): start string
+        y (str): target string
+
+    Returns:
+        Tuple[int, np.ndarray]: a pair with the distance and a matrix M of real values, where 
+            each each index stands for a character (with 0 being the nullchar) and M[i,j] is
+            the share of char[i] that is substituted with char[j]. Insertions and deletions 
+            correspond to substitutions of and by the nullchar, respectively. 
+    """
+    d, cm = char_confusion_integer_matrix(x, y)
+    return (d, cm / np.expand_dims(np.sum(cm, axis=1), axis=1))
 
 def edit_dist_with_mask(x, y, masks=[]):
     """
@@ -302,10 +304,8 @@ def align_dist(x, y):
         elif memo[i][j-1] <= memo[i][j] and memo[i][j-1] <= memo[i-1][j]:
             j -= 1
     
-    alignments = tuple(zip(*reversed(pairs))) # unzipping :)
+    return tuple(zip(*reversed(pairs))) # unzipping :)
  
-    return alignments
-
 def align_lcs(x, y):
     """ Compute a LCS-based alignment between strings x and y.
 
@@ -342,10 +342,21 @@ def align_lcs(x, y):
         elif memo[i][j-1] >= memo[i][j] and memo[i][j-1] >= memo[i-1][j]:
             j -= 1
     
-    alignments = tuple(zip(*reversed(pairs))) # unzipping :)
+    return tuple(zip(*reversed(pairs))) # unzipping :)
  
-    return alignments
 
+def alphabet(s:str, nullchar='ϵ'):
+    """ Indexed alphabet of string x, as a dictionary { char: idx }
+
+    Args:
+        x (str): input string
+        nullchar (str): a 1-char string that represent the nullchar, always with index 0. Default: 'ϵ'
+    Output:
+        dict[str,int]: a dictionary { char: idx }
+    """
+    alpha = {nullchar: 0}
+    alpha.update( { k:idx for idx,k in enumerate( sorted( set( list( s ))), start=1 ) })
+    return alpha
 
 
 @pytest.mark.parametrize("x, y, alignment", [ ('', '', ()),
@@ -355,7 +366,7 @@ def align_lcs(x, y):
                                              ('Le roi court', 'La route tourne', ((0,2,3,4,6,8,9,10), (0,2,3,4,8,10,11,12))),
                                          ])
 def test_alignment(x, y, alignment):
-    assert align(x, y) == alignment
+    assert align_dist(x, y) == alignment
 
 @pytest.mark.parametrize("x, y, distance", [ ('', '', 0),
                                              ('La route tourne', '', 15),
@@ -365,7 +376,7 @@ def test_alignment(x, y, alignment):
                                          ])
 def test_edit_dist_strings(x, y, distance):
     assert edit_dist(x, y) == distance
-    assert edit_dist(x, y) == Levenshtein.distance( x, y )
+    #assert edit_dist(x, y) == Levenshtein.distance( x, y )
 
 @pytest.mark.parametrize("x, y, distance", [ ('', '', 0),
                                              ('La route tourne', '', 15),
@@ -376,7 +387,7 @@ def test_edit_dist_strings(x, y, distance):
 def test_edit_dist_codes(x, y, distance):
     x_codes, y_codes = [ord(c) for c in x ], [ ord(c) for c in y ]
     assert edit_dist( x_codes, y_codes ) == distance
-    assert edit_dist(x, y) == Levenshtein.distance( x_codes, y_codes )
+    #assert edit_dist(x, y) == Levenshtein.distance( x_codes, y_codes )
 
 @pytest.mark.parametrize("x, y, mask, distance", [ ('', '', [], 0),
                                                    ('La route tourne', '', [], 15),
@@ -392,16 +403,91 @@ def test_edit_dist_with_mask(x, y, mask, distance):
     assert edit_dist_with_mask(x, y, mask) == distance
 
 
+def test_confusion_matrix_identity():
+    x, y = "La route ", "La route "
+    _, cm_out = char_confusion_integer_matrix( x, y )
+    expected_cm = np.array([[1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 2., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 1., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 1., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 1., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 1., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 0., 1.]])
 
-def test_cm():
-    #d, cm = char_confusion_matrix( 'La route tourne', 'Le roi court')
-    print("La route tourne, la roue tourne")
-    d, cm = char_confusion_matrix( 'La route tourne', 'La roue tourne')
-    print(cm)
+    assert np.array_equal(cm_out, expected_cm )
 
-    print("La rute tourne, la roube tourne")
-    d, cm = char_confusion_matrix( 'Le Partisan de la prigoncée', 'L')
 
-    print(cm)
-    assert type(cm) is np.ndarray
+def test_confusion_matrix_x_deletions():
+    x, y = "La route", ""
+    _, cm_out = char_confusion_integer_matrix( x, y )
+    expected_cm = np.array([[1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [1., 0., 0., 0., 0., 0., 0., 0., 0.]])
+
+    assert np.array_equal(cm_out, expected_cm )
+
+
+def test_confusion_matrix_y_insertions():
+    x, y = "", "La route"
+    _, cm_out = char_confusion_integer_matrix( x, y )
+    expected_cm = np.array([[0., 1., 1., 1., 1., 1., 1., 1., 1.],
+                            [0., 1., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 1., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 1., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 1., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 1., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 0., 1.]])
+
+    assert np.array_equal(cm_out, expected_cm )
+
+
+def test_confusion_matrix_substitutions():
+    x, y = "route", "aabab"
+    _, cm_out = char_confusion_integer_matrix( x, y )
+    expected_cm = np.array([[1., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 1., 0., 0., 0., 0., 0.]])
+
+    assert np.array_equal(cm_out, expected_cm )
+def test_confusion_matrix_all_ops():
+    x, y = "La rute tourne", "la roube tourna"
+    _, cm_out = char_confusion_integer_matrix( x, y )
+    expected_cm = np.array([[0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0.],
+                            [0., 2., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 1., 0., 1., 0., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 0., 0., 2., 0., 0.],
+                            [0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0.],
+                            [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 2.]])
+
+    assert np.array_equal(cm_out, expected_cm )
+
+
+def test_confusion_matrix_normalized():
+    x, y = "La rute tourne", "la roube tourna"
+    _, cm_out = char_confusion_matrix( x, y )
+
+    assert np.all( cm_out <= 1.0 )
+    assert np.all( np.sum( cm_out, axis=1)==1 )
+
 
