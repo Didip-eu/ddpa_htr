@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 
 p = {
     "appname": "htr_train",
-    "batch_size": 2,
+    "batch_size": 8,
+    "input_channels": 3,
     "img_height": 128,
     "img_width": 2048,
     "max_epoch": 200,
@@ -78,7 +79,7 @@ if __name__ == "__main__":
 
     #------------- Model ------------
     model_spec_rnn_top = vgsl.build_spec_from_chunks(
-            [ ('Input','0,0,0,3'),
+            [ ('Input','0,0,0,{}'.format(args.input_channels)),
               ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
           ('Column Maxpool', 'Mp{height//8},1'),
           ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do')],
@@ -140,8 +141,9 @@ if __name__ == "__main__":
         msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings = b['transcription'][:cut]
         logger.info('epoch {}'.format( epoch ))
-        for (img_name, gt_string, decoded_string ) in zip(  b['id'][:cut], b['transcription'][:cut], msg_strings ):
+        for (img, img_name, gt_string, decoded_string ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], msg_strings ):
                 logger.info("{}:\n\t[{}]\n\t {}".format(img_name, decoded_string, gt_string ))
+                writer.add_image(img_name, img )
 
         model.net.train()
 

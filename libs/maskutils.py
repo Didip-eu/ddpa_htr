@@ -91,9 +91,3 @@ def show_img_three_plus_one(img_chw):
     plt.show()
 
 
-def gray_channel_gz_to_png( channel_npy_gz: Union[Path,str], out_file: Union[Path,str], target_dir=Path('.')): 
-    fileprefix = Path(re.sub(r'\..+', '', channel_file.name ))
-    with gzip.GzipFile(channel_npy_gz, 'r') as channel_hw_f:
-        channel_hw = np.load( channel_hw_f )
-        Image.fromarray( np.stack([channel_hw, channel_hw, channel_hw], axis=2)).save( fileprefix.with_suffix('.png'))
-

@@ -19,7 +19,7 @@ Training sample counts:
 Nuremberg           |     26130  |          3760  | 11258/3
 Koenigsfelden       |     26167  |         14050  | 37.52/30 * 11258
 Monasterium/Teklia  |      8423  |          8423  | Fixed
-FSDB_aligned        |     11258  |         11258  | Fixed
+FSDB_aligned        |     11165  |         11165  | Fixed
 
 Recipe:
 
@@ -77,25 +77,25 @@ if not Path('no_links').exists():
 
     print("Creating hard links to files in {}".format( fsdb_aligned_folder ))
     for file in fsdb_aligned_folder.glob('*'):
-        if file.suffix in ['.tsv', '.md'] or file.is_dir():
+        if file.suffix in ['.tsv', '.md', '.py'] or file.is_dir():
             continue
         os.link( file, file.name)
 
     print("Creating hard links to files in {}".format( MonasteriumTeklia_folder ))
     for file in MonasteriumTeklia_folder.glob('*'):
-        if file.suffix in ['.tsv', '.md'] or file.is_dir():
+        if file.suffix in ['.tsv', '.md', '.py'] or file.is_dir():
             continue
         os.link(file, file.name)
 
     print("Creating hard links to files in {}".format( koenigsfelden_folder ))
-    selected_files = [ [ filepath_prefix.with_suffix(sfx) for sfx in ('.gt.txt','.bool.npy.gz','.png') ] for filepath_prefix in koenigsfelden_samples ] 
+    selected_files = [ [ filepath_prefix.with_suffix(sfx) for sfx in ('.gt.txt','.channel.npy.gz', '.bool.npy.gz', '.png') ] for filepath_prefix in koenigsfelden_samples ] 
     for triplet in selected_files:
         for fpath in triplet:
             os.link( fpath, fpath.name)
 
 
     print("Creating hard links to files in {}".format( nuremberg_folder ))
-    selected_files = [ [ filepath_prefix.with_suffix(sfx) for sfx in ('.gt.txt','.bool.npy.gz','.png') ] for filepath_prefix in nuremberg_samples ] 
+    selected_files = [ [ filepath_prefix.with_suffix(sfx) for sfx in ('.gt.txt','.channel.npy.gz', '.bool.npy.gz','.png') ] for filepath_prefix in nuremberg_samples ] 
     for triplet in selected_files:
         for fpath in triplet:
             os.link( fpath, fpath.name)
