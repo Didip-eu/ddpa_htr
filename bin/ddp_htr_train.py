@@ -252,7 +252,7 @@ if __name__ == "__main__":
             writer.add_scalar("CER/validate", cer, epoch)
             writer.add_scalar("WER/validate", wer, epoch)
                 
-            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.3f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.4f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
                     epoch, 
                     model.train_epochs[-1]['loss'],
                     cer, wer, 
@@ -265,7 +265,7 @@ if __name__ == "__main__":
     ############# VALIDATE / TEST ############
     elif args.mode == 'validate':
         cer, wer = validate(val_loader)
-        logger.info('CER={:1.3f}, WER={:1.3f}'.format( cer, wer ))
+        logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
 
     elif args.mode == 'test':
         
@@ -275,7 +275,7 @@ if __name__ == "__main__":
             target_transform=filter_transcription,)
         test_loader = DataLoader( ds_test, batch_size=args.batch_size)
         cer, wer = validate(test_loader)
-        logger.info('CER={:1.3f}, WER={:1.3f}'.format( cer, wer ))
+        logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
 
 
     writer.flush()
