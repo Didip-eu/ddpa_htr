@@ -203,14 +203,15 @@ def char_confusion_integer_matrix( x:str, y:str, alpha=None ) -> Tuple[int, np.n
                 cm[ alpha[x[i]], alpha[y[j]]] += 1  # substitute
             mem_i -= 1 
             mem_j -= 1
-        elif memo[mem_i-1][mem_j] < memo[mem_i-1][mem_j-1] and memo[mem_i-1][mem_j] < memo[mem_i][mem_j-1]:
+        elif memo[mem_i-1][mem_j] <= memo[mem_i-1][mem_j-1] and memo[mem_i-1][mem_j] <= memo[mem_i][mem_j-1]:
             if x[i] in alpha:
                 cm[ alpha[x[i]], 0] += 1 # from north: x-deletion
             mem_i -= 1 
-        elif memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j-1] and memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j]:
+        elif memo[mem_i][mem_j-1] <= memo[mem_i-1][mem_j-1] and memo[mem_i][mem_j-1] <= memo[mem_i-1][mem_j]:
             if y[j] in alpha:
                 cm[ 0, alpha[y[j]]] += 1 # from west:: y-insertion
             mem_j -= 1
+
     while mem_i > 0:
         if x[mem_i-1] in alpha:
             cm[ alpha[x[mem_i-1]], 0] += 1
@@ -245,6 +246,7 @@ def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -
     """
     # batch-wide alphabet
     alph = alphabet(''.join( itertools.chain( xs, ys))) if alpha is None else alpha
+    print('length=', len(xs))
     integer_matrix = np.sum( np.stack([ char_confusion_integer_matrix(x, y, alpha=alph)[1] for (x,y) in zip( xs, ys) ]), axis=0 )
     return (integer_matrix / np.expand_dims(np.sum(integer_matrix, axis=1), axis=1), alph)
 
