@@ -161,7 +161,7 @@ def edit_dist( x, y ):
 
     return dist_rec(len(x)-1, len(y)-1)
 
-def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
+def char_confusion_integer_matrix( x:str, y:str, alpha=None ) -> Tuple[int, np.ndarray]:
     """
     The by-product of edit distance: the character confusion matrix, as 
     an array of integers, for easy testing. For all practical purpose,
@@ -171,6 +171,9 @@ def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
     Args:
         x (str): start string
         y (str): target string
+        alphabet (Dict[str,int]): a dictionary mapping a character to an index in the matrix.
+            Some of the input string characters may be ignored, depending on which alphabet
+            is passed to the function.
 
     Returns:
         Tuple[int, np.ndarray]: a pair with the edit distance and an a integer matrix M, 
@@ -179,7 +182,7 @@ def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
             correspond to substitutions of and by the nullchar, respectively. All lines 
             guaranteed to have a non-zero sum, allowing for easy normalization.
     """
-    alpha = alphabet( x + y )
+    alpha = alphabet( x + y ) if alpha is None else alpha
     memo = [ [0]*(len(y)+1) for r in range(len(x)+1) ]
     for i in range(len(x)+1):
         memo[i][0]=i
@@ -196,20 +199,25 @@ def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
     while mem_i > 0 and mem_j > 0:
         i, j = mem_i-1, mem_j-1
         if x[i]==y[j] or (memo[mem_i-1][mem_j-1] <= memo[mem_i][mem_j-1] and memo[mem_i-1][mem_j-1] <= memo[mem_i-1][mem_j]):
-            cm[ alpha[x[i]], alpha[y[j]]] += 1  # substitute
+            if x[i] in alpha and y[j] in alpha:
+                cm[ alpha[x[i]], alpha[y[j]]] += 1  # substitute
             mem_i -= 1 
             mem_j -= 1
         elif memo[mem_i-1][mem_j] < memo[mem_i-1][mem_j-1] and memo[mem_i-1][mem_j] < memo[mem_i][mem_j-1]:
-            cm[ alpha[x[i]], 0] += 1 # from north: x-deletion
+            if x[i] in alpha:
+                cm[ alpha[x[i]], 0] += 1 # from north: x-deletion
             mem_i -= 1 
         elif memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j-1] and memo[mem_i][mem_j-1] < memo[mem_i-1][mem_j]:
-            cm[ 0, alpha[y[j]]] += 1 # from west:: y-insertion
+            if y[j] in alpha:
+                cm[ 0, alpha[y[j]]] += 1 # from west:: y-insertion
             mem_j -= 1
     while mem_i > 0:
-        cm[ alpha[x[mem_i-1]], 0] += 1
+        if x[mem_i-1] in alpha:
+            cm[ alpha[x[mem_i-1]], 0] += 1
         mem_i -= 1
     while mem_j > 0:
-        cm[ 0, alpha[y[mem_j-1]]] += 1
+        if y[mem_j-1] in alpha:
+            cm[ 0, alpha[y[mem_j-1]]] += 1
         mem_j -= 1
 
     for r, row in enumerate( cm ): # ensure that any 0 line always sums up to 1
@@ -219,22 +227,26 @@ def char_confusion_integer_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
     return (cm[-1][-1], cm)
     
 
-def char_confusion_matrix( x:str, y:str ) -> Tuple[int, np.ndarray]:
+def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -> Tuple[np.ndarray,dict]:
     """
-    The by-product of edit distance: the character confusion matrix.
+    Character confusion matrix, for a batch, normalized.
 
     Args:
-        x (str): start string
-        y (str): target string
+        xs (List[str]): predicted strings
+        ys (List[str]): GT strings
 
     Returns:
-        Tuple[int, np.ndarray]: a pair with the distance and a matrix M of real values, where 
-            each each index stands for a character (with 0 being the nullchar) and M[i,j] is
-            the share of char[i] that is substituted with char[j]. Insertions and deletions 
-            correspond to substitutions of and by the nullchar, respectively. 
+        Tuple[np.ndarray,dict]: pair with 
+            + a matrix M of real values, where each each index stands for a character
+              (with 0 being the nullchar) and M[i,j] is the share of char[i] that is
+              substituted with char[j]. Insertions and deletions correspond to substitutions
+              of and by the nullchar, respectively. 
+            + the dictionary that stores the strings alphabet, for plotting purpose
     """
-    d, cm = char_confusion_integer_matrix(x, y)
-    return (d, cm / np.expand_dims(np.sum(cm, axis=1), axis=1))
+    # batch-wide alphabet
+    alph = alphabet(''.join( itertools.chain( xs, ys))) if alpha is None else alpha
+    integer_matrix = np.sum( np.stack([ char_confusion_integer_matrix(x, y, alpha=alph)[1] for (x,y) in zip( xs, ys) ]), axis=0 )
+    return (integer_matrix / np.expand_dims(np.sum(integer_matrix, axis=1), axis=1), alph)
 
 def edit_dist_with_mask(x, y, masks=[]):
     """
@@ -484,9 +496,31 @@ def test_confusion_matrix_all_ops():
     assert np.array_equal(cm_out, expected_cm )
 
 
-def test_confusion_matrix_normalized():
+def test_confusion_matrix_incomplete_alphabet():
     x, y = "La rute tourne", "la roube tourna"
-    _, cm_out = char_confusion_matrix( x, y )
+    _, cm_out = char_confusion_integer_matrix( x, y, alpha={'ϵ': 0, 'L': 1, 'a': 2, 'e': 3, 'u': 4}  )
+    expected_cm = np.array([[1., 0., 0., 0., 0.],
+                            [0., 1., 0., 0., 0.],
+                            [0., 0., 1., 0., 0.],
+                            [0., 0., 1., 1., 0.],
+                            [0., 0., 0., 0., 2.]])
+
+    assert np.array_equal(cm_out, expected_cm )
+
+def test_batch_char_confusion_matrix_single():
+    xs, ys = ["La rute tourne"], ["la roube tourna"]
+    cm_out, alph = batch_char_confusion_matrix( xs, ys )
+
+    assert np.all( cm_out <= 1.0 )
+    assert np.all( np.sum( cm_out, axis=1)==1 )
+    assert type(alph) is dict
+
+
+def test_batch_char_confusion_matrix_medium():
+    xs = ['rich . und an Heinzinen von Lentzburg, . und wir och dez kuntsamer erhorten . und uns dez erkanten', 'es nastten phintztags nach sand Viegeren tag in der vasten', 'vicissims su in hoc officio sucedencium aut aliquam speitalis sclarigve persona predictos fratres inquetare presu', 'rehabite vendicionis libertas nullus immuram distrbetur, u abonni impedimento seista sit prevetus et semota veritate presentium profiteor et']
+    ys = ['ich ✳ und an Heinzinen von Lentzburg, ✳ und wir och dez kuntsami erhorten ✳ und uns dez erkanten', 'des nasten phincztags nach sand Gregorii Tag in der Vasten.', 'vicissim sibi in hoc officio succedencium aut aliqua spiritalis secularisve persona predictos fratres inquietare presu', 'prehabite vendicionis libertas nullius iniuria disturbetur, sed ab omni impedimento sequestrata sit penitus et semota, veritate presencium profiteor et']
+
+    cm_out, alph = batch_char_confusion_matrix( xs, ys )
 
     assert np.all( cm_out <= 1.0 )
     assert np.all( np.sum( cm_out, axis=1)==1 )

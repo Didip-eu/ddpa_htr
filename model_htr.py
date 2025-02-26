@@ -187,6 +187,7 @@ class HTR_Model():
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
         assert isinstance( widths_n, Tensor) and len(widths_n) == img_nchw.shape[0]
 
+        self.net.to('cpu')
         # raw outputs
         outputs_ncw, output_widths = self.forward( img_nchw, widths_n, split_output=split_output ) 
 
