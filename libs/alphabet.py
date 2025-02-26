@@ -29,7 +29,7 @@ class Alphabet:
     unknown_symbol = '?' 
     unknown_value = 1
 
-    def __init__( self, alpha_repr: Union[str,list]='', tokenizer=None ) -> None:
+    def __init__( self, alpha_repr: Union[str,list]='', tokenizer=None, case_insensitive=False ) -> None:
         """Initialize a new Alphabet object. The special characters are added automatically.
 
             From a nested list::
@@ -42,15 +42,18 @@ class Alphabet:
                 >>> alphabet.Alphabet('aAbc ')
                 {' ': 1, 'A': 2, 'a': 3, 'b': 4, 'c': 5, 'ϵ': 0, '↦': 6, '⇥': 7}
 
-            Returns:
+            Args:
                 alpha_repr (Union[str, list]): the input source--it may be a nested list, or a plain string.
+                tokenizer (Callable): a tokenizer function - if None, a default function is used.
+                case_insensitive (bool): If True, merge lower- and upper-case symbol classes. Default: False.
         """
         self._utf_2_code = {}
 
         if type(alpha_repr) is str:
             self._utf_2_code = self._dict_from_string( alpha_repr )
         elif type(alpha_repr) is list:
-            self._utf_2_code = self._dict_from_list( alpha_repr )
+            merge = [] if not case_insensitive else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z'))]
+            self._utf_2_code = self._dict_from_list( alpha_repr, merge=merge )
 
         self._finalize()
 
@@ -443,7 +446,6 @@ class Alphabet:
 
         charset.difference_update( set( char for char in charset if char.isspace() and char!=' '))    
         
-        print("charset=", charset)
         weird_chars = charset.difference( set(lu.flatten( std_charsets )))
         if weird_chars:
             warnings.warn("The following characters are in the data, but not in the 'standard' charsets used by this prototype: {}".format( weird_chars ))
@@ -455,7 +457,7 @@ class Alphabet:
 
 
     @classmethod
-    def _dict_from_list(cls, symbol_list: List[Union[List,str]]) -> Dict[str,int]:
+    def _dict_from_list(cls, symbol_list: List[Union[List,str]], merge: List[str]=[]) -> Dict[str,int]:
         """Construct a symbol-to-code dictionary from a list of strings or sublists of symbols (for many-to-one alphabets):
         symbols in the same sublist are assigned the same label.
         Works on many-to-one, compound symbols. Eg.::
@@ -467,6 +469,9 @@ class Alphabet:
             symbol_list (List[Union[List,str]]): a list of either symbols (possibly with more
                 than one characters) or sublists of symbols that should map to the same code.
 
+            merge (List[str]): for each of the provided subsequences, merge those output sublists
+                that contain the characters in it. Eg. `merge=['ij']` will merge the `'i'` sublist
+                (`['i','I','î',...]`) with the `'j'` sublist (`['j','J',...]`)
         Returns:
             Dict[str,int]: a dictionary mapping symbols to codes.
         """
@@ -478,6 +483,9 @@ class Alphabet:
         # if list is not nested (one-to-one)
         if all( type(elt) is str for elt in symbol_list ):
             return {s:c for (c,s) in enumerate( sorted( symbol_list), start=2)}
+
+        if len(merge)>0:
+            symbol_list = lu.merge_sublists( symbol_list, merge )
 
         # nested list (many-to-one)
         reserved_symbols = (cls.start_of_seq_symbol, cls.end_of_seq_symbol, cls.null_symbol, cls.unknown_symbol)
