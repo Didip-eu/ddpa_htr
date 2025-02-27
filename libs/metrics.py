@@ -171,12 +171,13 @@ def char_confusion_integer_matrix( x:str, y:str, alpha=None ) -> Tuple[int, np.n
     Args:
         x (str): start string
         y (str): target string
-        alphabet (Dict[str,int]): a dictionary mapping a character to an index in the matrix.
-            Some of the input string characters may be ignored, depending on which alphabet
-            is passed to the function.
+        alpha (Dict[str,int]): a one-to-one or many-to-one dictionary char-to-integer
+            mapping; it determines the size of the square matrix, that has as many rows
+            as there are unique values in the alphabet. By default, a one-to-one alphabet
+            is constructed from the input strings.
 
     Returns:
-        Tuple[int, np.ndarray]: a pair with the edit distance and an a integer matrix M, 
+        Tuple[int, np.ndarray]: a pair with the edit distance and an integer matrix M, 
             where each index stands for a character (with 0 being the nullchar) and M[i,j]
             is the number of times char[i] is substituted with char[j]. Insertions and deletions
             correspond to substitutions of and by the nullchar, respectively. All lines 
@@ -194,7 +195,8 @@ def char_confusion_integer_matrix( x:str, y:str, alpha=None ) -> Tuple[int, np.n
             else:
                 memo[i][j]=min( memo[i-1][j-1], memo[i-1][j], memo[i][j-1]) + 1
 
-    cm = np.zeros((len(alpha.keys()), len(alpha.keys())))
+    matrix_size = len(set(alpha.values()))
+    cm = np.zeros((matrix_size, matrix_size))
     mem_i, mem_j = len(x), len(y)
     while mem_i > 0 and mem_j > 0:
         i, j = mem_i-1, mem_j-1
@@ -235,6 +237,10 @@ def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -
     Args:
         xs (List[str]): predicted strings
         ys (List[str]): GT strings
+        alpha (Dict[str,int]): a one-to-one or many-to-one dictionary char-to-integer
+            mapping; it determines the size of the square matrix, that has as many rows
+            as there are unique values in the alphabet. By default, a one-to-one alphabet
+            is constructed from the input strings.
 
     Returns:
         Tuple[np.ndarray,dict]: pair with 

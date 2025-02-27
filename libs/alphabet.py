@@ -48,11 +48,14 @@ class Alphabet:
                 case_insensitive (bool): If True, merge lower- and upper-case symbol classes. Default: False.
         """
         self._utf_2_code = {}
+        merge = [] if not case_insensitive else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z'))]
 
         if type(alpha_repr) is str:
             self._utf_2_code = self._dict_from_string( alpha_repr )
+            if case_insensitive:
+                self._utf_2_code = self._dict_from_list( self.to_list(), merge=merge)
+
         elif type(alpha_repr) is list:
-            merge = [] if not case_insensitive else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z'))]
             self._utf_2_code = self._dict_from_list( alpha_repr, merge=merge )
 
         self._finalize()
