@@ -45,20 +45,21 @@ class Alphabet:
             Args:
                 alpha_repr (Union[str, list]): the input source--it may be a nested list, or a plain string.
                 tokenizer (Callable): a tokenizer function - if None, a default function is used.
-                case_insensitive (bool): If True, merge lower- and upper-case symbol classes. Default: False.
+                case_insensitive (bool): If True, it affects:
+                    + encoding: merge lower- and upper-case symbol classes;
+                    + decoding: of any given code, lower case char is chosen.
+                    Default: False.
         """
         self._utf_2_code = {}
         merge = [] if not case_insensitive else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z'))]
 
         if type(alpha_repr) is str:
             self._utf_2_code = self._dict_from_string( alpha_repr )
-            if case_insensitive:
-                self._utf_2_code = self._dict_from_list( self.to_list(), merge=merge)
 
         elif type(alpha_repr) is list:
             self._utf_2_code = self._dict_from_list( alpha_repr, merge=merge )
 
-        self._finalize()
+        self._finalize( case_insensitive )
 
         # crude, character-splitting function makes do for now
         # TODO: a proper tokenizer that splits along the given alphabet
@@ -68,7 +69,7 @@ class Alphabet:
     def many_to_one( self ):
         return not all(i==1 for i in Counter(self._utf_2_code.values()).values())
 
-    def _finalize( self ) -> None:
+    def _finalize( self, case_insensitive=False ) -> None:
         """Finalize the alphabet's data:
 
         * Add virtual symbols: EOS, SOS, null symbol, default symbol
@@ -83,7 +84,7 @@ class Alphabet:
         
         if self.many_to_one:
             # ensure that a many-to-one code maps to first character in a sublist 
-            self._code_2_utf = { c:s for (s,c) in reversed(self._utf_2_code.items()) }
+            self._code_2_utf = { c:(s.lower() if case_insensitive else s) for (s,c) in reversed(self._utf_2_code.items()) }
         else:
             self._code_2_utf = { c:s for (s,c) in self._utf_2_code.items() }
             
@@ -494,10 +495,11 @@ class Alphabet:
         reserved_symbols = (cls.start_of_seq_symbol, cls.end_of_seq_symbol, cls.null_symbol, cls.unknown_symbol)
         def sort_and_label( lol ):
             lol = itertools.filterfalse( lambda x: x in reserved_symbols, lol )
-            lol = [ (c,s) for (c,s) in enumerate(sorted([ sub for sub in lol ], key=lambda x: x[0]), start=2)] 
+            lol = [ (c,s) for (c,s) in enumerate(sorted([ sorted(sub) for sub in lol ], key=lambda x: x[0]), start=2)] 
             return lol
 
         sall = sort_and_label( symbol_list )
+        #print(sall)
         # single-character symbols
         alphadict ={ s:c for (c,s) in sall if type(s) is str and (not s.isspace() or s==' ') }
         # compound symbols
