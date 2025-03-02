@@ -7,6 +7,7 @@ from pathlib import Path
 import itertools
 import warnings
 from collections import Counter
+import unicodedata
 
 # 3rd party
 import torch
@@ -29,7 +30,7 @@ class Alphabet:
     unknown_symbol = '?' 
     unknown_value = 1
 
-    def __init__( self, alpha_repr: Union[str,list]='', tokenizer=None, case_insensitive=False ) -> None:
+    def __init__( self, alpha_repr: Union[str,list,dict]='', tokenizer=None, case_folding=False ) -> None:
         """Initialize a new Alphabet object. The special characters are added automatically.
 
             From a nested list::
@@ -43,25 +44,33 @@ class Alphabet:
                 {' ': 1, 'A': 2, 'a': 3, 'b': 4, 'c': 5, 'ϵ': 0, '↦': 6, '⇥': 7}
 
             Args:
-                alpha_repr (Union[str, list]): the input source--it may be a nested list, or a plain string.
+                alpha_repr (Union[str, list]): the input source--it may be 
+                    + a dictionary `{ 'list': <nested list>, 'case-insensitive': bool }`
+                    + a nested list
+                    + a plain string.
                 tokenizer (Callable): a tokenizer function - if None, a default function is used.
-                case_insensitive (bool): If True, it affects:
-                    + encoding: merge lower- and upper-case symbol classes;
+                case_folding (bool): If True, it affects:
+                    + encoding: merge lower- and upper-case classes of alphanumerical symbols;
                     + decoding: of any given code, lower case char is chosen.
                     Default: False.
         """
         self._utf_2_code = {}
-        merge = [] if not case_insensitive else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z'))]
+        self._case_folding = case_folding
 
         if type(alpha_repr) is str:
             self._utf_2_code = self._dict_from_string( alpha_repr )
+        else:
+            # loading a serialized alphabet
+            alpha_list=[]
+            if type (alpha_repr) is dict:   # case 1: alphabet's list wrapped into a dict
+                alpha_list, self._case_folding = alpha_repr['list'], alpha_repr['case_folding']
+            elif type( alpha_repr) is list: # case 2: alphabet's list is bare
+                alpha_list = alpha_repr
+            merge = [] if not self._case_folding else [ f'{chr(c)}{chr(c).lower()}' for c in range(ord('A'), ord('Z')+1)]
+            self._utf_2_code = self._dict_from_list( alpha_list, merge=merge )
+        self._finalize()
 
-        elif type(alpha_repr) is list:
-            self._utf_2_code = self._dict_from_list( alpha_repr, merge=merge )
-
-        self._finalize( case_insensitive )
-
-        # crude, character-splitting function makes do for now
+        # crude, character-splitting function makes do for now 
         # TODO: a proper tokenizer that splits along the given alphabet
         self.tokenize = self._tokenize_crude if tokenizer is None else tokenizer
 
@@ -69,7 +78,11 @@ class Alphabet:
     def many_to_one( self ):
         return not all(i==1 for i in Counter(self._utf_2_code.values()).values())
 
-    def _finalize( self, case_insensitive=False ) -> None:
+    @property
+    def case_folding( self ):
+        return self._case_folding
+
+    def _finalize( self) -> None:
         """Finalize the alphabet's data:
 
         * Add virtual symbols: EOS, SOS, null symbol, default symbol
@@ -83,8 +96,8 @@ class Alphabet:
                 self._utf_2_code[ s ] = self.maxcode+1
         
         if self.many_to_one:
-            # ensure that a many-to-one code maps to first character in a sublist 
-            self._code_2_utf = { c:(s.lower() if case_insensitive else s) for (s,c) in reversed(self._utf_2_code.items()) }
+            # ensure that a many-to-one code maps to first character in a sublist: Ascii-UC if alphabet is case-sensitive, Ascii-LC otherwise 
+            self._code_2_utf = { c:(s.lower() if self.case_folding else s) for (s,c) in reversed(self._utf_2_code.items()) }
         else:
             self._code_2_utf = { c:s for (s,c) in self._utf_2_code.items() }
             
@@ -97,6 +110,13 @@ class Alphabet:
         """
         with open( filename, 'w') as of:
             print(self, file=of)
+
+    def serialize( self ) -> Dict[str,Union[List[Union[str,list]], bool]]:
+        """Wrap an alphabet into a dictionary with
+        + 'list': the alphabet in nested list form
+        + 'case_folding': a boolean flag indicating that case is folded at encoding and decoding time.
+        """
+        return {'list': self.to_list(), 'case_folding': self.case_folding }
 
 
     def to_list( self, exclude: list=[] )-> List[Union[str,list]]:
@@ -122,7 +142,12 @@ class Alphabet:
                 code_2_utfs[c].add( s )
             else:
                 code_2_utfs[c]=set([s])
-        return sorted([ sorted(list(l)) if len(l)>1 else list(l)[0] for l in code_2_utfs.values() ], key=lambda x: x[0])
+        alphabet_list = sorted([ sorted(list(l)) if len(l)>1 else list(l)[0] for l in code_2_utfs.values() ], key=lambda x: x[0])
+        #if self.case_folding:
+            # in all class, swap head char (UC) with next one if it is its LC counterpart
+        #    return [ elt if type(elt) is not list else ([elt[1],elt[0]]+elt[2:] if (len(elt)>1 and elt[0].lower()==elt[1]) else elt) for elt in alphabet_list ]
+        return alphabet_list
+
         
 
         
@@ -221,15 +246,26 @@ class Alphabet:
 
     def encode(self, sample_s: str) -> Tensor:
         """Encode a message string with integers: the string is segmented first.
+        Apply first a NFKC Unicode normalization, where f.i. 'Å' (composed) → 'Å' (precomposed)
+        and 'ĳ' → 'ij'. Special cases: ligatured characters that are not handled by
+        the NFKC normalization, s.a. 'ß' → 'ss', ... Goal: align input to alphabet charset
+        intended mapping, as much as possible (avoid cluttering of mapping with 
+        composed characters).
 
         Args:
-            sample_s (str): message string, clean or not.
+            sample_s (str): message string.
 
         Returns:
             Tensor: a list of integers; 
         """
-        sample_s = self.normalize_spaces( sample_s )
+        sample_s = self.normalize_string( sample_s )
         return torch.tensor( [ self.get_code( t ) for t in self.tokenize( sample_s ) ], dtype=torch.int64)
+
+    @staticmethod
+    def normalize_string(sample_s: str):
+        sample_s = re.sub( r'\s+', ' ', sample_s.strip())
+        sample_s = sample_s.replace('ß', 'ss').replace('æ', 'ae').replace('Æ','AE').replace('œ','oe').replace('Œ','OE')
+        return unicodedata.normalize( 'NFKC', sample_s )
 
 
     def reduce(self, sample_s: str, length_invariant=False) -> str:
@@ -241,7 +277,7 @@ class Alphabet:
                 has been modified. Default is False.
 
         Returns:
-            str: the message, where all members of a given charset of been replaced by their 
+            str: the message, where all members of a given charset have been replaced by their 
                 representative.
         """
         reduced = self.decode( self.encode( sample_s ))
@@ -332,28 +368,6 @@ class Alphabet:
         keep_idx = np.logical_and( keep_idx, msg != self.null_value )
 
         return ''.join( self.get_symbol( c ) for c in msg[ keep_idx ] )
-
-
-    @staticmethod
-    def normalize_spaces(mesg: str) -> str:
-        """Normalize the spaces:
-
-        * remove trailing spaces
-        * all spaces mapped to standard space (`' '=\\u0020`)
-        * duplicate spaces removed
-
-        Eg.::
-
-           >>> normalize_spaces('\\t \\u000Ba\\u000C\\u000Db\\u0085c\\u00A0\\u2000\\u2001d\\u2008\\u2009e')
-           ['a b c d e']
-
-        Args:
-            mesg (str): a string
-
-        Returns:
-               str: a string
-        """
-        return re.sub( r'\s+', ' ', mesg)
 
 
     @classmethod
@@ -494,12 +508,11 @@ class Alphabet:
         # nested list (many-to-one)
         reserved_symbols = (cls.start_of_seq_symbol, cls.end_of_seq_symbol, cls.null_symbol, cls.unknown_symbol)
         def sort_and_label( lol ):
-            lol = itertools.filterfalse( lambda x: x in reserved_symbols, lol )
-            lol = [ (c,s) for (c,s) in enumerate(sorted([ sorted(sub) for sub in lol ], key=lambda x: x[0]), start=2)] 
+            lol = list(itertools.filterfalse( lambda x: x in reserved_symbols, lol ))
+            lol = [ (c,s) for (c,s) in enumerate(sorted([ sorted(sub) if type(sub) is list else ''.join(sorted(sub)) for sub in lol ], key=lambda x: x[0]), start=2)] 
             return lol
 
         sall = sort_and_label( symbol_list )
-        #print(sall)
         # single-character symbols
         alphadict ={ s:c for (c,s) in sall if type(s) is str and (not s.isspace() or s==' ') }
         # compound symbols
@@ -516,7 +529,8 @@ class Alphabet:
         Returns:
             Dict[str,int]: a `{ code: symbol }` mapping.
         """
-        alphadict = { s:c for (c,s) in enumerate(sorted(set( [ s for s in stg if not s.isspace() or s==' ' ])), start=2) }
+        stg = cls.normalize_string( stg )
+        alphadict = { s:c for (c,s) in enumerate(sorted(set( list(stg))), start=2) }
         return alphadict
 
     def _tokenize_crude( self, mesg: str, quiet=True ) -> List[str]:

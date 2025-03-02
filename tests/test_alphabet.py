@@ -24,9 +24,9 @@ def test_alphabet_dict_from_string():
     Raw dictionary reflects the given string: no less, no more; no virtual chars (null, ⇥, ...)
     """
     # unique symbols, sorted
-    assert alphabet.Alphabet._dict_from_string('ßaafdbce →e') == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 'ß': 9, '→': 10, }
+    assert alphabet.Alphabet._dict_from_string('ßaafdbce →e') == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 's': 9, '→': 10, }
     # space chars ignored
-    assert alphabet.Alphabet._dict_from_string('ßaf \u2009db\n\tce\t→') == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 'ß': 9, '→': 10}
+    assert alphabet.Alphabet._dict_from_string('ßaf \u2009db\n\tce\t→') == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 's': 9, '→': 10}
 
 
 def test_dict_from_list_one_to_one():
@@ -42,13 +42,13 @@ def test_dict_from_list_compound_symbols_one_to_one():
 def test_dict_from_list_many_to_one():
     input_list = [['A', 'a'], 'J', 'b', ['ö', 'o', 'O'], 'ü', 'U', 'w', 'y', 'z', ['d', 'D']]
     alpha = alphabet.Alphabet._dict_from_list( input_list )
-    assert alpha == {'A': 2, 'a': 2, 'J': 3, 'U': 4, 'b': 5, 'd': 6, 'D': 6, 'w': 7, 'y': 8, 'z': 9, 'ö': 10, 'o': 10, 'O': 10, 'ü': 11}
+    assert alpha == {'A': 2, 'a': 2, 'D': 3, 'd': 3, 'J': 4, 'O': 5, 'o': 5, 'ö': 5, 'U': 6, 'b': 7, 'w': 8, 'y': 9, 'z': 10, 'ü': 11}
                     
 def test_dict_from_list_compound_symbols_many_to_one():
     input_list = ['A', 'ae', 'J', ['ü','U'], 'eu', 'w', 'y', 'z', ['...', '.'], 'D']
     alpha = alphabet.Alphabet._dict_from_list( input_list )
     assert set(alpha.keys()) == set([ 'A', 'ae', 'J','ü','U','eu', 'w', 'y', 'z', '...', '.', 'D'])
-    assert alpha == {'A': 3, 'D': 4, 'J': 5, 'ae': 6, 'eu': 7, 'w': 8, 'y': 9, 'z': 10, '...': 2, '.': 2, 'ü': 11, 'U': 11}
+    assert alpha == {'A': 3, 'D': 4, 'J': 5, 'ae': 7, 'eu': 8, 'w': 9, 'y': 10, 'z': 11, '.': 2, '...': 2, 'U': 6, 'ü': 6}
 
 def test_dict_from_list_realistic():
     """ Passing a list with virtual symbols (EoS, SoS) yields a correct mapping 
@@ -71,11 +71,11 @@ def test_alphabet_many_to_one_deterministic_dict_init():
     """
     Initialization from dictionaries in different orders (but same mapping) gives consistent results
     """
-    key_values = [ ('A',1), ('D',10), ('J',2), ('O',4), ('U',6), ('a',1), ('b',3), ('d',10), ('o',4), ('w',7), ('y',8), ('z',9), ('ö',4), ('ü',5) ]
+    alpha_list = [ 'A', 'D', 'J', 'O', 'U', 'a', 'b', 'd', 'o', 'w', 'y', 'z', 'ö', 'ü' ]
     symbols = set()
     for i in range(10):
-        random.shuffle( key_values )
-        symbols.add( alphabet.Alphabet( { k:v for (k,v) in key_values } ).get_symbol(2) )
+        random.shuffle( alpha_list )
+        symbols.add( alphabet.Alphabet( alpha_list ).get_symbol(2) )
     assert len(symbols) == 1
 
 def test_alphabet_many_to_one_consistent_decoding():
@@ -87,8 +87,8 @@ def test_alphabet_many_to_one_consistent_decoding():
     assert alpha.get_symbol( alpha.get_code('Â')) == 'A'
     assert alpha.get_symbol( alpha.get_code('Á')) == 'A'
     alpha = alphabet.Alphabet(['0', '1', '2', ['C', 'À', 'A', 'Á'], 'B'])
-    assert alpha.get_symbol( alpha.get_code('Á')) == 'C'
-    assert alpha.get_symbol( alpha.get_code('A')) == 'C'
+    assert alpha.get_symbol( alpha.get_code('Á')) == 'A'
+    assert alpha.get_symbol( alpha.get_code('A')) == 'A'
 
 def test_alphabet_many_to_one_deterministic_list_init():
     """ 
@@ -116,8 +116,8 @@ def test_alphabet_many_to_one_compound_symbols_deterministic_list_init():
 
 def test_alphabet_init_from_str():
     alpha = alphabet.Alphabet('ßaf db\n\tce\t→')
-    assert alpha._utf_2_code == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 'ß': 9, '→': 10, 'ϵ': 0, '?': 1, '↦': 11, '⇥': 12}
-    assert alpha._code_2_utf == {12: '⇥', 11: '↦', 10: '→', 0: 'ϵ', 9: 'ß', 8: 'f', 7: 'e', 6: 'd', 5: 'c', 4: 'b', 3: 'a', 1: '?', 2: ' '} 
+    assert alpha._utf_2_code == {' ': 2, 'a': 3, 'b': 4, 'c': 5, 'd': 6, 'e': 7, 'f': 8, 's': 9, '→': 10, 'ϵ': 0, '?': 1, '↦': 11, '⇥': 12}
+    assert alpha._code_2_utf == {12: '⇥', 11: '↦', 10: '→', 0: 'ϵ', 9: 's', 8: 'f', 7: 'e', 6: 'd', 5: 'c', 4: 'b', 3: 'a', 1: '?', 2: ' '} 
 
 
 
@@ -173,22 +173,35 @@ def test_alphabet_eq():
     assert alpha1 == alpha2
     assert alpha1 != alpha3
 
-def test_normalize_spaces():
-    assert alphabet.Alphabet.normalize_spaces(' \t\n\u000Ba\u000C\u000Db\u0085c\u00A0\u2000\u2001d\u2008\u2009e') == 'a b c d e'
+def test_normalize_string_spaces():
+    assert alphabet.Alphabet.normalize_string(' \t\n\u000Ba\u000C\u000Db\u0085c\u00A0\u2000\u2001d\u2008\u2009e') == 'a b c d e'
 
 def test_encode_clean_sample():
-    """ Most common case: no trailing spaces, nor extra spaces."""
-    alpha= alphabet.Alphabet('ßa fdbce→') 
-    assert torch.equal( alpha.encode('abc ß def'), torch.tensor([3, 4, 5, 2, 9, 2, 6, 7, 8]))
+    """ Most common case: no trailing spaces, nor extra spaces. """
+    alpha= alphabet.Alphabet('ta fdbce→') 
+    assert torch.equal( alpha.encode('abc t def'), torch.tensor([3, 4, 5, 2, 9, 2, 6, 7, 8]))
 
 def test_encode_normalized_spaces():
     """ Encoding should normalize spaces: strip trailing spaces, homogeneize, merge duplicates. """
-    alpha= alphabet.Alphabet('ßa fdbce→') 
-    assert torch.equal( alpha.encode('\tabc ß  def '), torch.tensor([3, 4, 5, 2, 9, 2, 6, 7, 8]))
+    alpha= alphabet.Alphabet('ta fdbce→') 
+    assert torch.equal( alpha.encode('\tabc t  def '), torch.tensor([3, 4, 5, 2, 9, 2, 6, 7, 8]))
+
+def test_encode_normalize_composed_characters():
+    """Encoding should normalized 
+    + composed characters into their pre-composed equivalent
+    + ligatured characters into their 2-char equivalent
+    """
+    alpha = alphabet.Alphabet('atÅ fdbceso')
+    assert torch.equal( alpha.encode('abc t Å def'), torch.tensor( [ 3,  4,  5,  2, 11,  2, 12,  2,  6,  7,  8] ))
+    assert torch.equal( alpha.encode('abc ﬆ def'), torch.tensor( [ 3,  4,  5,  2, 10, 11,  2,  6,  7,  8] ))
+    assert torch.equal( alpha.encode('abc œdef'), torch.tensor( [3, 4, 5, 2, 9, 7, 6, 7, 8] ))
+    assert torch.equal( alpha.encode('abc ædef'), torch.tensor( [3, 4, 5, 2, 3, 7, 6, 7, 8] ))
+    assert torch.equal( alpha.encode('abc ßdef'), torch.tensor( [ 3,  4,  5,  2, 10, 10,  6,  7,  8] ))
+
 
 def test_encode_missing_symbols():
     """Unknown symbols generate unknown char (and a warning)."""
-    alpha= alphabet.Alphabet('ßa fdbce→') 
+    alpha= alphabet.Alphabet('a fdbce') 
     assert torch.equal(  alpha.encode('abc z def '), torch.tensor( [3, 4, 5, 2, 1, 2, 6, 7, 8]))
 
 
@@ -215,39 +228,39 @@ def test_decode():
 
 def test_encode_batch_default():
     """ Batch with clean strings, padded by default """
-    alpha= alphabet.Alphabet('ßa fdb\n\tce\t→') 
-    batch_str = [ 'abc def', 'ßecbcaaß' ]
+    alpha= alphabet.Alphabet('sa fdb\n\tce\t→') 
+    batch_str = [ 'abc def', 'ßecbcaff' ]
     encoded = alpha.encode_batch( batch_str )
 
     assert encoded[0].equal( 
-            torch.tensor( [[3, 4, 5, 2, 6, 7, 8, 0],
-                           [9, 7, 5, 4, 5, 3, 3, 9]], dtype=torch.int64))
+            torch.tensor( [[3, 4, 5, 2, 6, 7, 8, 0, 0],
+                           [9, 9, 7, 5, 4, 5, 3, 8, 8]], dtype=torch.int64))
     assert encoded[1].equal( 
-            torch.tensor([7,8], dtype=torch.int64 ))
+            torch.tensor([7,9], dtype=torch.int64 ))
 
 def test_encode_batch_padded():
     """ Batch with clean strings, padded explicit """
-    alpha= alphabet.Alphabet('ßa fdb\n\tce\t→') 
-    batch_str = [ 'abc def', 'ßecbcaaß' ]
+    alpha= alphabet.Alphabet('sa fdb\n\tce\t→') 
+    batch_str = [ 'abc def', 'ßecbcaff' ]
     encoded = alpha.encode_batch( batch_str, padded=True )
 
     assert encoded[0].equal( 
-            torch.tensor( [[3, 4, 5, 2, 6, 7, 8, 0],
-                           [9, 7, 5, 4, 5, 3, 3, 9]], dtype=torch.int64))
+            torch.tensor( [[3, 4, 5, 2, 6, 7, 8, 0, 0],
+                           [9, 9, 7, 5, 4, 5, 3, 8, 8]], dtype=torch.int64))
     assert encoded[1].equal( 
-            torch.tensor([7,8], dtype=torch.int64 ))
+            torch.tensor([7,9], dtype=torch.int64 ))
 
 
 def test_encode_batch_unpadded():
     """ Batch with clean strings, unpadded explicit """
-    alpha= alphabet.Alphabet('ßa fdb\n\tce\t→') 
-    batch_str = [ 'abc def', 'ßecbcaaß' ]
+    alpha= alphabet.Alphabet('sa fdb\n\tce\t→') 
+    batch_str = [ 'abc def', 'ßecbcaff' ]
     encoded = alpha.encode_batch( batch_str, padded=False )
 
     assert encoded[0].equal( 
-            torch.tensor( [3, 4, 5, 2, 6, 7, 8, 9, 7, 5, 4, 5, 3, 3, 9], dtype=torch.int64))
+            torch.tensor( [3, 4, 5, 2, 6, 7, 8, 9, 9, 7, 5, 4, 5, 3, 8, 8], dtype=torch.int64))
     assert encoded[1].equal( 
-            torch.tensor([7,8], dtype=torch.int64 ))
+            torch.tensor([7,9], dtype=torch.int64 ))
 
 
 def test_decode_batch():

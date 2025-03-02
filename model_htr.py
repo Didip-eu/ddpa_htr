@@ -53,7 +53,7 @@ class HTR_Model():
             self.alphabet = Alphabet( cc.space_charset + cc.latin_charset + cc.punctuation_charset, case_insensitive=True )
         else:
             # during save/resume cycles, alphabet may be serialized into a list
-            self.alphabet = Alphabet( alphabet ) if type(alphabet) is list else alphabet
+            self.alphabet = Alphabet( alphabet ) if type(alphabet) is not Alphabet else alphabet
         
         if net:
             self.net = self.load( net )
@@ -84,14 +84,13 @@ class HTR_Model():
         
         self.constructor_params = {
                 # serialize the alphabet 
-                'alphabet': self.alphabet.to_list(),
+                'alphabet': self.alphabet.serialize(),
                 'net': net,
                 'model_spec': model_spec,
                 'decoder': decoder,
                 'add_output_layer': add_output_layer,
                 'train': train
         }
-
 
     
     def forward(self, img_nchw: Tensor, widths_n: Tensor=None, split_output=False):
