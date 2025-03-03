@@ -50,7 +50,7 @@ class HTR_Model():
         """
 
         if alphabet is None:
-            self.alphabet = Alphabet( cc.space_charset + cc.latin_charset + cc.punctuation_charset, case_insensitive=True )
+            self.alphabet = Alphabet( cc.space_charset + cc.latin_charset + cc.punctuation_charset, case_folding=True )
         else:
             # during save/resume cycles, alphabet may be serialized into a list
             self.alphabet = Alphabet( alphabet ) if type(alphabet) is not Alphabet else alphabet
