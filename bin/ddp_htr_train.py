@@ -139,10 +139,10 @@ if __name__ == "__main__":
         b = next(iter(val_loader))
    
         msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
-        gt_strings = b['transcription'][:cut]
+        gt_strings_redux = [ model.alphabet.reduce(s) for s in b['transcription'][:cut] ]
         logger.info('epoch {}'.format( epoch ))
-        for (img, img_name, gt_string, decoded_string ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], msg_strings ):
-                logger.info("{}:\n\t[{}]\n\t {}".format(img_name, decoded_string, gt_string ))
+        for (img, img_name, gt_str_raw, gt_str_redux, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], gt_strings_redux, msg_strings ):
+            logger.info("{}:\n\tPred: [{}]\n\tRedux: {}\n\t  Raw: {}".format(img_name, decoded_str, gt_str_redux, gt_str_raw ))
                 writer.add_image(img_name, img )
 
         model.net.train()
