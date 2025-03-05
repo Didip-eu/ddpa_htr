@@ -170,8 +170,8 @@ class HTR_Model():
         """ Beam-search decoding
         """
 
-        c, w = outputs.shape
-        probs = np.log(outputs)
+        c, w = outputs_cw.shape
+        probs = np.log(outputs_cw)
         beam = [(tuple(), (0.0, float('-inf')))]  # type: List[Tuple[Tuple, Tuple[float, float]]]
 
         # loop over each time step
@@ -214,7 +214,7 @@ class HTR_Model():
                           key=lambda x: logsumexp(x[1]),
                           reverse=True)
             beam = beam[:beam_size]
-        return [(c, max(outputs[c, start:end+1])) for (c, start, end) in beam[0][0]]
+        return [(c, max(outputs_cw[c, start:end+1])) for (c, start, end) in beam[0][0]]
 
 
     def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
