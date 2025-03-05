@@ -92,7 +92,7 @@ if __name__ == "__main__":
                              add_output_layer=True,)
    
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
-        model.decoder = HTR.decode_beam_search
+        model.decoder = HTR_Model.decode_beam_search
 
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
