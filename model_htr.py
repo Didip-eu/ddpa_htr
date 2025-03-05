@@ -6,11 +6,14 @@ from typing import Union,Tuple,List
 import re
 import warnings
 import itertools
+import collections
 
 import torch
 from torch import Tensor
 from torch.utils.data import DataLoader
 import numpy as np
+from scipy.special import logsumexp
+
 
 # local
 from kraken.vgsl import TorchVGSLModel
