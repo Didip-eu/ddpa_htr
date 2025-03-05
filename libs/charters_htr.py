@@ -807,7 +807,8 @@ class ChartersDataset(VisionDataset):
                 img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
                 if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
                     img_array_hwc=img_array_hwc[:,:,None]
-        del sample['binary_mask']
+        if 'binary_mask' in sample:
+            del sample['binary_mask']
 
         sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)
         logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))

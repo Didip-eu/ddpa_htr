@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 p = {
     "appname": "ddpa_htr_inference",
     "model_path": "/tmp/model_monasterium-2024-10-28.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
+    "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "img_paths": set([]),
     #"charter_dirs": set(["./"]),
     "charter_dirs": set([]),
@@ -169,6 +170,9 @@ if __name__ == "__main__":
         # 2. HTR inference
 
         model = HTR_Model.load( args.model_path )
+        if args.decoder='beam-search': # this overrides whatever decoding function has been used during training
+            model.decoder = HTR_Model.decode_beam_search
+
         predictions = []
 
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):

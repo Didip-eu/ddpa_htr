@@ -52,7 +52,7 @@ p = {
     "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "dataset_path_test": [str(root.joinpath('data','current_working_set', 'charters_ds_test.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
-    #"ignored_chars": [],
+    "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "learning_rate": 1e-3,
     "dry_run": [False, "Iterate over the batches once, but do not run the network."],
     "validation_freq": 1,
@@ -89,7 +89,10 @@ if __name__ == "__main__":
                              #height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              reset_epochs=args.reset_epochs,
-                             add_output_layer=True ) 
+                             add_output_layer=True,)
+   
+    if args.decoder='beam-search': # this overrides whatever decoding function has been used during training
+        model.decoder = HTR.decode_beam_search
 
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
@@ -143,7 +146,7 @@ if __name__ == "__main__":
         logger.info('epoch {}'.format( epoch ))
         for (img, img_name, gt_str_raw, gt_str_redux, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], gt_strings_redux, msg_strings ):
             logger.info("{}:\n\tPred: [{}]\n\tRedux: {}\n\t  Raw: {}".format(img_name, decoded_str, gt_str_redux, gt_str_raw ))
-                writer.add_image(img_name, img )
+            writer.add_image(img_name, img )
 
         model.net.train()
 

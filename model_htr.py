@@ -165,6 +165,57 @@ class HTR_Model():
         #symbols = self.alphabet 
         return list(zip(labels, scores))
 
+    @staticmethod
+    def decode_beam_search(outputs_cw: np.ndarray, beam_size=3):
+        """ Beam-search decoding
+        """
+
+        c, w = outputs.shape
+        probs = np.log(outputs)
+        beam = [(tuple(), (0.0, float('-inf')))]  # type: List[Tuple[Tuple, Tuple[float, float]]]
+
+        # loop over each time step
+        for t in range(w):
+            next_beam = collections.defaultdict(lambda: 2*(float('-inf'),))  # type: dict
+            # p_b -> prob for prefix ending in blank
+            # p_nb -> prob for prefix not ending in blank
+            for prefix, (p_b, p_nb) in beam:
+                # only update ending-in-blank-prefix probability for blank
+                n_p_b, n_p_nb = next_beam[prefix]
+                n_p_b = logsumexp((n_p_b, p_b + probs[0, t], p_nb + probs[0, t]))
+                next_beam[prefix] = (n_p_b, n_p_nb)
+                # loop over non-blank classes
+                for s in range(1, c):
+                    # only update the not-ending-in-blank-prefix probability for prefix+s
+                    l_end = prefix[-1][0] if prefix else None
+                    n_prefix = prefix + ((s, t, t),)
+                    n_p_b, n_p_nb = next_beam[n_prefix]
+                    if s == l_end:
+                        # substitute the previous non-blank-ending-prefix
+                        # probability for repeated labels
+                        n_p_nb = logsumexp((n_p_nb, p_b + probs[s, t]))
+                    else:
+                        n_p_nb = logsumexp((n_p_nb, p_b + probs[s, t], p_nb + probs[s, t]))
+
+                    next_beam[n_prefix] = (n_p_b, n_p_nb)
+
+                    # If s is repeated at the end we also update the unchanged
+                    # prefix. This is the merging case.
+                    if s == l_end:
+                        n_p_b, n_p_nb = next_beam[prefix]
+                        n_p_nb = logsumexp((n_p_nb, p_nb + probs[s, t]))
+                        # rewrite both new and old prefix positions
+                        next_beam[prefix[:-1] + ((prefix[-1][0], prefix[-1][1], t),)] = (n_p_b, n_p_nb)
+                        next_beam[n_prefix[:-1] + ((n_prefix[-1][0], n_prefix[-1][1], t),)] = next_beam.pop(n_prefix)
+
+            # Sort and trim the beam before moving on to the
+            # next time-step.
+            beam = sorted(next_beam.items(),
+                          key=lambda x: logsumexp(x[1]),
+                          reverse=True)
+            beam = beam[:beam_size]
+        return [(c, max(outputs[c, start:end+1])) for (c, start, end) in beam[0][0]]
+
 
     def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
         """ Make predictions on a batch of images.
@@ -250,7 +301,7 @@ class HTR_Model():
         return HTR_Model( **kwargs )
 
     @staticmethod
-    def load( file_name: str, **kwargs):
+    def load( file_name: str):
         """ Load an existing model, for evaluation
         """
         if Path(file_name).exists():
