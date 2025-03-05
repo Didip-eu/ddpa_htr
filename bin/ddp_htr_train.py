@@ -274,6 +274,7 @@ if __name__ == "__main__":
         
         ds_test = ChartersDataset(
             from_line_tsv_file=args.dataset_path_test,
+            line_padding_style='median',
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
             target_transform=filter_transcription,)
         test_loader = DataLoader( ds_test, batch_size=args.batch_size)
