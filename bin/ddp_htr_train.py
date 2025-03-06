@@ -59,7 +59,7 @@ p = {
     "save_freq": 1,
     "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
     "reset_epochs": [ False, "Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
-    "mode": ('train', 'validate', 'test'),
+    "mode": ('train', 'test'),
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
 }
 
@@ -266,10 +266,6 @@ if __name__ == "__main__":
 
 
     ############# VALIDATE / TEST ############
-    elif args.mode == 'validate':
-        cer, wer = validate(val_loader)
-        logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
-
     elif args.mode == 'test':
         
         ds_test = ChartersDataset(
