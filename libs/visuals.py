@@ -28,3 +28,17 @@ def predictions_over_scores( strings: List[str], scores: List[List[float]]):
             text = ax.text(c,l,strings[l][c],ha='center',va='center',color='w' if data[l][c] <threshold else 'b')
     plt.show()
 
+
+def plot_confusion_matrix( cm: np.ndarray, alph: dict):
+
+    labels = alph.keys()
+    
+    fig, ax = plt.subplots()
+    ax.set_xticks( range(len(alph)), labels=alph.keys())
+    ax.set_yticks( range(len(alph)), labels=alph.keys())
+    plt.imshow( cm )
+    for i in range(len(alph)):
+        for j in range(len(alph)):
+            if cm[i,j] > .05:
+                text = ax.text(j,i, f'{cm[i,j]:.2f}',ha='center',va='center', color='w' if cm[i,j]<.5 else 'b')
+    plt.show()
