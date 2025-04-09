@@ -252,7 +252,7 @@ def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -
     """
     # batch-wide alphabet
     alph = alphabet(''.join( itertools.chain( xs, ys))) if alpha is None else alpha
-    print('length=', len(xs))
+    #print('length=', len(xs))
     integer_matrix = np.sum( np.stack([ char_confusion_integer_matrix(x, y, alpha=alph)[1] for (x,y) in zip( xs, ys) ]), axis=0 )
     return (integer_matrix / np.expand_dims(np.sum(integer_matrix, axis=1), axis=1), alph)
 

@@ -11,6 +11,7 @@ import itertools
 from typing import NamedTuple
 
 # 3rd-party
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -29,7 +30,7 @@ Todo:
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
-from libs import metrics, transforms as tsf, list_utils as lu
+from libs import metrics, transforms as tsf, list_utils as lu, visuals
 from model_htr import HTR_Model
 from kraken import vgsl
 from libs.charters_htr import ChartersDataset
@@ -60,6 +61,7 @@ p = {
     "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
     "reset_epochs": [ False, "Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
     "mode": ('train', 'test'),
+    "confusion_matrix": 0,
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
 }
 
@@ -150,7 +152,7 @@ if __name__ == "__main__":
 
         model.net.train()
 
-    def validate( data_loader ):
+    def validate( data_loader, confusion_matrix=False ):
         """ Test/validation step
         """
 
@@ -159,6 +161,8 @@ if __name__ == "__main__":
         batches = iter( data_loader )
         cer = 0.0
         wer = 0.0
+
+        conf_matrix, matrix_alph = None, None
 
         for batch_index in tqdm( range(len(batches))):
             batch = next(batches)
@@ -170,6 +174,20 @@ if __name__ == "__main__":
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
             wer += batch_wer
+            
+            if confusion_matrix:
+                if conf_matrix is None:
+                    matrix_alph = model.alphabet._utf_2_code_reduced()
+                    print(matrix_alph)
+                    conf_matrix = metrics.batch_char_confusion_matrix( transcriptions, predictions, matrix_alph )[0]
+                else:
+                    conf_matrix += metrics.batch_char_confusion_matrix( transcriptions, predictions, matrix_alph )[0]
+
+        if confusion_matrix:
+            import pickle
+            conf_matrix /= len(batches)
+            with open('confusion_matrix.pkl', 'wb') as pkl_file:
+                pickle.dump({'cm': conf_matrix, 'alph': matrix_alph}, pkl_file )
 
         mean_cer, mean_wer = cer/len(batches), wer/len(batches)
 
@@ -274,7 +292,7 @@ if __name__ == "__main__":
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
             target_transform=filter_transcription,)
         test_loader = DataLoader( ds_test, batch_size=args.batch_size)
-        cer, wer = validate(test_loader)
+        cer, wer = validate(test_loader, args.confusion_matrix)
         logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
 
 

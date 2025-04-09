@@ -4,6 +4,7 @@ Various visuals for HTR (draft)
 """
 import matplotlib.pyplot as plt
 import numpy as np
+import pickle
 from typing import List
 
 
@@ -29,6 +30,13 @@ def predictions_over_scores( strings: List[str], scores: List[List[float]]):
     plt.show()
 
 
+def plot_confusion_matrix_from_file( pickled_matrix_path: str ):
+    with open(pickled_matrix_path, 'rb') as pk:
+        cm_dict = pickle.load( pk )
+    plot_confusion_matrix( cm_dict['cm'], cm_dict['alph'])
+
+
+
 def plot_confusion_matrix( cm: np.ndarray, alph: dict):
 
     labels = alph.keys()
@@ -41,4 +49,5 @@ def plot_confusion_matrix( cm: np.ndarray, alph: dict):
         for j in range(len(alph)):
             if cm[i,j] > .05:
                 text = ax.text(j,i, f'{cm[i,j]:.2f}',ha='center',va='center', color='w' if cm[i,j]<.5 else 'b')
+                text.set_fontsize(8)
     plt.show()

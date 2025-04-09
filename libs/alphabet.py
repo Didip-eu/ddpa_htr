@@ -285,7 +285,6 @@ class Alphabet:
             assert len(reduced) != len(sample_s)
         return reduced
 
-
     def encode_one_hot( self, sample_s: List[str]) -> Tensor:
         """One-hot encoding of a message string."""
         encode_int = self.encode( sample_s )
@@ -552,3 +551,9 @@ class Alphabet:
                           ' →  code defaults to {}'.format( [ f"'{c}'={ord(c)}" for c in missing ], self.default_code ))
 
         return list( mesg )
+
+    def _utf_2_code_reduced( self ):
+        reduced_dict = { self.get_symbol( code ):code for code, utf in sorted(self._code_2_utf.items(), key=lambda x: x[0]) }
+        del reduced_dict[self.start_of_seq_symbol]
+        del reduced_dict[self.end_of_seq_symbol]
+        return reduced_dict

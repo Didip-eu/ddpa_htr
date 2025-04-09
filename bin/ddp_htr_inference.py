@@ -170,7 +170,7 @@ if __name__ == "__main__":
         # 2. HTR inference
 
         model = HTR_Model.load( args.model_path )
-        if args.decoder='beam-search': # this overrides whatever decoding function has been used during training
+        if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
             model.decoder = HTR_Model.decode_beam_search
 
         predictions = []
