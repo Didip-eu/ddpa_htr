@@ -80,7 +80,7 @@ class ChartersDataset(VisionDataset):
                 root: str='',
                 work_folder: str = '', # here further files are created, for any particular task
                 subset: str = 'train',
-                subset_ratios: Tuple[float,float,float]=(.7, 0.1, 0.2),
+                subset_ratios: tuple[float,float,float]=(.7, 0.1, 0.2),
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
@@ -105,7 +105,7 @@ class ChartersDataset(VisionDataset):
             work_folder (str): Where line images and ground truth transcriptions fitting a
                 particular task are to be created; default: './data/ChartersHandwritingDatasetHTR';
             subset (str): 'train' (default), 'validate' or 'test'.
-            subset_ratios (Tuple[float, float, float]): ratios for respective ('train', 
+            subset_ratios (tuple[float, float, float]): ratios for respective ('train', 
                 'validate', ...) subsets
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
@@ -306,7 +306,7 @@ class ChartersDataset(VisionDataset):
                    build_items: bool=True, 
                    work_folder: str='', 
                    subset: str='train',
-                   )->List[dict]:
+                   )->list[dict]:
         """Build the image/GT samples required for an HTR task, either from the raw files (extracted from archive)
         or a work folder that already contains compiled files.
 
@@ -317,7 +317,7 @@ class ChartersDataset(VisionDataset):
             subset (str): sample subset to be returned - 'train' (default), 'validate' or 'test'; 
 
         Returns:
-            List[dict]: a list of dictionaries.
+            list[dict]: a list of dictionaries.
 
         Raises:
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
@@ -363,7 +363,7 @@ class ChartersDataset(VisionDataset):
 
 
     @staticmethod
-    def load_line_items_from_dir( work_folder_path: Union[Path,str], channel_suffix:str='' ) -> List[dict]:
+    def load_line_items_from_dir( work_folder_path: Union[Path,str], channel_suffix:str='' ) -> list[dict]:
         """Construct a list of samples from a directory that has been populated with
         line images and line transcriptions
 
@@ -373,7 +373,7 @@ class ChartersDataset(VisionDataset):
             channel_suffix (str): default suffix for the extra channel ('*.channel.npy.gz')
 
         Returns:
-            List[dict]: a list of samples.
+            list[dict]: a list of samples.
         """
         logger.debug('In function')
         samples = []
@@ -408,7 +408,7 @@ class ChartersDataset(VisionDataset):
                 
 
     @staticmethod
-    def load_from_tsv(file_path: Path, expansion_masks=False) -> List[dict]:
+    def load_from_tsv(file_path: Path, expansion_masks=False) -> list[dict]:
         """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
 
             <img file path> <transcription text> <height> <width> [<polygon points>]
@@ -418,7 +418,7 @@ class ChartersDataset(VisionDataset):
             expansion_masks (bool): Load expansion mask field.
 
         Returns:
-            List[dict]: A list of dictionaries of the form::
+            list[dict]: A list of dictionaries of the form::
 
             {'img': <img file path>,
              'transcription': <transcription text>,
@@ -467,7 +467,7 @@ class ChartersDataset(VisionDataset):
                                
         return samples
 
-    def _extract_lines(self, raw_data_folder_path: Path, work_folder_path: Path,) -> List[Dict[str, Union[Tensor,str,int]]]:
+    def _extract_lines(self, raw_data_folder_path: Path, work_folder_path: Path,) -> list[Dict[str, Union[Tensor,str,int]]]:
         """Generate line images from the PageXML files and save them in a local subdirectory
         of the consumer's program.
 
@@ -476,7 +476,7 @@ class ChartersDataset(VisionDataset):
             work_folder_path (Path): Line images are extracted in this subfolder
 
         Returns:
-            List[Dict[str,Union[Tensor,str,int]]]: An array of dictionaries of the form:: 
+            list[Dict[str,Union[Tensor,str,int]]]: An array of dictionaries of the form:: 
 
                 {'img': <absolute img_file_path>,
                  'transcription': <transcription text>,
@@ -619,12 +619,12 @@ class ChartersDataset(VisionDataset):
         return samples
 
     @staticmethod
-    def dump_data_to_tsv(samples: List[dict], file_path: str='', all_path_style=False) -> None:
-        """Create a CSV file with all tuples (`<line image absolute path>`, `<transcription>`, `<height>`, `<width>` `[<polygon points]`).
+    def dump_data_to_tsv(samples: list[dict], file_path: str='', all_path_style=False) -> None:
+        """Create a TSV file with all tuples (`<line image absolute path>`, `<transcription>`, `<height>`, `<width>` `[<polygon points]`).
         Height and widths are the original heights and widths.
 
         Args:
-            samples (List[dict]): dataset samples.
+            samples (list[dict]): dataset samples.
             file_path (str): A TSV (absolute) file path (Default value = '')
             all_path_style (bool): list GT file name instead of GT content. (Default value = False)
 
@@ -653,14 +653,14 @@ class ChartersDataset(VisionDataset):
                                             
 
     @staticmethod
-    def dataset_stats( samples: List[dict] ) -> str:
+    def dataset_stats( samples: list[dict] ) -> str:
         """Compute basic stats about sample sets.
 
         + avg, median, min, max on image heights and widths
         + avg, median, min, max on transcriptions
 
         Args:
-            samples (List[dict]): a list of samples.
+            samples (list[dict]): a list of samples.
 
         Returns:
             str: a string.
@@ -704,16 +704,16 @@ class ChartersDataset(VisionDataset):
 
 
     @staticmethod
-    def _split_set(samples: object, ratios: Tuple[float, float, float], subset: str) -> List[object]:
+    def _split_set(samples: object, ratios: tuple[float, float, float], subset: str) -> list[object]:
         """Split a dataset into 3 sets: train, validation, test.
 
         Args:
             samples (object): any dataset sample.
-            ratios (Tuple[float, float, float]): respective proportions for possible subsets
+            ratios (tuple[float, float, float]): respective proportions for possible subsets
             subset (str): subset to be build  ('train', 'validate', or 'test')
 
         Returns:
-            List[object]: a list of samples.
+            list[object]: a list of samples.
 
         Raises:
             ValueError: The subset type does not exist.
@@ -803,14 +803,14 @@ class ChartersDataset(VisionDataset):
         logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
         return sample
 
-    def __getitems__(self, indexes: list ) -> List[dict]:
+    def __getitems__(self, indexes: list ) -> list[dict]:
         """To help with batching.
 
         Args:
             indexes (list): a list of indexes.
 
         Returns:
-            List[dict]: a list of samples.
+            list[dict]: a list of samples.
         """
         return [ self.__getitem__( idx ) for idx in indexes ]
 
@@ -852,24 +852,6 @@ class ChartersDataset(VisionDataset):
         if self.from_line_tsv_file:
              summary += "\nBuilt from TSV input:\t{}".format( self.from_line_tsv_file )
         
-#        prototype_alphabet = alphabet.Alphabet.prototype_from_data_samples( 
-#                list(itertools.chain.from_iterable( character_classes.charsets )),
-#                self.data ) if data else None
-#
-#        if prototype_alphabet is not None:
-#            summary += f"\n + A prototype alphabet generated from this subset would have {len(prototype_alphabet)} codes." 
-#        
-#            symbols_shared = self.alphabet.symbol_intersection( prototype_alphabet )
-#            symbols_only_here, symbols_only_prototype = self.alphabet.symbol_differences( prototype_alphabet )
-#
-#
-#            summary += f"\n + Dataset alphabet shares {len(symbols_shared)} symbols with a data-generated charset."
-#            summary += f"\n + Dataset alphabet and a data-generated charset are identical: {self.alphabet == prototype_alphabet}"
-#            if symbols_only_here:
-#                summary += f"\n + Dataset alphabet's symbols that are not in a data-generated charset: {symbols_only_here}"
-#            if symbols_only_prototype:
-#                summary += f"\n + Data-generated charset's symbols that are not in the dataset alphabet: {symbols_only_prototype}"
-
         return ("\n________________________________\n"
                 f"\n{summary}"
                 "\n________________________________\n")

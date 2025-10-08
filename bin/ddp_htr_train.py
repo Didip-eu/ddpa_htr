@@ -108,6 +108,8 @@ if __name__ == "__main__":
 
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
+    # name prefixes for img and target are read from the provided TSV file,
+    # that is in the same folder as the samples themselves
     ds_train = ChartersDataset(
         from_line_tsv_file=args.dataset_path_train,
         line_padding_style='median',
