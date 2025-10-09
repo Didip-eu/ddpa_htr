@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 class HTRDataset(VisionDataset):
     """A generic dataset class for HTR tasks, with minimal functionalities for accessing 
-    ready-made sample directories:
+    ready-made line samples.
     + if the folder contains a TSV, the names of the files to be included are read from it.
     + if the folder has no TSV, all present files are assumed to be in the dataset
     This class does not generate subsets (it is the responsibility of the training class).
@@ -275,7 +275,6 @@ class HTRDataset(VisionDataset):
                   '\n+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
                   file=of)
             print( repr(self), file=of)
-
 
 
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
