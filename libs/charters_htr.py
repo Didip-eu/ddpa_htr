@@ -41,7 +41,7 @@ class DataException( Exception ):
 
 
 """
-Utility classes to manage charter data.
+Utility classes to manage charter data, provided as PageXML.
 
 """
 
@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 
-class ChartersDataset(VisionDataset):
+class PageDataset(VisionDataset):
     """A generic dataset class for charters, equipped with a rich set of methods for HTR tasks:
 
         * region and line/transcription extraction methods (from original page images and XML metadata)
@@ -60,35 +60,25 @@ class ChartersDataset(VisionDataset):
         Attributes:
             dataset_resource (dict): meta-data (URL, archive name, type of repository).
 
-            work_folder_name (str): The work folder is where a task-specific instance of the data is created; if it not
-                passed to the constructor, a default path `data/<work_folder_name>` is created in the
-                current directory.
-
             root_folder_basename (str): A basename for the root folder, that contains
                 * the archive, if the dataset is to be downloaded
                 * the subfolder that is created from it (with page data)
-                * the work folders for specific tasks (where line items are to be compiled)
+
+            work_folder_name (str): The work folder where line samples (images and transcriptions) are
+                to be extracted. If it is not passed to the constructor, a default path 
+                `dataset/<work_folder_name>` is created in the current directory.
     """
 
     dataset_resource = None
 
-    work_folder_name = "ChartersHandwritingDataset"
-
-    root_folder_basename="Charters"
-
     def __init__( self,
-                root: str='',
-                work_folder: str = '', # here further files are created, for any particular task
-                subset: str = 'train',
-                subset_ratios: tuple[float,float,float]=(.7, 0.1, 0.2),
+                root: str='./data',
+                work_folder: str = './dataset/htr_line_dataset', 
+                from_page_dir: str = '',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
-                from_line_tsv_file: str = '',
-                from_page_dir: str = '',
-                from_work_folder: str = '',
                 build_items: bool = True,
-                expansion_masks = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
                 count: int = 0,
@@ -101,40 +91,26 @@ class ChartersDataset(VisionDataset):
         Args:
             root (str): Where the archive is to be downloaded and the subfolder containing
                 original files (pageXML documents and page images) is to be created. 
-                Default: subfolder `data/Charters' in this project's directory.
-            work_folder (str): Where line images and ground truth transcriptions fitting a
-                particular task are to be created; default: './data/ChartersHandwritingDatasetHTR';
-            subset (str): 'train' (default), 'validate' or 'test'.
-            subset_ratios (tuple[float, float, float]): ratios for respective ('train', 
-                'validate', ...) subsets
+                Default: subfolder `data' in this project's directory.
+            work_folder (str): Where line images and ground truth transcriptions 
+                are to be created; default: './dataset/htr_line_dataset';
+            from_page_dir (str): if set, the samples have to be extracted from the
+                raw page data contained in the given directory. GT metadata are either
+                JSON files or PageXML.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
             extract_pages (bool): if True, extract the archive's content into the base
                 folder no matter what; otherwise (default), check first for a file tree 
                 with matching name and checksum.
-            expansion_masks (bool): if True (default), add transcription expansion offsets
-                to the sample if it is present in the XML source line annotations.
             channel_func (Callable): function that takes image and binary polygon mask as inputs,
                 and generates an additional channel in the sample. Default: None.
             channel_suffix (str): when loading items from a work folder, which suffix
                 to read for the channel file. Default: '' (=ignore channel file).
             build_items (bool): if True (default), extract and store images for the task
                 from the pages; otherwise, just extract the original data from the archive.
-            from_line_tsv_file (str): if set, the data are to be loaded from the given file
-                (containing folder is assumed to be the work folder, superceding the
-                work_folder option).
-            from_page_dir (str): if set, the samples have to be extracted from the
-                raw page data contained in the given directory. GT metadata are either
-                JSON files or PageXML.
-            from_work_folder (str): if set, the samples are to be loaded from the 
-                given directory, without prior processing.
             count (int): Stops after extracting {count} image items (for testing 
                 purpose only).
-            line_padding_style (str): When extracting line bounding boxes, padding to be 
-                used around the polygon: 'median'=median value of the polygon; 'noise'=random;
-                'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
-                Default is None.
             resume_task (bool): If True, the work folder is not purged. Only those page
                 items (lines, regions) that not already in the work folder are extracted.
                 (Partially implemented: works only for lines.)
@@ -164,58 +140,43 @@ class ChartersDataset(VisionDataset):
         self.raw_data_folder_path = None
         self.work_folder_path = None # task-dependent
 
-        if line_padding_style and line_padding_style not in ['noise', 'zero', 'median', 'none']:
-            raise ValueError(f"Incorrect padding style: '{line_padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
-        self.from_line_tsv_file = ''
-        if from_line_tsv_file == '':
-            # Local file system with data samples, no archive
-            if from_work_folder != '':
-                work_folder = from_work_folder
-                logger.debug("work_folder="+ work_folder)
-                if not Path(work_folder).exists():
-                    raise FileNotFoundError(f"Work folder {self.work_folder_path} does not exist. Abort.")
-                
-            # Local file system with raw page data, no archive 
-            elif from_page_dir != '':
-                self.raw_data_folder_path = Path( from_page_dir )
-                if not self.raw_data_folder_path.exists():
-                    raise FileNotFoundError(f"Directory {self.raw_data_folder_path} does not exist. Abort.")
-                self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix)))
+        # Local file system with data samples, no archive
+        if from_work_folder != '':
+            work_folder = from_work_folder
+            logger.debug("work_folder="+ work_folder)
+            if not Path(work_folder).exists():
+                raise FileNotFoundError(f"Work folder {self.work_folder_path} does not exist. Abort.")
+            
+        # Local file system with raw page data, no archive 
+        elif from_page_dir != '':
+            self.raw_data_folder_path = Path( from_page_dir )
+            if not self.raw_data_folder_path.exists():
+                raise FileNotFoundError(f"Directory {self.raw_data_folder_path} does not exist. Abort.")
+            self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix)))
 
-            # Online archive
-            elif self.dataset_resource is not None:
-                # tarball creates its own base folder
-                self.raw_data_folder_path = self.root.joinpath( self.dataset_resource['tarball_root_name'] )
-                self.download_and_extract( self.root, self.root, self.dataset_resource, extract_pages )
-                # input PageXML files are at the root of the resulting tree
-                #        (sorting is necessary for deterministic output)
-                self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix))) 
-            else:
-                raise FileNotFoundError("Could not find a dataset source!")
+        # Online archive
+        elif self.dataset_resource is not None:
+            # tarball creates its own base folder
+            self.raw_data_folder_path = self.root.joinpath( self.dataset_resource['tarball_root_name'] )
+            self.download_and_extract( self.root, self.root, self.dataset_resource, extract_pages )
+            # input PageXML files are at the root of the resulting tree
+            #        (sorting is necessary for deterministic output)
+            self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix))) 
         else:
-            # used only by __str__ method
-            self.from_line_tsv_file = from_line_tsv_file
+            raise FileNotFoundError("Could not find a dataset source!")
 
         # bbox or polygons and/or masks
         self.config = {
                 'channel_func': channel_func,
                 'channel_suffix': channel_suffix,
-                'line_padding_style': line_padding_style,
                 'count': count,
                 'resume_task': resume_task,
-                'from_line_tsv_file': from_line_tsv_file,
-                'subset': subset,
-                'subset_ratios': subset_ratios,
-                'expansion_masks': expansion_masks,
                 'gt_suffix': gt_suffix,
         }
 
 
         self.data = []
 
-        if (from_line_tsv_file!='' or from_work_folder!=''):
-            build_items = False
-        
         # when loading a set from compiled samples, just build all 3 CSV files
         if from_work_folder and not from_line_tsv_file:
             for ss in ('train', 'validate', 'test'):
@@ -305,7 +266,6 @@ class ChartersDataset(VisionDataset):
     def _build_task( self, 
                    build_items: bool=True, 
                    work_folder: str='', 
-                   subset: str='train',
                    )->list[dict]:
         """Build the image/GT samples required for an HTR task, either from the raw files (extracted from archive)
         or a work folder that already contains compiled files.
@@ -314,7 +274,6 @@ class ChartersDataset(VisionDataset):
             build_items (bool): if True (default), go through the compilation step; otherwise, work from the existing work folder's content.
             work_folder (str): Where line images and ground truth transcriptions fitting a particular task
                 are to be created; default: './MonasteriumHandwritingDatasetHTR'.
-            subset (str): sample subset to be returned - 'train' (default), 'validate' or 'test'; 
 
         Returns:
             list[dict]: a list of dictionaries.
@@ -322,150 +281,26 @@ class ChartersDataset(VisionDataset):
         Raises:
             FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
         """
-        from_line_tsv_file, line_padding_style, expansion_masks = [ self.config[k] for k in ('from_line_tsv_file', 'line_padding_style', 'expansion_masks')]
-        # create from existing TSV files - passed directory that contains:
         # + image to GT mapping (TSV)
-        if from_line_tsv_file != '':
-            tsv_path = Path( from_line_tsv_file )
-            if tsv_path.exists():
-                self.work_folder_path = tsv_path.parent
-                # paths are assumed to be absolute
-                data = self.load_from_tsv( tsv_path, expansion_masks )
-                logger.debug("data={}".format( data[:6]))
-                #logger.debug("height: {} type={}".format( data[0]['height'], type(data[0]['height'])))
-            else:
-                raise FileNotFoundError(f'File {tsv_path} does not exist!')
-
+        if work_folder=='':
+            self.work_folder_path = Path('data', self.work_folder_name+'HTR') 
+            logger.debug("Setting default location for work folder: {}".format( self.work_folder_path ))
         else:
-            if work_folder=='':
-                self.work_folder_path = Path('data', self.work_folder_name+'HTR') 
-                logger.debug("Setting default location for work folder: {}".format( self.work_folder_path ))
-            else:
-                self.work_folder_path = Path(work_folder)
-                logger.debug("Work folder: {}".format( self.work_folder_path ))
+            self.work_folder_path = Path(work_folder)
+            logger.debug("Work folder: {}".format( self.work_folder_path ))
 
-            if not self.work_folder_path.is_dir():
-                self.work_folder_path.mkdir(parents=True)
-                logger.debug("Creating work folder = {}".format( self.work_folder_path ))
+        if not self.work_folder_path.is_dir():
+            self.work_folder_path.mkdir(parents=True)
+            logger.debug("Creating work folder = {}".format( self.work_folder_path ))
 
-            # samples: all of them! (Splitting into subsets happens in an ulterior step.)
-            if build_items:
-                print("Building samples")
-                samples = self._extract_lines( self.raw_data_folder_path, self.work_folder_path, )
-            else:
-                logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
-                samples = self.load_line_items_from_dir( self.work_folder_path, self.config['channel_suffix'] )
+        # samples: all of them! 
+        if build_items:
+            print("Building samples")
+            self._extract_lines( self.raw_data_folder_path, self.work_folder_path, )
 
-            data = self._split_set( samples, ratios=self.config['subset_ratios'], subset=subset)
-            logger.info(f"Subset '{subset}' contains {len(data)} samples.")
-
-        return data
+        logger.info(f"Subset '{subset}' contains {len(data)} samples.")
 
 
-    @staticmethod
-    def load_line_items_from_dir( work_folder_path: Union[Path,str], channel_suffix:str='' ) -> list[dict]:
-        """Construct a list of samples from a directory that has been populated with
-        line images and line transcriptions
-
-        Args:
-            work_folder_path (Union[Path,str]): a folder containing images (`*.png`), transcription 
-            files (`*.gt.txt`) and optional extra channel.
-            channel_suffix (str): default suffix for the extra channel ('*.channel.npy.gz')
-
-        Returns:
-            list[dict]: a list of samples.
-        """
-        logger.debug('In function')
-        samples = []
-        if type(work_folder_path) is str:
-            work_folder_path = Path( work_folder_path )
-        for img_file_path in work_folder_path.glob('*.png'):
-            sample=dict()
-            logger.debug(img_file_path)            
-            gt_file_name = img_file_path.with_suffix('.gt.txt')
-            sample['img']=img_file_path
-            with Image.open( img_file_path, 'r') as img:
-                sample['width'], sample['height'] = img.size
-            
-            with open(gt_file_name, 'r') as gt_if:
-                transcription=gt_if.read().rstrip()
-                expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', transcription)
-                if expansion_masks_match is not None:
-                    sample['transcription']=expansion_masks_match.group(1)
-                    sample['expansion_masks']=eval(expansion_masks_match.group(2))
-                else:
-                    sample['transcription']=transcription
-
-            # optional mask
-            channel_file_path = img_file_path.with_suffix( channel_suffix )
-            if channel_file_path.exists():
-                sample['img_channel']=channel_file_path
-
-            samples.append( sample )
-
-        logger.debug(f"Loaded {len(samples)} samples from {work_folder_path}")
-        return samples
-                
-
-    @staticmethod
-    def load_from_tsv(file_path: Path, expansion_masks=False) -> list[dict]:
-        """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
-
-            <img file path> <transcription text> <height> <width> [<polygon points>]
-
-        Args:
-            file_path (Path): A file path.
-            expansion_masks (bool): Load expansion mask field.
-
-        Returns:
-            list[dict]: A list of dictionaries of the form::
-
-            {'img': <img file path>,
-             'transcription': <transcription text>,
-             'height': <original height>,
-             'width': <original width>,
-            ['img_channel': <2D extra channel> ]
-            }
-
-        """
-        work_folder_path = file_path.parent
-        samples=[]
-        logger.debug("work_folder_path={}".format(work_folder_path))
-        logger.debug("tsv file={}".format(file_path))
-        with open( file_path, 'r') as infile:
-            # Detection: 
-            # - is the transcription passed as a filepath or as text?
-            first_line = next( infile )[:-1]
-            img_path, file_or_text, height, width = first_line.split('\t')[:4]
-            inline_transcription = False if Path(file_or_text).exists() else True
-            # - Is there a field for an extra channel
-            has_channel = len(first_line.split('\t')) > 4
-            infile.seek(0)
-
-            for tsv_line in infile:
-                fields = tsv_line[:-1].split('\t')
-                img_file, gt_field, height, width = fields[:4]
-                binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
-
-                expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
-                if not inline_transcription:
-                    with open( work_folder_path.joinpath( gt_field ), 'r') as igt:
-                        gt_field = '\n'.join( igt.readlines() )
-                elif expansion_masks_match is not None:
-                    gt_field = expansion_masks_match.group(1)
-
-                spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
-                        'height': int(height), 'width': int(width) }
-                if has_channel:
-                    spl['img_channel']=work_folder_path.joinpath(fields[4])
-                if expansion_masks and expansion_masks_match is not None:
-                    spl['expansion_masks']=eval( expansion_masks_match.group(2))
-                if binary_mask_file.exists():
-                    spl['binary_mask']=binary_mask_file
-
-                samples.append( spl )
-                               
-        return samples
 
     def _extract_lines(self, raw_data_folder_path: Path, work_folder_path: Path,) -> list[Dict[str, Union[Tensor,str,int]]]:
         """Generate line images from the PageXML files and save them in a local subdirectory
@@ -483,9 +318,6 @@ class ChartersDataset(VisionDataset):
                  'height': <original height>,
                  'width': <original width>}
         """
-        logger.info("_extract_lines()")
-        print(self.pages)
-
         # filtering out Godzilla-sized images (a couple of them)
         warnings.simplefilter("error", Image.DecompressionBombWarning)
 
@@ -509,7 +341,7 @@ class ChartersDataset(VisionDataset):
     @classmethod
     def extract_lines_from_page(cls, page: Union[str,Path], work_folder_path: Union[Path,str], config:dict={}):
 
-        assert all([ k in config for k in ('line_padding_style', 'channel_func', 'resume_task', 'expansion_masks')])
+        assert all([ k in config for k in ( 'channel_func', 'resume_task')])
 
         samples = []
         line_tuples = []
@@ -521,61 +353,25 @@ class ChartersDataset(VisionDataset):
         ###################### Case #1: PageXML ###################
         with open(page, 'r') as page_file:
 
-            if config['gt_suffix']=='xml':
-                page_tree = ET.parse( page_file )
-                ns = { 'pc': "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"}
-                page_root = page_tree.getroot()
-                page_elt = page_root.find('.//pc:Page', ns)
-                imageFilename = page_elt.get('imageFilename')
+            page_dict = seglib.segmentation_dict_from_xml( page_file, get_text=True ) if ['gt_suffix']=='xml' else json.load( page_file )
+            
+            img_path = Path(page).parent.joinpath( page_dict['image_filename'] )
 
-                img_path = Path(page).parent.joinpath( imageFilename )
+            page_image = None
 
-                page_image = None
+            try:
+                page_image = Image.open( img_path, 'r')
+            except Image.DecompressionBombWarning as dcb:
+                logger.debug( f'{dcb}: ignoring page' )
+                return None
 
-                try:
-                    page_image = Image.open( img_path, 'r')
-                except Image.DecompressionBombWarning as dcb:
-                    logger.debug( f'{dcb}: ignoring page' )
-                    return None
-                
-                for textline_elt in page_root.findall( './/pc:TextLine', ns ):
 
-                    sample = dict()
-                    textline_id=textline_elt.get("id")
-                    transcription_element = textline_elt.find('./pc:TextEquiv', ns)
-                    if transcription_element is None:
-                        continue
-                    transcription_text_element = transcription_element.find('./pc:Unicode', ns)
-                    if transcription_text_element is None:
-                        continue
-                    transcription = transcription_text_element.text
-                    if not transcription or re.match(r'\s+$', transcription):
-                        continue
+            for tl in page_dict['lines']:
+                sample = dict()
+                textline_id, transcription=tl['id'], tl['text']
+                polygon_coordinates = [ tuple(pair) for pair in tl['coords'] ]
+                line_tuples.append( (sample, textline_id, polygon_coordinates, transcription) )
 
-                    if config['expansion_masks'] and 'custom' in textline_elt.keys():
-                        sample['expansion_masks'] = [ (int(o), int(l)) for (o,l) in re.findall(r'expansion *{ *offset:(\d+); *length:(\d+);', textline_elt.get('custom')) ]
-
-                    polygon_string=textline_elt.find('./pc:Coords', ns).get('points')
-                    polygon_coordinates = [ tuple(map(int, pt.split(','))) for pt in polygon_string.split(' ') ]
-                    line_tuples.append( (sample, textline_id, polygon_coordinates, transcription))
-
-            ################ Case #2: JSON ############################
-            elif 'json' in config['gt_suffix']:
-                page_dict = json.load( page_file )
-                img_path = Path(page).parent.joinpath( page_dict['imagename'] )
-                page_image = None
-
-                try:
-                    page_image = Image.open( img_path, 'r')
-                except Image.DecompressionBombWarning as dcb:
-                    logger.debug( f'{dcb}: ignoring page' )
-                    return None
-
-                for tl in page_dict['lines']:
-                    sample = dict()
-                    textline_id, transcription=tl['id'], tl['text']
-                    polygon_coordinates = [ tuple(pair) for pair in tl['boundary'] ]
-                    line_tuples.append( (sample, textline_id, polygon_coordinates, transcription) )
 
             for (sample, textline_id, polygon_coordinates, transcription) in line_tuples:
                 
@@ -612,45 +408,10 @@ class ChartersDataset(VisionDataset):
 
                 with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
                     gt_file.write( sample['transcription'])
-                    if 'expansion_masks' in sample:
-                        gt_file.write( '<{}>'.format( sample['expansion_masks']))
 
                 samples.append( sample )
         return samples
 
-    @staticmethod
-    def dump_data_to_tsv(samples: list[dict], file_path: str='', all_path_style=False) -> None:
-        """Create a TSV file with all tuples (`<line image absolute path>`, `<transcription>`, `<height>`, `<width>` `[<polygon points]`).
-        Height and widths are the original heights and widths.
-
-        Args:
-            samples (list[dict]): dataset samples.
-            file_path (str): A TSV (absolute) file path (Default value = '')
-            all_path_style (bool): list GT file name instead of GT content. (Default value = False)
-
-        Returns:
-            None
-        """
-        if file_path == '':
-            for sample in samples:
-                # note: TSV only contains the image file name (load_from_tsv() takes care of applying the correct path prefix)
-                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
-                logger.debug("{}\t{}\t{}\t{}".format( img_path, 
-                      gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'), int(height), int(width)))
-            return
-        with open( file_path, 'w' ) as of:
-            for sample in samples:
-                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
-                #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
-                if 'expansion_masks' in sample and sample['expansion_masks'] is not None:
-                    gt = gt + '<{}>'.format( sample['expansion_masks'] )
-                of.write( '{}\t{}\t{}\t{}'.format( img_path,
-                                             gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'),
-                                             int(height), int(width) ))
-                if 'img_channel' in sample and sample['img_channel'] is not None:
-                    of.write('\t{}'.format( sample['img_channel'].name ))
-                of.write('\n')
-                                            
 
     @staticmethod
     def dataset_stats( samples: list[dict] ) -> str:
@@ -703,55 +464,9 @@ class ChartersDataset(VisionDataset):
 
 
 
-    @staticmethod
-    def _split_set(samples: object, ratios: tuple[float, float, float], subset: str) -> list[object]:
-        """Split a dataset into 3 sets: train, validation, test.
-
-        Args:
-            samples (object): any dataset sample.
-            ratios (tuple[float, float, float]): respective proportions for possible subsets
-            subset (str): subset to be build  ('train', 'validate', or 'test')
-
-        Returns:
-            list[object]: a list of samples.
-
-        Raises:
-            ValueError: The subset type does not exist.
-        """
-
-        random.seed(10)
-        logger.debug("Splitting set of {} samples with ratios {}".format( len(samples), ratios))
-
-        if 1.0 in ratios:
-            return list( samples )
-        if subset not in ('train', 'validate', 'test'):
-            raise ValueError("Incorrect subset type: choose among 'train', 'validate', and 'test'.")
-
-        subset_2_count = int( len(samples)* ratios[1])
-        subset_3_count = int( len(samples)* ratios[2] )
-
-        subset_1_indices = set( range(len(samples)))
-        
-        if ratios[1] != 0:
-            subset_2_indices = set( random.sample( subset_1_indices, subset_2_count))
-            subset_1_indices -= subset_2_indices
-
-        if ratios[2] != 0:
-            subset_3_indices = set( random.sample( subset_1_indices, subset_3_count))
-            subset_1_indices -= subset_3_indices
-
-        if subset == 'train':
-            return [ samples[i] for i in subset_1_indices ]
-        if subset == 'validate':
-            return [ samples[i] for i in subset_2_indices ]
-        if subset == 'test':
-            return [ samples[i] for i in subset_3_indices ]
-
-
+    @abstractmethod
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
-        """Callback function for the iterator. Assumption: the raw sample always contains
-        the bounding box image + binary polygon mask. Any combined image (ex. noise-background)
-        is constructed from those, _before_ any transform that is passed to the DS constructor.
+        """This method generate a line sample.
 
         Args:
             index (int): item index.
@@ -759,52 +474,11 @@ class ChartersDataset(VisionDataset):
         Returns:
             dict[str,Union[Tensor,int,str]]: a sample dictionary
         """
-        img_path = self.data[index]['img']
-        
-        assert isinstance(img_path, Path) or isinstance(img_path, str)
+        pass
 
-        sample = self.data[index].copy()
-        sample['transcription']=self.target_transform( sample['transcription'] )
-
-        img_array_hwc = ski.io.imread( img_path ) # img path --> img ndarray
-
-        if self.config['line_padding_style'] is not None:
-            assert 'binary_mask' in sample and sample['binary_mask'].exists()
-            with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
-                binary_mask_hw = np.load( mask_in )
-                padding_func = lambda x, m, channel_dim=2: x
-                if self.config['line_padding_style']=='noise':
-                    padding_func = self.bbox_noise_pad
-                elif self.config['line_padding_style']=='zero':
-                    padding_func = self.bbox_zero_pad
-                elif self.config['line_padding_style']=='median':
-                    padding_func = self.bbox_median_pad
-                img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
-                if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
-                    img_array_hwc=img_array_hwc[:,:,None]
-        del sample['binary_mask']
-
-        # img ndarray --> tensor
-        sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)
-        logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
-
-        if 'img_channel' in self.data[index]:
-            channel_t = None
-            if self.data[index]['img_channel'].suffix == '.gz':
-                with gzip.GzipFile(self.data[index]['img_channel'], 'r') as channel_in:
-                    channel_t = torch.from_numpy( np.load( channel_in ) )/255
-            else:
-                channel_t = np.load(self.data[index]['img_channel'])/255
-            sample['img']=torch.cat( [sample['img'], channel_t[None,:,:]] )
-
-        sample = self.transform( sample )
-        sample['id'] = Path(img_path).name
-
-        logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
-        return sample
-
+    @abstractmethod
     def __getitems__(self, indexes: list ) -> list[dict]:
-        """To help with batching.
+        """To help with batching lines.
 
         Args:
             indexes (list): a list of indexes.
@@ -815,13 +489,14 @@ class ChartersDataset(VisionDataset):
         return [ self.__getitem__( idx ) for idx in indexes ]
 
 
+    @abstractmethod
     def __len__(self) -> int:
         """Number of samples in the dataset.
 
         Returns:
             int: number of data points.
         """
-        return len( self.data )
+        pass
 
 
     def _purge(self, folder: str) -> int:
@@ -849,139 +524,10 @@ class ChartersDataset(VisionDataset):
                     f"Data points:\t{len(self.data)}",
                     "Stats:",
                     f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
-        if self.from_line_tsv_file:
-             summary += "\nBuilt from TSV input:\t{}".format( self.from_line_tsv_file )
         
         return ("\n________________________________\n"
                 f"\n{summary}"
                 "\n________________________________\n")
-
-
-    @staticmethod
-    def bbox_median_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
-        """Pad a polygon BBox with the median value of the polygon. Used by
-        the line extraction method.
-
-        Args:
-            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
-            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
-            param channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
-        
-        Returns:
-            np.ndarray: the padded image, with same shape as input.
-        """
-        img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
-        
-        if len(img.shape)==2:
-            img = img[None]
-        padding_bg = np.zeros( img.shape, dtype=img.dtype)
-
-        for ch in range( img.shape[0] ):
-            med = np.median( img[ch][mask_hw] ).astype( img.dtype )
-            padding_bg[ch] += np.logical_not(mask_hw) * med
-            padding_bg[ch] += img[ch] * mask_hw
-        return padding_bg.transpose(1,2,0) if (channel_dim==2 and len(img_chw.shape)>2) else padding_bg[0]
-
-    @staticmethod
-    def bbox_noise_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
-        """Pad a polygon BBox with noise. Used by the line extraction method.
-
-        Args:
-            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C) or (H,W)
-            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
-            channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
-
-        Returns:
-            np.ndarray: the padded image, with same shape as input.
-        """
-        img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
-        padding_bg = np.random.randint(0, 255, img.shape, dtype=img_chw.dtype)
-        
-        padding_bg *= np.logical_not(mask_hw) 
-        if len(img.shape)>2:
-            mask_hw = np.stack( [ mask_hw, mask_hw, mask_hw ] )
-
-        padding_bg += img * mask_hw
-        return padding_bg.transpose(1,2,0) if (channel_dim==2 and len(img.shape) > 2) else padding_bg
-
-    @staticmethod
-    def bbox_zero_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
-        """Pad a polygon BBox with zeros. Used by the line extraction method.
-
-        Args:
-            img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
-            mask_hw (np.ndarray): a 2D Boolean mask (H,W).
-            channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
-
-        Returns:
-            np.ndarray: the padded image, with same shape as input.
-        """
-        img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
-        if len(img.shape)>2:
-            mask_hw = np.stack( [ mask_hw, mask_hw, mask_hw ] )
-        img_out = img * mask_hw
-        return img_out.transpose(1,2,0) if (channel_dim==2 and len(img.shape) > 2) else img_out
-
-
-class PadToWidth():
-    """Pad an image to desired length."""
-
-    def __init__( self, max_w ):
-        self.max_w = max_w
-
-    def __call__(self, sample: dict) -> dict:
-        """Transform a sample: only the image is modified, not the nominal height and width.
-        """
-        t_chw, w = [ sample[k] for k in ('img', 'width' ) ]
-        if w > self.max_w:
-            warnings.warn("Cannot pad an image that is wider ({}) than the padding size ({})".format( w, self.max_w))
-            return sample
-        new_t_chw = torch.zeros( t_chw.shape[:2] + (self.max_w,))
-        new_t_chw[:,:,:w] = t_chw
-
-        transformed_sample = sample.copy()
-        transformed_sample.update( {'img': new_t_chw } )
-        return transformed_sample
-
-
-
-class ResizeToHeight():
-    """Resize an image with fixed height, preserving aspect ratio as long as the resulting width
-    does not exceed the specified max. width. If that is the case, the image is horizontally
-    squeezed to fix this.
-
-    """
-
-    def __init__( self, target_height, max_width ):
-        self.target_height = target_height
-        self.max_width = max_width
-
-    def __call__(self, sample: dict) -> dict:
-        """Transform a sample
-
-           + resize 'img' value to desired height
-           + modify 'height' and 'width' accordingly
-
-        """
-        t_chw, h, w = [ sample[k] for k in ('img', 'height', 'width') ]
-        # freak case (marginal annotations): original height is the larger
-        # dimension -> specify the width too
-        if h > w:
-            t_chw = v2.Resize( size=(self.target_height, int(w*self.target_height/h) ), antialias=True)( t_chw )
-        # default case: original height is the smaller dimension and
-        # gets picked up by Resize()
-        else:
-            t_chw = v2.Resize(size=self.target_height, antialias=True)( t_chw )
-            
-        if t_chw.shape[-1] > self.max_width:
-            t_chw = v2.Resize(size=(self.target_height, self.max_width), antialias=True)( t_chw )
-        h_new, w_new = [ int(d) for d in t_chw.shape[1:] ]
-
-        transformed_sample = sample.copy()
-        transformed_sample.update( {'img': t_chw, 'height': h_new, 'width': w_new } )
-
-        return transformed_sample
-        
 
 
 class MonasteriumDataset(ChartersDataset):
@@ -1003,10 +549,6 @@ class MonasteriumDataset(ChartersDataset):
             'comment': 'A clean, terse dataset, with no use of Unicode abbreviation marks.',
     }
 
-    work_folder_name="MonasteriumHandwritingDataset"
-
-    root_folder_basename="Monasterium"
-
     def __init__(self, *args, **kwargs ):
 
         super().__init__( *args, **kwargs)
@@ -1026,12 +568,6 @@ class KoenigsfeldenDataset(ChartersDataset):
             'tarball_root_name': 'koenigsfelden_1308-1662',
             'comment': 'Transcriptions have been cleaned up (removal of obvious junk or non-printable characters, as well a redundant punctuation marks---star-shaped unicode symbols); unicode-abbreviation marks have been expanded.',
     }
-
-    work_folder_name="KoenigsfeldenHandwritingDataset"
-    "This prefix will be used when creating a work folder."
-
-    root_folder_basename="Koenigsfelden"
-    "This is the root of the archive tree."
 
     def __init__(self, *args, **kwargs ):
 
@@ -1057,12 +593,6 @@ class KoenigsfeldenDatasetAbbrev(ChartersDataset):
             'comment': 'Similar to the KoenigsfeldenDataset, with a notable difference: Unicode abbreviations have been kept.',
     }
 
-    work_folder_name="KoenigsfeldenHandwritingDataset"
-    "This prefix will be used when creating a work folder."
-
-    root_folder_basename="KoenigsfeldenAbbrev"
-    "This is the root of the archive tree."
-
     def __init__(self, *args, **kwargs ):
 
         super().__init__( *args, **kwargs)
@@ -1084,12 +614,6 @@ class NurembergLetterbooks(ChartersDataset):
             'tarball_root_name': 'nuremberg_letterbooks',
             'comment': 'Numerous struck-through lines (masked)'
     }
-
-    work_folder_name="NurembergLetterbooksDataset"
-    "This prefix will be used when creating a work folder."
-
-    root_folder_basename="NurembergLetterbooks"
-    "This is the root of the archive tree."
 
     def __init__(self, *args, **kwargs ):
 

@@ -47,12 +47,17 @@ class HTRDataset(VisionDataset):
     ready-made line samples.
     + if the folder contains a TSV, the names of the files to be included are read from it.
     + if the folder has no TSV, all present files are assumed to be in the dataset
-    This class does not generate subsets (it is the responsibility of the training class).
+    The class handles load and manipulates line samples, where each sample is a dictionary with
+    { line_img, polygon mask, target }
+    What this class does _not_ do:
+    + compile lines out of PageXML and images (augmented or not)
+    + construct train, validation and test subsets (it is the responsibility of the training class)
     """
 
     def __init__(self,
                 from_line_tsv_file: str='',
                 from_work_folder: str='dataset',
+                from_page_dir: str='',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 expansion_masks = False,
@@ -68,6 +73,9 @@ class HTRDataset(VisionDataset):
                 from_work_folder option).
             from_work_folder (str): if set, the samples are to be loaded from the
                 given directory, without prior processing.
+            from_page_dir (str): if set, the samples have to be extracted from the
+                raw page data contained in the given directory. GT metadata are either
+                JSON files or PageXML.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
@@ -99,6 +107,7 @@ class HTRDataset(VisionDataset):
             self.work_folder_path = Path(from_work_folder)
             logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
             self.data = self.load_line_items_from_dir( self.work_folder_path, channel_suffix )
+            self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{ss}.tsv")) )
 
         if not self.data:
             raise DataException("No data found. from_tsv_file={}, from_work_folder={}".format(from_tsv_file, from_work_folder))
@@ -170,7 +179,10 @@ class HTRDataset(VisionDataset):
     def load_from_tsv(file_path: Path, expansion_masks=False) -> list[dict]:
         """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
 
-            <img file path> <transcription text> <height> <width> [<polygon points>]
+           <img file path> <transcription text> <height> <width> [<polygon points>]
+
+        Each line image is assumed to have a binary mask counterpart `*.bool.npy.gz` (computing
+        from an optional field <polygon points> is not implemented).
 
         Args:
             file_path (Path): A file path.
@@ -227,6 +239,39 @@ class HTRDataset(VisionDataset):
         return samples
 
 
+    @staticmethod
+    def dump_data_to_tsv(samples: list[dict], file_path: str='', all_path_style=False) -> None:
+        """Create a TSV file with all tuples (`<line image absolute path>`, `<transcription>`, `<height>`, `<width>` `[<polygon points]`).
+        Height and widths are the original heights and widths.
+
+        Args:
+            samples (list[dict]): dataset samples.
+            file_path (str): A TSV (absolute) file path (Default value = '')
+            all_path_style (bool): list GT file name instead of GT content. (Default value = False)
+
+        Returns:
+            None
+        """
+        if file_path == '':
+            for sample in samples:
+                # note: TSV only contains the image file name (load_from_tsv() takes care of applying the correct path prefix)
+                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
+                logger.debug("{}\t{}\t{}\t{}".format( img_path, 
+                      gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'), int(height), int(width)))
+            return
+        with open( file_path, 'w' ) as of:
+            for sample in samples:
+                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
+                #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
+                if 'expansion_masks' in sample and sample['expansion_masks'] is not None:
+                    gt = gt + '<{}>'.format( sample['expansion_masks'] )
+                of.write( '{}\t{}\t{}\t{}'.format( img_path,
+                                             gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'),
+                                             int(height), int(width) ))
+                if 'img_channel' in sample and sample['img_channel'] is not None:
+                    of.write('\t{}'.format( sample['img_channel'].name ))
+                of.write('\n')
+                                            
     @staticmethod
     def dataset_stats( samples: list[dict] ) -> str:
         """Compute basic stats about sample sets.
