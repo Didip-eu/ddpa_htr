@@ -151,7 +151,7 @@ def line_binary_mask_from_segmentation_dict( segmentation_dict: dict, polygon_ke
     """
     polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict, polygon_key=polygon_key)
     # create 2D boolean matrix
-    mask_size = segmentation_dict['image_wh']
+    mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
     return torch.tensor( np.sum( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ], axis=0))
 
 def line_binary_mask_stack_from_json_file( segmentation_json: str, polygon_key='coords' ) -> Tensor:
@@ -181,7 +181,7 @@ def line_binary_mask_stack_from_segmentation_dict( segmentation_dict: dict, poly
     """
     polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict, polygon_key=polygon_key)
     # create 2D boolean matrix
-    mask_size = segmentation_dict['image_wh']
+    mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
     return torch.tensor( np.stack( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ]))
 
 def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> list[list[int]]:

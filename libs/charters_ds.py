@@ -26,9 +26,11 @@ import torch
 from torch import Tensor
 import torchvision
 from torchvision.datasets import VisionDataset
+from torchvision.tv_tensors import BoundingBoxes, Mask
 import torchvision.transforms as transforms
 
 from . import download_utils as du
+from . import seglib
 
 #from . import alphabet, character_classes.py
 
@@ -52,39 +54,49 @@ logger = logging.getLogger(__name__)
 
 
 class PageDataset(VisionDataset):
-    """A generic dataset class for charters, equipped with a rich set of methods for HTR tasks:
+    """A generic dataset class for charters, equipped with page-wide functionalities:
 
+        * page augmentation functionalities
         * region and line/transcription extraction methods (from original page images and XML metadata)
-        * commonly-used transforms, for use in getitem()
+
+        File-management logic:
+
+        - a <root> folder where archives are saved and decompressed (set at initialization time, with a reasonable default in the current location)
+        - a page work folder
+            - defaults to the root directory of the tarball, in last resort
+            - OR: implied from <from_page_dir> option, when loading data from existing pages
+            - OR: specified at initialization time through the <page_work_folder> parameter - archive is checked; after extraction, page files
+                  are copied in the work folder
+        - [optional] a cache for augmented pages
+        - a line work folder where line samples extracted from the page are to be saved
+
+        Depending on the options passed at initialization time, the page work folder may be under <root> or not.
+
 
         Attributes:
             dataset_resource (dict): meta-data (URL, archive name, type of repository).
 
-            root_folder_basename (str): A basename for the root folder, that contains
-                * the archive, if the dataset is to be downloaded
-                * the subfolder that is created from it (with page data)
-
-            work_folder_name (str): The work folder where line samples (images and transcriptions) are
-                to be extracted. If it is not passed to the constructor, a default path 
-                `dataset/<work_folder_name>` is created in the current directory.
     """
 
     dataset_resource = None
 
     def __init__( self,
                 root: str='./data',
-                work_folder: str = './dataset/htr_line_dataset', 
+                page_work_folder: str = '',
+                line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_dir: str = '',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
-                build_items: bool = True,
+                dry_run: bool = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
                 count: int = 0,
                 line_padding_style: str = None,
                 resume_task: bool = False,
-                gt_suffix: str = 'xml'
+                lbl_suffix: str = '.xml',
+                img_suffix: str = '.jpg',
+                polygon_key: str = 'coords',
                 ) -> None:
         """Initialize a dataset instance.
 
@@ -92,7 +104,8 @@ class PageDataset(VisionDataset):
             root (str): Where the archive is to be downloaded and the subfolder containing
                 original files (pageXML documents and page images) is to be created. 
                 Default: subfolder `data' in this project's directory.
-            work_folder (str): Where line images and ground truth transcriptions 
+            page_work_folder (str): Where page images and XML annotations are to be extracted.
+            line_work_folder (str): Where line images and ground truth transcriptions 
                 are to be created; default: './dataset/htr_line_dataset';
             from_page_dir (str): if set, the samples have to be extracted from the
                 raw page data contained in the given directory. GT metadata are either
@@ -107,15 +120,16 @@ class PageDataset(VisionDataset):
                 and generates an additional channel in the sample. Default: None.
             channel_suffix (str): when loading items from a work folder, which suffix
                 to read for the channel file. Default: '' (=ignore channel file).
-            build_items (bool): if True (default), extract and store images for the task
-                from the pages; otherwise, just extract the original data from the archive.
+            dry_run (bool): if True (default), compute all paths (root, page_work_folder, line_work_folder)
+                but does not write anything.
             count (int): Stops after extracting {count} image items (for testing 
                 purpose only).
             resume_task (bool): If True, the work folder is not purged. Only those page
                 items (lines, regions) that not already in the work folder are extracted.
                 (Partially implemented: works only for lines.)
-            gt_suffix (str): 'xml' for PageXML (default) or valid, unique suffix of JSON file.
-                Ex. 'htr.gt.json'
+            lbl_suffix (str): '.xml' for PageXML (default) or valid, unique suffix of JSON file.
+                Ex. '.htr.gt.json'
+            img_suffix (str): image suffix. Default: '.jpg'
 
         """
 
@@ -125,109 +139,106 @@ class PageDataset(VisionDataset):
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
                                     "\n\t + one of the following options: -from_page_dir, -from_work_folder, -from_line_tsv_file")
 
-        trf = v2.Compose( [ v2.ToDtype(torch.float32, scale=True) ])  
-        if transform is not None:
-            trf = v2.Compose( [ trf, transform ] ) 
-        super().__init__(root, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
-
-        self.root = Path(root) if root else Path(__file__).parents[1].joinpath('data', self.root_folder_basename)
-
-        logger.debug("Root folder: {}".format( self.root ))
-        if not self.root.exists():
-            self.root.mkdir( parents=True )
-            logger.debug("Create root path: {}".format(self.root))
-
-        self.raw_data_folder_path = None
-        self.work_folder_path = None # task-dependent
-
-        # Local file system with data samples, no archive
-        if from_work_folder != '':
-            work_folder = from_work_folder
-            logger.debug("work_folder="+ work_folder)
-            if not Path(work_folder).exists():
-                raise FileNotFoundError(f"Work folder {self.work_folder_path} does not exist. Abort.")
-            
-        # Local file system with raw page data, no archive 
-        elif from_page_dir != '':
-            self.raw_data_folder_path = Path( from_page_dir )
-            if not self.raw_data_folder_path.exists():
-                raise FileNotFoundError(f"Directory {self.raw_data_folder_path} does not exist. Abort.")
-            self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix)))
-
-        # Online archive
-        elif self.dataset_resource is not None:
-            # tarball creates its own base folder
-            self.raw_data_folder_path = self.root.joinpath( self.dataset_resource['tarball_root_name'] )
-            self.download_and_extract( self.root, self.root, self.dataset_resource, extract_pages )
-            # input PageXML files are at the root of the resulting tree
-            #        (sorting is necessary for deterministic output)
-            self.pages = sorted( self.raw_data_folder_path.glob('*.{}'.format(gt_suffix))) 
-        else:
-            raise FileNotFoundError("Could not find a dataset source!")
-
-        # bbox or polygons and/or masks
-        self.config = {
-                'channel_func': channel_func,
-                'channel_suffix': channel_suffix,
-                'count': count,
-                'resume_task': resume_task,
-                'gt_suffix': gt_suffix,
-        }
-
-
+        self._transforms = transform if transform is not None else v2.ToImage()
+        self.polygon_key = polygon_key
         self.data = []
 
-        # when loading a set from compiled samples, just build all 3 CSV files
-        if from_work_folder and not from_line_tsv_file:
-            for ss in ('train', 'validate', 'test'):
-                if ss==subset:
-                    continue
-                data = self._build_task(build_items=False, work_folder=work_folder, subset=ss )
-                self.dump_data_to_tsv(data, Path(self.work_folder_path.joinpath(f"charters_ds_{ss}.tsv")) )
+        self.root_path = Path(root) 
+        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] )
+        self.page_work_folder_path = self.archive_root_folder_path
+        if from_page_dir:
+            self.page_work_folder_path = Path(from_page_dir) 
+        elif page_work_folder:
+            self.page_work_folder_path = Path(page_work_folder)
+        self.line_work_folder_path = Path(line_work_folder)
 
-        self.data = self._build_task(build_items=build_items, work_folder=work_folder, subset=subset )
-        if self.data and not from_line_tsv_file:
-            # Generate a TSV file with one entry per img/transcription pair
-            self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{subset}.tsv")) )
+        logger.info(f"""
+        Dataset creation (dry run):
+            root (prefix of archive tree): {self.root_path}
+            archive path: {self.root_path.joinpath(self.dataset_resource['tarball_filename'])}
+            archive_root_folder: {self.archive_root_folder_path}
+            page_work_folder (pages): {self.page_work_folder_path} (exists: {self.page_work_folder_path.exists()})
+            line_work_folder (lines): {self.line_work_folder_path} (exists: {self.line_work_folder_path.exists()})
+            """)
+        if dry_run:
+            return
 
-            channel_function_def = ''
-            if channel_func is not None:
-                if type(channel_func) is functools.partial:
-                    channel_function_def = inspect.getsource(channel_func.func) + str( channel_func.keywords)
-                else:
-                    channel_function_def = inspect.getsource( channel_func )
+        # Folder creation, when needed
+        if from_page_dir != '' and not self.page_work_folder_path.exists():
+           raise FileNotFoundError(f"Work folder {self.page_work_folder_path} does not exist. Abort.")
+        else:
+            self.root_path.mkdir( parents=True, exist_ok=True )
+            self.page_work_folder_path.mkdir( parents=True, exist_ok=True)
 
-            self._generate_readme("README.md", 
-                    { 'subset': subset,
-                      'subset_ratios': subset_ratios, 
-                      'build_items': build_items, 
-                      'count': count, 
-                      'from_line_tsv_file': from_line_tsv_file,
-                      'from_page_dir': from_page_dir,
-                      'from_work_folder': from_work_folder,
-                      'work_folder': work_folder, 
-                      'line_padding_style': line_padding_style,
-                      'channel_func': channel_function_def,
-                      'channel_suffix': channel_suffix,
-                     } )
+        page_paths = []
+        # Assume pages are already there = ignore archive
+        if from_page_dir:
+            self.page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix)))
+        else:
+            self.download_and_extract( self.root_path, self.dataset_resource, extract=extract_pages )
+            # copy files from archive folder to page_work_folder
+            print('{}, {}'.format(self.archive_root_folder_path, self.page_work_folder_path))
+            if self.archive_root_folder_path != self.page_work_folder_path:
+                logger.debug("Copying files...")
+                self._purge( self.page_work_folder_path )
+                for page_lbl_path in self.archive_root_folder_path.glob('*{}'.format( lbl_suffix )):
+                    page_img_path = Path(re.sub(r'{}$'.format( lbl_suffix ), img_suffix, str(page_lbl_path)))
+                    print(page_img_path)
+                    if page_img_path.exists():
+                        shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
+                        logger.info("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
+                        shutil.copyfile( page_img_path, self.page_work_folder_path.joinpath( page_img_path.name) )
+                        logger.info("Copying {} to work folder {}...".format( page_img_path, self.page_work_folder_path))
+
+            page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix))) 
+
+        if not page_paths:
+            raise FileNotFoundError("Could not find a dataset source!")
+
+        self._data = self.build_page_data( page_paths, lbl_suffix, img_suffix )
+
+        self.config = {
+                'count': count,
+                'resume_task': resume_task,
+                'lbl_suffix': lbl_suffix,
+        }
+
+        return
+
+
+
+    def build_page_data( self, page_paths, lbl_suffix, img_suffix ):
+        """
+        Build raw samples (img, page).
+
+        Args:
+            page_paths (list[Path]): a list of PageXML files.
+            lbl_suffix (str): suffix of annotation file
+            img_suffix (str): suffix of image file
+
+        Return:
+            list[tuple(Path,Path)]: a list of pairs (<img_file_path>, <annotation_file_path>)
+        """
+        data = []
+        for pp in page_paths:
+            img_path = Path(re.sub(r'{}$'.format( lbl_suffix), img_suffix, str(pp) ))
+            if img_path.exists():
+                data.append( (img_path, pp) )
+        return data
 
 
     def download_and_extract(
             self,
-            root: Path,
-            raw_data_folder_path: Path,
+            root_path: Path,
             fl_meta: dict,
             extract=False) -> None:
         """Download the archive and extract it. If a valid archive already exists in the root location,
         extract only.
 
         Args:
-            root (Path): where to save the archive raw_data_folder_path (Path): where to extract the archive.
+            root_path (Path): where to save and extract the archive
             fl_meta (dict): a dictionary with file meta-info (keys: url, filename, md5, full-md5, origin, desc)
             extract (bool): If False (default), skip archive extraction step.
-
-        Returns:
-            None
 
         Raises:
             OSError: the base folder does not exist.
@@ -235,32 +246,32 @@ class PageDataset(VisionDataset):
         output_file_path = None
         # downloadable archive
         if 'url' in fl_meta:
-            output_file_path = root.joinpath( fl_meta['tarball_filename'])
+            output_file_path = root_path.joinpath( fl_meta['tarball_filename'])
+
+            print(fl_meta['md5'])
 
             if 'md5' not in fl_meta or not du.is_valid_archive(output_file_path, fl_meta['md5']):
                 logger.info("Downloading archive...")
-                du.resumable_download(fl_meta['url'], root, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
+                du.resumable_download(fl_meta['url'], root_path, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
             else:
                 logger.info("Found valid archive {} (MD5: {})".format( output_file_path, self.dataset_resource['md5']))
         elif 'file' in fl_meta:
             output_file_path = Path(fl_meta['file'])
 
-        if not raw_data_folder_path.exists() or not raw_data_folder_path.is_dir():
-            raise OSError("Base folder does not exist! Aborting.")
-
+        archive_root_folder_path = root_path.joinpath( self.dataset_resource['tarball_root_name'] ) 
         # skip if archive already extracted (unless explicit override)
         if not extract: # and du.check_extracted( raw_data_folder_path.joinpath( self.dataset_resource['tarball_root_name'] ) , fl_meta['full-md5'] ):
-            logger.info('Found valid file tree in {}: skipping the extraction stage.'.format(str(raw_data_folder_path.joinpath( self.dataset_resource['tarball_root_name'] ))))
+            logger.info("Skipping the extraction stage ('extract' option=F). You should check whether {} contains a valid archive tree.".format( archive_root_folder_path ))
             return
         if output_file_path.suffix == '.tgz' or output_file_path.suffixes == [ '.tar', '.gz' ] :
             with tarfile.open(output_file_path, 'r:gz') as archive:
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( raw_data_folder_path )
+                archive.extractall( root_path )
         # task description
         elif output_file_path.suffix == '.zip':
             with zipfile.ZipFile(output_file_path, 'r' ) as archive:
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( raw_data_folder_path )
+                archive.extractall( root_path )
 
 
     def _build_task( self, 
@@ -299,6 +310,137 @@ class PageDataset(VisionDataset):
             self._extract_lines( self.raw_data_folder_path, self.work_folder_path, )
 
         logger.info(f"Subset '{subset}' contains {len(data)} samples.")
+
+
+
+    @staticmethod
+    def dataset_stats( samples: list[dict] ) -> str:
+        """Compute basic stats about sample sets.
+
+        + avg, median, min, max on image heights and widths
+        + avg, median, min, max on transcriptions
+
+        Args:
+            samples (list[dict]): a list of samples.
+
+        Returns:
+            str: a string.
+        """
+        heights = np.array([ s['height'] for s in samples  ], dtype=int)
+        widths = np.array([ s['width'] for s in samples  ], dtype=int)
+        gt_lengths = np.array([ len(s['transcription']) for s in samples  ], dtype=int)
+
+        height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
+        width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
+        gt_length_stats = [int(s) for s in (np.mean( gt_lengths ), np.median(gt_lengths), np.min(gt_lengths), np.max(gt_lengths))]
+
+        stat_list = ('Mean', 'Median', 'Min', 'Max')
+        row_format = "{:>10}" * (len(stat_list) + 1)
+        return '\n'.join([
+            row_format.format("", *stat_list),
+            row_format.format("Img height", *height_stats),
+            row_format.format("Img width", *width_stats),
+            row_format.format("GT length", *gt_length_stats),
+        ])
+
+
+    def _generate_readme( self, filename: str, params: dict )->None:
+        """Create a metadata file in the work directory.
+
+        Args:
+            filename (str): a filepath.
+            params (dict): dictionary of parameters passed to the dataset task builder.
+
+        Returns:
+            None
+        """
+        filepath = Path(self.work_folder_path, filename )
+        
+        with open( filepath, "w") as of:
+            print('Task was built with the following options:\n\n\t+ ' + 
+                  '\n+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
+                  file=of)
+            print( repr(self), file=of)
+
+
+
+    def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
+        """This method returns a page sample.
+
+        Args:
+            index (int): item index.
+
+        Returns:
+            tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
+        """
+        img_path, label_path = self._data[index]
+        image, target = self._load_image_and_target(img_path, label_path)
+
+        if self._transforms:
+            print(self._transforms)
+            image, target = self._transforms( image, target )
+        return (image, target)
+
+    def _load_image_and_target(self, img_path, annotation_path):
+        """
+        Load an image and its target (bounding boxes and labels).
+
+        Parameters:
+            img_path (Path): image path
+            annotation_path (Path): annotation path
+
+        Returns:
+            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
+        """
+        # Open the image file and convert it to RGB
+        img = Image.open(img_path)#.convert('RGB')
+
+        page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
+        masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
+        bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
+        text = '\n'.join( l['text'] for l in page_dict['lines'] )
+        return img, {'masks': masks, 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'text': text}
+
+
+
+
+    def __len__(self) -> int:
+        """Number of samples in the dataset.
+
+        Returns:
+            int: number of pages
+        """
+        return len(self._data)
+
+    def _purge(self, folder: str) -> int:
+        """Empty the line image subfolder: all line images and transcriptions are
+        deleted, as well as the TSV file.
+
+        Args:
+            folder (str): Name of the subfolder to _purge (relative the caller's pwd
+
+        Returns:
+            int: number of deleted files.
+        """
+        cnt = 0
+        for item in [ f for f in Path( folder ).iterdir() if not f.is_dir()]:
+            item.unlink()
+            cnt += 1
+        return cnt
+
+    def __repr__(self) -> str:
+
+        summary = '\n'.join([
+                    f"Root folder:\t{self.root}",
+                    f"Files extracted in:\t{self.archive_root_folder_path}",
+                    f"Page_Work folder:\t{self.page_work_folder_path}",
+                    f"Data points:\t{len(self.data)}",
+                    "Stats:",
+                    f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
+        
+        return ("\n________________________________\n"
+                f"\n{summary}"
+                "\n________________________________\n")
 
 
 
@@ -347,13 +489,13 @@ class PageDataset(VisionDataset):
         line_tuples = []
 
         # replace extra dots in some names (everything that is not in the suffix)
-        page_id = re.match(r'(.+).{}'.format(config['gt_suffix']), page.name).group(1)
+        page_id = re.match(r'(.+).{}'.format(config['lbl_suffix']), page.name).group(1)
         page_id = page_id.replace('.', '_')
 
         ###################### Case #1: PageXML ###################
         with open(page, 'r') as page_file:
 
-            page_dict = seglib.segmentation_dict_from_xml( page_file, get_text=True ) if ['gt_suffix']=='xml' else json.load( page_file )
+            page_dict = seglib.segmentation_dict_from_xml( page_file, get_text=True ) if config['lbl_suffix']=='.xml' else json.load( page_file )
             
             img_path = Path(page).parent.joinpath( page_dict['image_filename'] )
 
@@ -412,125 +554,7 @@ class PageDataset(VisionDataset):
                 samples.append( sample )
         return samples
 
-
-    @staticmethod
-    def dataset_stats( samples: list[dict] ) -> str:
-        """Compute basic stats about sample sets.
-
-        + avg, median, min, max on image heights and widths
-        + avg, median, min, max on transcriptions
-
-        Args:
-            samples (list[dict]): a list of samples.
-
-        Returns:
-            str: a string.
-        """
-        heights = np.array([ s['height'] for s in samples  ], dtype=int)
-        widths = np.array([ s['width'] for s in samples  ], dtype=int)
-        gt_lengths = np.array([ len(s['transcription']) for s in samples  ], dtype=int)
-
-        height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
-        width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
-        gt_length_stats = [int(s) for s in (np.mean( gt_lengths ), np.median(gt_lengths), np.min(gt_lengths), np.max(gt_lengths))]
-
-        stat_list = ('Mean', 'Median', 'Min', 'Max')
-        row_format = "{:>10}" * (len(stat_list) + 1)
-        return '\n'.join([
-            row_format.format("", *stat_list),
-            row_format.format("Img height", *height_stats),
-            row_format.format("Img width", *width_stats),
-            row_format.format("GT length", *gt_length_stats),
-        ])
-
-
-    def _generate_readme( self, filename: str, params: dict )->None:
-        """Create a metadata file in the work directory.
-
-        Args:
-            filename (str): a filepath.
-            params (dict): dictionary of parameters passed to the dataset task builder.
-
-        Returns:
-            None
-        """
-        filepath = Path(self.work_folder_path, filename )
-        
-        with open( filepath, "w") as of:
-            print('Task was built with the following options:\n\n\t+ ' + 
-                  '\n+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
-                  file=of)
-            print( repr(self), file=of)
-
-
-
-    @abstractmethod
-    def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
-        """This method generate a line sample.
-
-        Args:
-            index (int): item index.
-
-        Returns:
-            dict[str,Union[Tensor,int,str]]: a sample dictionary
-        """
-        pass
-
-    @abstractmethod
-    def __getitems__(self, indexes: list ) -> list[dict]:
-        """To help with batching lines.
-
-        Args:
-            indexes (list): a list of indexes.
-
-        Returns:
-            list[dict]: a list of samples.
-        """
-        return [ self.__getitem__( idx ) for idx in indexes ]
-
-
-    @abstractmethod
-    def __len__(self) -> int:
-        """Number of samples in the dataset.
-
-        Returns:
-            int: number of data points.
-        """
-        pass
-
-
-    def _purge(self, folder: str) -> int:
-        """Empty the line image subfolder: all line images and transcriptions are
-        deleted, as well as the TSV file.
-
-        Args:
-            folder (str): Name of the subfolder to _purge (relative the caller's pwd
-
-        Returns:
-            int: number of deleted files.
-        """
-        cnt = 0
-        for item in [ f for f in Path( folder ).iterdir() if not f.is_dir()]:
-            item.unlink()
-            cnt += 1
-        return cnt
-
-    def __repr__(self) -> str:
-
-        summary = '\n'.join([
-                    f"Root folder:\t{self.root}",
-                    f"Files extracted in:\t{self.raw_data_folder_path}",
-                    f"Work folder:\t{self.work_folder_path}",
-                    f"Data points:\t{len(self.data)}",
-                    "Stats:",
-                    f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
-        
-        return ("\n________________________________\n"
-                f"\n{summary}"
-                "\n________________________________\n")
-
-
-class MonasteriumDataset(ChartersDataset):
+class MonasteriumDataset(PageDataset):
     """A subset of Monasterium charter images and their meta-data (PageXML).
 
         + its core is a set of charters segmented and transcribed by various contributors, mostly by correcting Transkribus-generated data.
@@ -542,6 +566,7 @@ class MonasteriumDataset(ChartersDataset):
             'url': r'https://drive.google.com/uc?id=1hEyAMfDEtG0Gu7NMT7Yltk_BAxKy_Q4_',
             'tarball_filename': 'MonasteriumTekliaGTDataset.tar.gz',
             'md5': '7d3974eb45b2279f340cc9b18a53b47a',
+            #'md5': '337929f65c52526b61d6c4073d08ab79',
             'full-md5': 'e720bac1040523380921a576f4cc89dc',
             'desc': 'Monasterium ground truth data (Teklia)',
             'origin': 'google',
@@ -552,9 +577,9 @@ class MonasteriumDataset(ChartersDataset):
     def __init__(self, *args, **kwargs ):
 
         super().__init__( *args, **kwargs)
+#
 
-
-class KoenigsfeldenDataset(ChartersDataset):
+class KoenigsfeldenDataset(PageDataset):
     """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
         The data have been compiled from raw Transkribus exports.
     """
@@ -578,7 +603,7 @@ class KoenigsfeldenDataset(ChartersDataset):
 
 
 
-class KoenigsfeldenDatasetAbbrev(ChartersDataset):
+class KoenigsfeldenDatasetAbbrev(PageDataset):
     """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
         The data have been compiled from raw Transkribus exports.
     """
@@ -600,7 +625,7 @@ class KoenigsfeldenDatasetAbbrev(ChartersDataset):
         #self.target_transform = self.filter_transcription
 
 
-class NurembergLetterbooks(ChartersDataset):
+class NurembergLetterbooks(PageDataset):
     """
     Nuremberg letterbooks (15th century).
     """
