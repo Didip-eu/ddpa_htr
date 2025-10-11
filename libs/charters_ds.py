@@ -422,7 +422,7 @@ class PageDataset(VisionDataset):
 
 
 
-
+    # OBSOLETE: check and delete
     def _extract_lines(self, raw_data_folder_path: Path, work_folder_path: Path,) -> list[Dict[str, Union[Tensor,str,int]]]:
         """Generate line images from the PageXML files and save them in a local subdirectory
         of the consumer's program.
