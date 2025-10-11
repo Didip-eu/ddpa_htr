@@ -173,7 +173,7 @@ class PageDataset(VisionDataset):
         page_paths = []
         # Assume pages are already there = ignore archive
         if from_page_dir:
-            self.page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix)))
+            page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix)))
         else:
             self.download_and_extract( self.root_path, self.dataset_resource, extract=extract_pages )
             # copy files from archive folder to page_work_folder
@@ -201,15 +201,13 @@ class PageDataset(VisionDataset):
                 'count': count,
                 'resume_task': resume_task,
                 'lbl_suffix': lbl_suffix,
+                'img_suffix': img_suffix,
         }
-
-        return
-
 
 
     def build_page_data( self, page_paths, lbl_suffix, img_suffix ):
         """
-        Build raw samples (img, page).
+        Build raw samples (img, page), ensuring that every image has its annotation counterpart.
 
         Args:
             page_paths (list[Path]): a list of PageXML files.
@@ -227,11 +225,7 @@ class PageDataset(VisionDataset):
         return data
 
 
-    def download_and_extract(
-            self,
-            root_path: Path,
-            fl_meta: dict,
-            extract=False) -> None:
+    def download_and_extract( self, root_path: Path, fl_meta: dict, extract=False) -> None:
         """Download the archive and extract it. If a valid archive already exists in the root location,
         extract only.
 
@@ -274,44 +268,75 @@ class PageDataset(VisionDataset):
                 archive.extractall( root_path )
 
 
-    def _build_task( self, 
-                   build_items: bool=True, 
-                   work_folder: str='', 
-                   )->list[dict]:
-        """Build the image/GT samples required for an HTR task, either from the raw files (extracted from archive)
-        or a work folder that already contains compiled files.
+    def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
+        """This method returns a page sample.
 
         Args:
-            build_items (bool): if True (default), go through the compilation step; otherwise, work from the existing work folder's content.
-            work_folder (str): Where line images and ground truth transcriptions fitting a particular task
-                are to be created; default: './MonasteriumHandwritingDatasetHTR'.
+            index (int): item index.
 
         Returns:
-            list[dict]: a list of dictionaries.
-
-        Raises:
-            FileNotFoundError: the TSV file passed to the `from_line_tsv_file` option does not exist.
+            tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
         """
-        # + image to GT mapping (TSV)
-        if work_folder=='':
-            self.work_folder_path = Path('data', self.work_folder_name+'HTR') 
-            logger.debug("Setting default location for work folder: {}".format( self.work_folder_path ))
-        else:
-            self.work_folder_path = Path(work_folder)
-            logger.debug("Work folder: {}".format( self.work_folder_path ))
+        img_path, label_path = self._data[index]
+        image, target = self._load_image_and_target(img_path, label_path)
 
-        if not self.work_folder_path.is_dir():
-            self.work_folder_path.mkdir(parents=True)
-            logger.debug("Creating work folder = {}".format( self.work_folder_path ))
+        if self._transforms:
+            print(self._transforms)
+            image, target = self._transforms( image, target )
+        return (image, target)
 
-        # samples: all of them! 
-        if build_items:
-            print("Building samples")
-            self._extract_lines( self.raw_data_folder_path, self.work_folder_path, )
+    def _load_image_and_target(self, img_path, annotation_path):
+        """
+        Load an image and its target (bounding boxes and labels).
 
-        logger.info(f"Subset '{subset}' contains {len(data)} samples.")
+        Parameters:
+            img_path (Path): image path
+            annotation_path (Path): annotation path
+
+        Returns:
+            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
+        """
+        # Open the image file and convert it to RGB
+        img = Image.open(img_path)#.convert('RGB')
+
+        page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
+        masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
+        print( "masks.shape={}".format( masks.shape ))
+        bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
+        text = [ l['text'] for l in page_dict['lines'] ]
+        return img, {'masks': masks, 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'text': text}
 
 
+
+    def dump_lines( self ):
+        """
+        Question: save line crops as compressed tensors or PNG images, or both?
+        """
+        self.line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        for img, annotation in self:
+            img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', annotation['path'].name)
+            for idx, box in enumerate( annotation['boxes'] ):
+                l,t,r,b = [ int(elt.item()) for elt in box ]
+                print(l,t,r,b)
+                line_tensor = img[t:b+1, l:r+1]
+                mask_tensor = annotation['masks'][idx, t:b+1, l:r+1]
+                line_text = annotation['text'][idx]
+                outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
+                for datum, suffix in [ (line_tensor, 'pt.gz'), (mask_tensor, 'bool.pt.gz') ]:
+                    with gzip.GzipFile( f'{outfile_prefix}.{suffix}', 'w') as zf:
+                        torch.save( datum, zf )
+                with open( f'{outfile_prefix}.gt.txt', 'w') as of:
+                    of.write( line_text )
+
+
+
+    def __len__(self) -> int:
+        """Number of samples in the dataset.
+
+        Returns:
+            int: number of pages
+        """
+        return len(self._data)
 
     @staticmethod
     def dataset_stats( samples: list[dict] ) -> str:
@@ -364,54 +389,6 @@ class PageDataset(VisionDataset):
 
 
 
-    def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
-        """This method returns a page sample.
-
-        Args:
-            index (int): item index.
-
-        Returns:
-            tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
-        """
-        img_path, label_path = self._data[index]
-        image, target = self._load_image_and_target(img_path, label_path)
-
-        if self._transforms:
-            print(self._transforms)
-            image, target = self._transforms( image, target )
-        return (image, target)
-
-    def _load_image_and_target(self, img_path, annotation_path):
-        """
-        Load an image and its target (bounding boxes and labels).
-
-        Parameters:
-            img_path (Path): image path
-            annotation_path (Path): annotation path
-
-        Returns:
-            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
-        """
-        # Open the image file and convert it to RGB
-        img = Image.open(img_path)#.convert('RGB')
-
-        page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
-        masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
-        bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
-        text = '\n'.join( l['text'] for l in page_dict['lines'] )
-        return img, {'masks': masks, 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'text': text}
-
-
-
-
-    def __len__(self) -> int:
-        """Number of samples in the dataset.
-
-        Returns:
-            int: number of pages
-        """
-        return len(self._data)
-
     def _purge(self, folder: str) -> int:
         """Empty the line image subfolder: all line images and transcriptions are
         deleted, as well as the TSV file.
@@ -441,6 +418,8 @@ class PageDataset(VisionDataset):
         return ("\n________________________________\n"
                 f"\n{summary}"
                 "\n________________________________\n")
+
+
 
 
 
