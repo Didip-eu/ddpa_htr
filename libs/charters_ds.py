@@ -122,8 +122,6 @@ class PageDataset(VisionDataset):
                 to read for the channel file. Default: '' (=ignore channel file).
             dry_run (bool): if True (default), compute all paths (root, page_work_folder, line_work_folder)
                 but does not write anything.
-            count (int): Stops after extracting {count} image items (for testing 
-                purpose only).
             resume_task (bool): If True, the work folder is not purged. Only those page
                 items (lines, regions) that not already in the work folder are extracted.
                 (Partially implemented: works only for lines.)
@@ -177,13 +175,11 @@ class PageDataset(VisionDataset):
         else:
             self.download_and_extract( self.root_path, self.dataset_resource, extract=extract_pages )
             # copy files from archive folder to page_work_folder
-            print('{}, {}'.format(self.archive_root_folder_path, self.page_work_folder_path))
             if self.archive_root_folder_path != self.page_work_folder_path:
                 logger.debug("Copying files...")
                 self._purge( self.page_work_folder_path )
                 for page_lbl_path in self.archive_root_folder_path.glob('*{}'.format( lbl_suffix )):
                     page_img_path = Path(re.sub(r'{}$'.format( lbl_suffix ), img_suffix, str(page_lbl_path)))
-                    print(page_img_path)
                     if page_img_path.exists():
                         shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
                         logger.info("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
@@ -242,8 +238,6 @@ class PageDataset(VisionDataset):
         if 'url' in fl_meta:
             output_file_path = root_path.joinpath( fl_meta['tarball_filename'])
 
-            print(fl_meta['md5'])
-
             if 'md5' not in fl_meta or not du.is_valid_archive(output_file_path, fl_meta['md5']):
                 logger.info("Downloading archive...")
                 du.resumable_download(fl_meta['url'], root_path, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
@@ -281,7 +275,6 @@ class PageDataset(VisionDataset):
         image, target = self._load_image_and_target(img_path, label_path)
 
         if self._transforms:
-            print(self._transforms)
             image, target = self._transforms( image, target )
         return (image, target)
 
@@ -301,33 +294,57 @@ class PageDataset(VisionDataset):
 
         page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
         masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
-        print( "masks.shape={}".format( masks.shape ))
         bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
         text = [ l['text'] for l in page_dict['lines'] ]
         return img, {'masks': masks, 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'text': text}
 
 
 
-    def dump_lines( self ):
+    def dump_lines( self, line_as_tensor=False, resume=False ):
         """
-        Question: save line crops as compressed tensors or PNG images, or both?
+        Save line samples in the line work folder; each line yields:
+        - line crop (as PNG, by default)
+        - polygon mask (as tensor)
+        - transcription text (text file)
+        
+        Args:
+            line_as_tensor (bool): save line crops as tensors (compressed).
+            resume (bool): resume a dump task---work folder is checked for existing, completed pages.
+
         """
         self.line_work_folder_path.mkdir( parents=True, exist_ok=True)
-        for img, annotation in self:
+
+        if not resume:
+            self._purge( self.line_work_folder_path )
+
+        for img, annotation in tqdm( self ):
             img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', annotation['path'].name)
+            sentinel_path = self.line_work_folder_path.joinpath(f'{img_prefix}.sentinel')
+            if resume and sentinel_path.exists():
+                continue
             for idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
-                print(l,t,r,b)
-                line_tensor = img[t:b+1, l:r+1]
+                line_tensor = img[:,t:b+1, l:r+1]
                 mask_tensor = annotation['masks'][idx, t:b+1, l:r+1]
                 line_text = annotation['text'][idx]
                 outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
-                for datum, suffix in [ (line_tensor, 'pt.gz'), (mask_tensor, 'bool.pt.gz') ]:
-                    with gzip.GzipFile( f'{outfile_prefix}.{suffix}', 'w') as zf:
-                        torch.save( datum, zf )
+                if not line_as_tensor:
+                    ski.io.imsave( f'{outfile_prefix}.png', line_tensor.permute(1,2,0)) 
+                else:
+                    with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
+                        torch.save( line_tensor, zf )
+                with gzip.GzipFile( f'{outfile_prefix}.bool.pt.gz', 'w') as zf:
+                    torch.save( mask_tensor, zf )
                 with open( f'{outfile_prefix}.gt.txt', 'w') as of:
                     of.write( line_text )
-
+            # indicates that this page dump is complete (for resuming task)
+            with open( sentinel_path, 'w') as sf:
+                pass
+        
+        sentinels = self.line_work_folder_path.glob('*.sentinel')
+        if len(list(sentinels)) == len(self):
+            for stl in sentinels:
+                stl.unlink()
 
 
     def __len__(self) -> int:
@@ -379,7 +396,7 @@ class PageDataset(VisionDataset):
         Returns:
             None
         """
-        filepath = Path(self.work_folder_path, filename )
+        filepath = Path(self.page_work_folder_path, filename )
         
         with open( filepath, "w") as of:
             print('Task was built with the following options:\n\n\t+ ' + 
@@ -420,118 +437,6 @@ class PageDataset(VisionDataset):
                 "\n________________________________\n")
 
 
-
-
-    # OBSOLETE: check and delete
-    def _extract_lines(self, raw_data_folder_path: Path, work_folder_path: Path,) -> list[Dict[str, Union[Tensor,str,int]]]:
-        """Generate line images from the PageXML files and save them in a local subdirectory
-        of the consumer's program.
-
-        Args:
-            raw_data_folder_path (Path): root of the (read-only) expanded archive.
-            work_folder_path (Path): Line images are extracted in this subfolder
-
-        Returns:
-            list[Dict[str,Union[Tensor,str,int]]]: An array of dictionaries of the form:: 
-
-                {'img': <absolute img_file_path>,
-                 'transcription': <transcription text>,
-                 'height': <original height>,
-                 'width': <original width>}
-        """
-        # filtering out Godzilla-sized images (a couple of them)
-        warnings.simplefilter("error", Image.DecompressionBombWarning)
-
-        Path( work_folder_path ).mkdir(exist_ok=True, parents=True) 
-
-        if not self.config['resume_task']:
-            self._purge( work_folder_path ) 
-
-        cnt = 0 # for testing purpose
-        samples = [] 
-
-        for page in tqdm(self.pages):
-            line_samples = self.extract_lines_from_page( page, work_folder_path, config=self.config)
-            if line_samples:
-                samples.extend( line_samples )
-                cnt += 1
-                if self.config['count'] and cnt == self.config['count']:
-                    break
-        return samples
-
-    @classmethod
-    def extract_lines_from_page(cls, page: Union[str,Path], work_folder_path: Union[Path,str], config:dict={}):
-
-        assert all([ k in config for k in ( 'channel_func', 'resume_task')])
-
-        samples = []
-        line_tuples = []
-
-        # replace extra dots in some names (everything that is not in the suffix)
-        page_id = re.match(r'(.+).{}'.format(config['lbl_suffix']), page.name).group(1)
-        page_id = page_id.replace('.', '_')
-
-        ###################### Case #1: PageXML ###################
-        with open(page, 'r') as page_file:
-
-            page_dict = seglib.segmentation_dict_from_xml( page_file, get_text=True ) if config['lbl_suffix']=='.xml' else json.load( page_file )
-            
-            img_path = Path(page).parent.joinpath( page_dict['image_filename'] )
-
-            page_image = None
-
-            try:
-                page_image = Image.open( img_path, 'r')
-            except Image.DecompressionBombWarning as dcb:
-                logger.debug( f'{dcb}: ignoring page' )
-                return None
-
-
-            for tl in page_dict['lines']:
-                sample = dict()
-                textline_id, transcription=tl['id'], tl['text']
-                polygon_coordinates = [ tuple(pair) for pair in tl['coords'] ]
-                line_tuples.append( (sample, textline_id, polygon_coordinates, transcription) )
-
-
-            for (sample, textline_id, polygon_coordinates, transcription) in line_tuples:
-                
-                transcription = transcription.replace("\t",' ')
-                if len(transcription) == 0:
-                    continue
-                sample['transcription'] = transcription
-                textline_bbox = ImagePath.Path( polygon_coordinates ).getbbox()
-                
-                x_left, y_up, x_right, y_low = textline_bbox
-                sample['width'], sample['height'] = x_right-x_left, y_low-y_up
-                
-                img_path_prefix = work_folder_path.joinpath( f"{page_id}-{textline_id}" ) 
-                sample['img'] = Path(img_path_prefix).with_suffix('.png').absolute()
-
-                if not (config['resume_task'] and sample['img'].exists()):
-                    bbox_img = page_image.crop( textline_bbox)
-                    img_hwc = np.array( bbox_img )
-                    leftx, topy = textline_bbox[:2]
-                    transposed_coordinates = np.array([ (x-leftx, y-topy) for x,y in polygon_coordinates ], dtype='int')[:,::-1]
-
-                    boolean_mask = ski.draw.polygon2mask( img_hwc.shape[:2], transposed_coordinates )
-                    sample['binary_mask']=img_path_prefix.with_suffix('.bool.npy.gz')
-                    with gzip.GzipFile( sample['binary_mask'], 'w') as zf:
-                        np.save( zf, boolean_mask )
-                    bbox_img.save( sample['img'] )
-
-                    # construct an additional, flat channel
-                    if config['channel_func'] is not None:
-                        img_channel_hw = config['channel_func']( img_hwc, boolean_mask)
-                        sample['img_channel']=img_path_prefix.with_suffix( '.channel.npy.gz' )
-                        with gzip.GzipFile(sample['img_channel'], 'w') as zf:
-                            np.save( zf, img_channel_hw ) 
-
-                with open( img_path_prefix.with_suffix('.gt.txt'), 'w') as gt_file:
-                    gt_file.write( sample['transcription'])
-
-                samples.append( sample )
-        return samples
 
 class MonasteriumDataset(PageDataset):
     """A subset of Monasterium charter images and their meta-data (PageXML).
