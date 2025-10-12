@@ -213,11 +213,20 @@ class PageDataset(VisionDataset):
         Return:
             list[tuple(Path,Path)]: a list of pairs (<img_file_path>, <annotation_file_path>)
         """
+        warnings.simplefilter('error', Image.DecompressionBombWarning)
         data = []
         for pp in page_paths:
             img_path = Path(re.sub(r'{}$'.format( lbl_suffix), img_suffix, str(pp) ))
-            if img_path.exists():
-                data.append( (img_path, pp) )
+            if not img_path.exists():
+                continue
+
+            img = None
+            try:
+                img = Image.open(img_path)#.convert('RGB')
+            except Image.DecompressionBombWarning as dcb:
+                logger.error( f'{dcb}: ignoring page {pp}' )
+                continue
+            data.append( (img_path, pp) )
         return data
 
 
@@ -274,6 +283,7 @@ class PageDataset(VisionDataset):
         img_path, label_path = self._data[index]
         image, target = self._load_image_and_target(img_path, label_path)
 
+
         if self._transforms:
             image, target = self._transforms( image, target )
         return (image, target)
@@ -287,17 +297,41 @@ class PageDataset(VisionDataset):
             annotation_path (Path): annotation path
 
         Returns:
-            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
+            tuple[Image,dict]: A tuple containing the image and a dictionary with 'mask', 'boxes' and 'labels' keys.
         """
-        # Open the image file and convert it to RGB
-        img = Image.open(img_path)#.convert('RGB')
+        img = Image.open(img_path, 'r')
 
         page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
+        # one mask per page is enough (!= Mask-RCNN)
         masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
         bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
-        text = [ l['text'] for l in page_dict['lines'] ]
-        return img, {'masks': masks, 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'text': text}
+        texts = [ l['text'] for l in page_dict['lines'] ]
+        return img, {'mask': Mask(torch.sum(masks, axis=0)), 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'texts': texts}
 
+
+    @staticmethod
+    def augment_with_bboxes( sample, aug, device ):
+        """  Augment a sample (img + masks), and add bounding boxes to the target.
+        (For Tormentor only.)
+
+        Args:
+            sample (tuple[Tensor,dict]): tuple with image (as tensor) and label dictionary.
+        """
+        img, target = sample
+        img = img.to(device)
+        img = aug(img)
+        masks, labels, texts = target['masks'].to(device), target['labels'].to(device), target['texts']
+        masks = torch.stack( [ aug(m, is_mask=True) for m in target['masks'] ], axis=0).to(device)
+
+        # first, filter empty masks
+        keep = torch.sum( masks, dim=(1,2)) > 10
+        masks, labels = masks[keep], labels[keep]
+        # construct boxes, filter out invalid ones
+        boxes=BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.shape)
+        keep=(boxes[:,0]-boxes[:,2])*(boxes[:,1]-boxes[:,3]) != 0
+
+        target['boxes'], target['masks'], target['texts'] = boxes[keep], masks[keep], texts[keep]
+        return (img, target)
 
 
     def dump_lines( self, line_as_tensor=False, resume=False ):
@@ -325,8 +359,8 @@ class PageDataset(VisionDataset):
             for idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
                 line_tensor = img[:,t:b+1, l:r+1]
-                mask_tensor = annotation['masks'][idx, t:b+1, l:r+1]
-                line_text = annotation['text'][idx]
+                mask_tensor = annotation['mask'][t:b+1, l:r+1]
+                line_text = annotation['texts'][idx]
                 outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
                 if not line_as_tensor:
                     ski.io.imsave( f'{outfile_prefix}.png', line_tensor.permute(1,2,0)) 
@@ -355,22 +389,20 @@ class PageDataset(VisionDataset):
         """
         return len(self._data)
 
-    @staticmethod
-    def dataset_stats( samples: list[dict] ) -> str:
+    def dataset_stats(self) -> str:
         """Compute basic stats about sample sets.
 
         + avg, median, min, max on image heights and widths
-        + avg, median, min, max on transcriptions
 
-        Args:
-            samples (list[dict]): a list of samples.
 
         Returns:
             str: a string.
         """
-        heights = np.array([ s['height'] for s in samples  ], dtype=int)
-        widths = np.array([ s['width'] for s in samples  ], dtype=int)
-        gt_lengths = np.array([ len(s['transcription']) for s in samples  ], dtype=int)
+        heights, widths, gt_lengths = [], [], []
+        for img, lbl in tqdm( self ):
+            widths.append( lbl['orig_size'][0] )
+            heights.append( lbl['orig_size'][1] )
+            gt_lengths.append( np.sum( [ len(txt) for txt in lbl['texts'] ]))
 
         height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
         width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
