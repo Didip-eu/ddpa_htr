@@ -10,14 +10,11 @@ import re
 import os
 from pathlib import *
 from typing import *
-import inspect
-import functools
+import time
 
 # 3rd-party
 from tqdm import tqdm
-import defusedxml.ElementTree as ET
-#import xml.etree.ElementTree as ET
-from PIL import Image, ImagePath
+from PIL import Image
 import skimage as ski
 import gzip
 
@@ -281,12 +278,11 @@ class PageDataset(VisionDataset):
             tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
         """
         img_path, label_path = self._data[index]
-        image, target = self._load_image_and_target(img_path, label_path)
-
+        img_whc, target = self._load_image_and_target(img_path, label_path)
 
         if self._transforms:
-            image, target = self._transforms( image, target )
-        return (image, target)
+            img_chw, target = self._transforms( img_whc, target )
+        return (img_chw, target)
 
     def _load_image_and_target(self, img_path, annotation_path):
         """
@@ -299,14 +295,16 @@ class PageDataset(VisionDataset):
         Returns:
             tuple[Image,dict]: A tuple containing the image and a dictionary with 'mask', 'boxes' and 'labels' keys.
         """
-        img = Image.open(img_path, 'r')
-
+        img_whc = Image.open(img_path, 'r')
+        
+        start_time = time.time()
         page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
         # one mask per page is enough (!= Mask-RCNN)
-        masks = Mask( seglib.line_binary_mask_stack_from_segmentation_dict(page_dict, polygon_key=self.polygon_key))
-        bboxes = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.size[::-1])
+        start_time = time.time()
+        bboxes_n4, masks_nhw = seglib.line_masks_from_img_segmentation_dict( img_whc, page_dict, polygon_key=self.polygon_key) 
+        bboxes_n4, masks_nhw = torch.tensor(bboxes_n4), torch.tensor(masks_nhw)
         texts = [ l['text'] for l in page_dict['lines'] ]
-        return img, {'mask': Mask(torch.sum(masks, axis=0)), 'boxes': bboxes, 'path': img_path, 'orig_size': img.size, 'texts': texts}
+        return img_whc, {'mask': Mask(torch.sum(masks_nhw, axis=0)), 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
 
 
     @staticmethod
@@ -350,15 +348,20 @@ class PageDataset(VisionDataset):
 
         if not resume:
             self._purge( self.line_work_folder_path )
-
-        for img, annotation in tqdm( self ):
+        start = 0
+        sentinel_path = self.line_work_folder_path.joinpath('.sentinel')
+        if sentinel_path.exists():
+            with open(sentinel_path, 'r') as sf:
+                start = int(sf.read())
+        for idx in tqdm( range(len(self))):
+            if idx < start:
+                continue
+            img_chw, annotation = self[idx]
             img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', annotation['path'].name)
             sentinel_path = self.line_work_folder_path.joinpath(f'{img_prefix}.sentinel')
-            if resume and sentinel_path.exists():
-                continue
             for idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
-                line_tensor = img[:,t:b+1, l:r+1]
+                line_tensor = img_chw[:,t:b+1, l:r+1]
                 mask_tensor = annotation['mask'][t:b+1, l:r+1]
                 line_text = annotation['texts'][idx]
                 outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
@@ -373,12 +376,10 @@ class PageDataset(VisionDataset):
                     of.write( line_text )
             # indicates that this page dump is complete (for resuming task)
             with open( sentinel_path, 'w') as sf:
-                pass
+                sf.write(f'{idx}')
         
-        sentinels = self.line_work_folder_path.glob('*.sentinel')
-        if len(list(sentinels)) == len(self):
-            for stl in sentinels:
-                stl.unlink()
+        if sentinel_path.exists():
+            sentinel_path.unlink()
 
 
     def __len__(self) -> int:

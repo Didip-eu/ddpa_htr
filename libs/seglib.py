@@ -446,7 +446,8 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
 
     Args:
         page (str): path of a PageXML file.
-        get_text (bool): extract line text content, if present (default: False).
+        get_text (bool): extract line text content, if present (default: False); this
+            option causes line with no text to be yanked from the dictionary.
 
     Returns:
         dict[str,Union[str,list[Any]]]: a dictionary of the form::
@@ -482,10 +483,12 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
                     line_text = unicode_elt.text 
             line_dict = {'line_id': line_id, 'baseline': baseline_points, 
                         'coords': polygon_points, 'regions': regions}
-            if not re.match(r'\s*$', line_text):
+            if line_text and not re.match(r'\s*$', line_text):
                 line_dict['text'] = line_text 
                 if line_custom_attribute:
                     line_dict['custom']=line_custom_attribute
+            elif get_text:
+                return None
             return line_dict
 
     def process_region( region: ET.Element, line_accum: list, regions:list ):
