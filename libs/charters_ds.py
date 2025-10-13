@@ -147,15 +147,9 @@ class PageDataset(VisionDataset):
             self.page_work_folder_path = Path(page_work_folder)
         self.line_work_folder_path = Path(line_work_folder)
 
-        logger.info(f"""
-        Dataset creation (dry run):
-            root (prefix of archive tree): {self.root_path}
-            archive path: {self.root_path.joinpath(self.dataset_resource['tarball_filename'])}
-            archive_root_folder: {self.archive_root_folder_path}
-            page_work_folder (pages): {self.page_work_folder_path} (exists: {self.page_work_folder_path.exists()})
-            line_work_folder (lines): {self.line_work_folder_path} (exists: {self.line_work_folder_path.exists()})
-            """)
+        logger.info(self)
         if dry_run:
+            logger.info('Dry run: exiting.')
             return
 
         # Folder creation, when needed
@@ -179,9 +173,9 @@ class PageDataset(VisionDataset):
                     page_img_path = Path(re.sub(r'{}$'.format( lbl_suffix ), img_suffix, str(page_lbl_path)))
                     if page_img_path.exists():
                         shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
-                        logger.info("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
+                        logger.debug("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
                         shutil.copyfile( page_img_path, self.page_work_folder_path.joinpath( page_img_path.name) )
-                        logger.info("Copying {} to work folder {}...".format( page_img_path, self.page_work_folder_path))
+                        logger.debug("Copying {} to work folder {}...".format( page_img_path, self.page_work_folder_path))
 
             page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix))) 
 
@@ -457,19 +451,14 @@ class PageDataset(VisionDataset):
         return cnt
 
     def __repr__(self) -> str:
-
-        summary = '\n'.join([
-                    f"Root folder:\t{self.root}",
-                    f"Files extracted in:\t{self.archive_root_folder_path}",
-                    f"Page_Work folder:\t{self.page_work_folder_path}",
-                    f"Data points:\t{len(self.data)}",
-                    "Stats:",
-                    f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
-        
-        return ("\n________________________________\n"
-                f"\n{summary}"
-                "\n________________________________\n")
-
+        return f"""
+                Root path:\t{self.root_path}
+                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename'])}
+                Archive root folder:\t{self.archive_root_folder_path}
+                Page_work folder:\t{self.page_work_folder_path}
+                Line_work folder:\t{self.line_work_folder_path}
+                Data points:\t{len(self._data)}
+                """
 
 
 class MonasteriumDataset(PageDataset):
