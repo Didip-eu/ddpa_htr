@@ -362,7 +362,8 @@ class PageDataset(VisionDataset):
             for idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
                 line_tensor = img_chw[:,t:b+1, l:r+1]
-                mask_tensor = annotation['mask'][t:b+1, l:r+1]
+                # compressed arrays << compressed tensors
+                mask_array = annotation['mask'][t:b+1, l:r+1].numpy()
                 line_text = annotation['texts'][idx]
                 outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
                 if not line_as_tensor:
@@ -370,8 +371,8 @@ class PageDataset(VisionDataset):
                 else:
                     with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
                         torch.save( line_tensor, zf )
-                with gzip.GzipFile( f'{outfile_prefix}.bool.pt.gz', 'w') as zf:
-                    torch.save( mask_tensor, zf )
+                with gzip.GzipFile( f'{outfile_prefix}.bool.npy.gz', 'w') as zf:
+                    np.save( zf, mask_array )
                 with open( f'{outfile_prefix}.gt.txt', 'w') as of:
                     of.write( line_text )
             # indicates that this page dump is complete (for resuming task)
