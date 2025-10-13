@@ -199,7 +199,7 @@ class PageDataset(VisionDataset):
         if not image_paths:
             raise FileNotFoundError("Could not find a dataset source!")
 
-        self._data = self.build_page_data( image_paths, lbl_suffix, img_suffix )
+        self._data = self.build_page_data( image_paths, img_suffix, lbl_suffix )
 
         self.config = {
                 'count': count,
@@ -232,7 +232,7 @@ class PageDataset(VisionDataset):
                 logger.error( f'{dcb}: ignoring page {ip}' )
                 continue
 
-            lbl_path = Path(re.sub(r'{}$'.format( img_suffix), lbl_suffix, str(ip) ))
+            lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
             if not lbl_path.exists():
                 continue
             data.append( (ip, lbl_path) )
@@ -310,9 +310,13 @@ class PageDataset(VisionDataset):
         img_whc = Image.open(img_path, 'r')
         
         start_time = time.time()
-        page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
+        page_dict = {}
+        if (annotation_path.name)[-4:]=='.xml':
+            page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) 
+        elif (annotation_path.name)[-5:]=='.json':
+            with open( annotation_path ) as jsonf:
+                page_dict = json.load( jsonf )
         # one mask per page is enough (!= Mask-RCNN)
-        start_time = time.time()
         bboxes_n4, masks_nhw = seglib.line_masks_from_img_segmentation_dict( img_whc, page_dict, polygon_key=self.config['polygon_key']) 
         bboxes_n4, masks_nhw = torch.tensor(bboxes_n4), torch.tensor(masks_nhw)
         texts = [ l['text'] for l in page_dict['lines'] ]
