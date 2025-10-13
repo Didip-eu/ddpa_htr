@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-From a dataset of images, generate Tormented crops and save them as tensors, for later use in training.
+Given a dataset of images+PageXML that has been previously extracted into a page work folder:
+
+1. Split the original set 
+2. Out of the train pages, generate a 'Tormented' version and dump the lines
+3. Out of the validation pages, generate a plain version and dump the lines
 
 Usage:
 
@@ -22,15 +26,14 @@ import random
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
-from libs import segviz, transforms as tsf
-from bin import ddp_lineseg_train as lsg
+from libs import charter_page_ds as pds
+from libs import transforms as tsf
 from libs.train_utils import split_set
 
 
 p = {
         'img_paths': set(list(Path("dataset").glob('*.jpg'))),
         'repeat': (1, "Number of patch samples to generate from one image."),
-        'img_size': 1024,
         'subsets': set(['train', 'val']),
         'log_tsv': 1,
         'dummy': 0,
@@ -44,11 +47,15 @@ args, _ = fargv.fargv( p )
 
 random.seed(46)
 imgs = list([ Path( ip ) for ip in args.img_paths ])
-lbls = [ str(img_path).replace(args.img_suffix, args.lbl_suffix) for img_path in imgs ]
 
+dataset_dirs = list(set( [ str(img.parent) for img in imgs ] ))
+if len(dataset_dirs) > 1:
+    print('All images should be in the same directory.')
+    sys.exit()
+dataset_dir = dataset_dirs[0]
 
-imgs_train, imgs_test, lbls_train, lbls_test = split_set( imgs, lbls )
-imgs_train, imgs_val, lbls_train, lbls_val = split_set( imgs_train, lbls_train )
+imgs_train, imgs_test = split_set( imgs )
+imgs_train, imgs_val = split_set( imgs_train )
 
 if args.log_tsv:
     for subset, log_tsv_file in ((imgs_train, 'train_ds.tsv'), (imgs_val, 'val_ds.tsv'), (imgs_test, 'test_ds.tsv')):
@@ -59,8 +66,13 @@ if args.log_tsv:
 if args.dummy:
     sys.exit()
 
+
 # for training, Torment at will
-ds_train = lsg.LineDetectionDataset( imgs_train, lbls_train, min_size=args.img_size, polygon_key='coords')
+ds_train = pds.PageDataset( from_page_files=imgs_train, polygon_key='coords')
+print(ds_train)
+ds_val = pds.PageDataset( from_page_files=imgs_val, polygon_key='coords')
+print(ds_val)
+sys.exit()
 aug = tsf.build_tormentor_augmentation_for_crop_training( crop_size=args.img_size, crop_before=False )
 ds_train = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=lsg.LineDetectionDataset.augment_with_bboxes )
 

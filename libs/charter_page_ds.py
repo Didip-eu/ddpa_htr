@@ -34,14 +34,9 @@ from . import seglib
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
 
-class DataException( Exception ):
-    """"""
-    pass
-
 
 """
-Utility classes to manage charter data, provided as PageXML.
-
+Utility classes to manage charter data, provided as images+PageXML.
 """
 
 import logging
@@ -53,35 +48,46 @@ logger = logging.getLogger(__name__)
 class PageDataset(VisionDataset):
     """A generic dataset class for charters, equipped with page-wide functionalities:
 
-        * page augmentation functionalities
-        * region and line/transcription extraction methods (from original page images and XML metadata)
+    * page augmentation functionalities
+    * region and line/transcription extraction methods (from original page images and XML metadata)
 
-        File-management logic:
+    File-management logic:
 
-        - a <root> folder where archives are saved and decompressed (set at initialization time, with a reasonable default in the current location)
-        - a page work folder
-            - defaults to the root directory of the tarball, in last resort
-            - OR: implied from <from_page_dir> option, when loading data from existing pages
-            - OR: specified at initialization time through the <page_work_folder> parameter - archive is checked; after extraction, page files
+    - a <root> folder where archives are saved and decompressed (set at initialization time, with a reasonable default in the current location)
+    - a page work folder
+    - defaults to the root directory of the tarball, in last resort
+    - OR: implied from <from_page_files> option, when loading data from existing pages
+    - OR: implied from <from_page_dir> option, when loading data from existing page folder
+    - OR: specified at initialization time through the <page_work_folder> parameter - archive is checked; after extraction, page files
                   are copied in the work folder
-        - [optional] a cache for augmented pages
-        - a line work folder where line samples extracted from the page are to be saved
+    - [optional] a cache for augmented pages
+    - a line work folder where line samples extracted from the page are to be saved
 
-        Depending on the options passed at initialization time, the page work folder may be under <root> or not.
+    Depending on the options passed at initialization time, the page work folder may be under <root> or not.
+    So far, we assume that there is a one-to-one relationship between PageXML files and an image. In practice,
+    this is not always true for all datasets.
 
 
-        Attributes:
-            dataset_resource (dict): meta-data (URL, archive name, type of repository).
-
+    Attributes:
+        dataset_resource (dict): meta-data (URL, archive name, type of repository).
     """
 
-    dataset_resource = None
+    dataset_resource = {
+            'file': '',
+            'tarball_filename': 'NONE',
+            'md5': '-',
+            'desc': 'Constructed from files.',
+            'origin': 'local',
+            'tarball_root_name': '-',
+            'comment': '',
+    }
 
     def __init__( self,
                 root: str='./data',
                 page_work_folder: str = '',
                 line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_dir: str = '',
+                from_page_files: list= [],
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
@@ -107,6 +113,8 @@ class PageDataset(VisionDataset):
             from_page_dir (str): if set, the samples have to be extracted from the
                 raw page data contained in the given directory. GT metadata are either
                 JSON files or PageXML.
+            from page_files (list[Path]): if set, supersedes previous options; all files must
+                be contained in the same folder.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
@@ -136,12 +144,19 @@ class PageDataset(VisionDataset):
 
         self._transforms = transform if transform is not None else v2.ToImage()
         self.polygon_key = polygon_key
-        self.data = []
+        self._data = []
 
         self.root_path = Path(root) 
         self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] )
         self.page_work_folder_path = self.archive_root_folder_path
-        if from_page_dir:
+
+        from_page_files = list(from_page_files)
+        if from_page_files:
+            dataset_dirs = set( [ img.parent for img in from_page_files ] )
+            if len(dataset_dirs) > 1:
+                raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
+            self.page_work_folder_path = list(dataset_dirs)[0]
+        elif from_page_dir:
             self.page_work_folder_path = Path(from_page_dir) 
         elif page_work_folder:
             self.page_work_folder_path = Path(page_work_folder)
@@ -155,69 +170,72 @@ class PageDataset(VisionDataset):
         # Folder creation, when needed
         if from_page_dir != '' and not self.page_work_folder_path.exists():
            raise FileNotFoundError(f"Work folder {self.page_work_folder_path} does not exist. Abort.")
-        else:
+        elif not from_page_files:
             self.root_path.mkdir( parents=True, exist_ok=True )
             self.page_work_folder_path.mkdir( parents=True, exist_ok=True)
 
-        page_paths = []
+        image_paths = []
         # Assume pages are already there = ignore archive
-        if from_page_dir:
-            page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix)))
+        if from_page_files:
+            image_paths = sorted( from_page_files )
+        elif from_page_dir:
+            image_paths = sorted( self.page_work_folder_path.glob('*{}'.format(img_suffix)))
         else:
             self.download_and_extract( self.root_path, self.dataset_resource, extract=extract_pages )
             # copy files from archive folder to page_work_folder
             if self.archive_root_folder_path != self.page_work_folder_path:
                 logger.debug("Copying files...")
                 self._purge( self.page_work_folder_path )
-                for page_lbl_path in self.archive_root_folder_path.glob('*{}'.format( lbl_suffix )):
-                    page_img_path = Path(re.sub(r'{}$'.format( lbl_suffix ), img_suffix, str(page_lbl_path)))
-                    if page_img_path.exists():
-                        shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
-                        logger.debug("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
+                for page_img_path in self.archive_root_folder_path.glob('*{}'.format( img_suffix )):
+                    lbl_img_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(page_img_path)))
+                    if page_lbl_path.exists():
                         shutil.copyfile( page_img_path, self.page_work_folder_path.joinpath( page_img_path.name) )
                         logger.debug("Copying {} to work folder {}...".format( page_img_path, self.page_work_folder_path))
+                        shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
+                        logger.debug("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
 
-            page_paths = sorted( self.page_work_folder_path.glob('*{}'.format(lbl_suffix))) 
+            image_paths = sorted( self.page_work_folder_path.glob('*{}'.format(img_suffix))) 
 
-        if not page_paths:
+        if not image_paths:
             raise FileNotFoundError("Could not find a dataset source!")
 
-        self._data = self.build_page_data( page_paths, lbl_suffix, img_suffix )
+        self._data = self.build_page_data( image_paths, lbl_suffix, img_suffix )
 
         self.config = {
                 'count': count,
                 'resume_task': resume_task,
                 'lbl_suffix': lbl_suffix,
                 'img_suffix': img_suffix,
+                'polygon_key': polygon_key,
         }
 
 
-    def build_page_data( self, page_paths, lbl_suffix, img_suffix ):
+    def build_page_data( self, image_paths, img_suffix, lbl_suffix ):
         """
         Build raw samples (img, page), ensuring that every image has its annotation counterpart.
 
         Args:
-            page_paths (list[Path]): a list of PageXML files.
-            lbl_suffix (str): suffix of annotation file
+            image_paths (list[Path]): a list of image files.
             img_suffix (str): suffix of image file
+            lbl_suffix (str): suffix of annotation file
 
         Return:
             list[tuple(Path,Path)]: a list of pairs (<img_file_path>, <annotation_file_path>)
         """
         warnings.simplefilter('error', Image.DecompressionBombWarning)
         data = []
-        for pp in page_paths:
-            img_path = Path(re.sub(r'{}$'.format( lbl_suffix), img_suffix, str(pp) ))
-            if not img_path.exists():
-                continue
-
+        for ip in image_paths:
             img = None
             try:
-                img = Image.open(img_path)#.convert('RGB')
+                img = Image.open(ip)
             except Image.DecompressionBombWarning as dcb:
-                logger.error( f'{dcb}: ignoring page {pp}' )
+                logger.error( f'{dcb}: ignoring page {ip}' )
                 continue
-            data.append( (img_path, pp) )
+
+            lbl_path = Path(re.sub(r'{}$'.format( img_suffix), lbl_suffix, str(ip) ))
+            if not lbl_path.exists():
+                continue
+            data.append( (ip, lbl_path) )
         return data
 
 
@@ -295,7 +313,7 @@ class PageDataset(VisionDataset):
         page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) if (annotation_path.name)[-4:]=='.xml' else json.load( annotation_path )
         # one mask per page is enough (!= Mask-RCNN)
         start_time = time.time()
-        bboxes_n4, masks_nhw = seglib.line_masks_from_img_segmentation_dict( img_whc, page_dict, polygon_key=self.polygon_key) 
+        bboxes_n4, masks_nhw = seglib.line_masks_from_img_segmentation_dict( img_whc, page_dict, polygon_key=self.config['polygon_key']) 
         bboxes_n4, masks_nhw = torch.tensor(bboxes_n4), torch.tensor(masks_nhw)
         texts = [ l['text'] for l in page_dict['lines'] ]
         return img_whc, {'mask': Mask(torch.sum(masks_nhw, axis=0)), 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
@@ -385,7 +403,7 @@ class PageDataset(VisionDataset):
         """
         return len(self._data)
 
-    def dataset_stats(self) -> str:
+    def statistics(self) -> str:
         """Compute basic stats about sample sets.
 
         + avg, median, min, max on image heights and widths
@@ -502,10 +520,7 @@ class KoenigsfeldenDataset(PageDataset):
     }
 
     def __init__(self, *args, **kwargs ):
-
         super().__init__( *args, **kwargs)
-
-        #self.target_transform = self.filter_transcription
 
 
 
@@ -526,10 +541,7 @@ class KoenigsfeldenDatasetAbbrev(PageDataset):
     }
 
     def __init__(self, *args, **kwargs ):
-
         super().__init__( *args, **kwargs)
-
-        #self.target_transform = self.filter_transcription
 
 
 class NurembergLetterbooks(PageDataset):
@@ -548,7 +560,6 @@ class NurembergLetterbooks(PageDataset):
     }
 
     def __init__(self, *args, **kwargs ):
-
         super().__init__( *args, **kwargs)
 
 
