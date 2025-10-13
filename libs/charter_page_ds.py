@@ -369,19 +369,18 @@ class PageDataset(VisionDataset):
         if sentinel_path.exists():
             with open(sentinel_path, 'r') as sf:
                 start = int(sf.read())
-        for idx in tqdm( range(len(self))):
-            if idx < start:
+        for page_idx in tqdm( range(len(self))):
+            if page_idx < start:
                 continue
-            img_chw, annotation = self[idx]
+            img_chw, annotation = self[page_idx]
             img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', annotation['path'].name)
-            sentinel_path = self.line_work_folder_path.joinpath(f'{img_prefix}.sentinel')
-            for idx, box in enumerate( annotation['boxes'] ):
+            for line_idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
                 line_tensor = img_chw[:,t:b+1, l:r+1]
                 # compressed arrays << compressed tensors
                 mask_array = annotation['mask'][t:b+1, l:r+1].numpy()
-                line_text = annotation['texts'][idx]
-                outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{idx}")
+                line_text = annotation['texts'][line_idx]
+                outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{line_idx}")
                 if not line_as_tensor:
                     ski.io.imsave( f'{outfile_prefix}.png', line_tensor.permute(1,2,0)) 
                 else:
@@ -393,7 +392,7 @@ class PageDataset(VisionDataset):
                     of.write( line_text )
             # indicates that this page dump is complete (for resuming task)
             with open( sentinel_path, 'w') as sf:
-                sf.write(f'{idx}')
+                sf.write(f'{page_idx}')
         
         if sentinel_path.exists():
             sentinel_path.unlink()
@@ -416,23 +415,32 @@ class PageDataset(VisionDataset):
         Returns:
             str: a string.
         """
-        heights, widths, gt_lengths = [], [], []
-        for img, lbl in tqdm( self ):
-            widths.append( lbl['orig_size'][0] )
-            heights.append( lbl['orig_size'][1] )
-            gt_lengths.append( np.sum( [ len(txt) for txt in lbl['texts'] ]))
+        heights, widths, page_gt_lengths, line_gt_lengths = [], [], [], []
+        for img, lbl in tqdm( self._data ):
+            page_dict = {}
+            if (lbl.name)[-4:]=='.xml':
+                page_dict = seglib.segmentation_dict_from_xml( lbl, get_text=True ) 
+            elif (lbl.name)[-5:]=='.json':
+                with open( lbl ) as jsonf:
+                    page_dict = json.load( jsonf )
+            widths.append( int(page_dict['image_width'] ))
+            heights.append( int(page_dict['image_height'] ))
+            page_gt_lengths.append( np.sum( [ len(line['text']) for line in page_dict['lines'] ]))
+            line_gt_lengths.extend( [ len(line['text']) for line in page_dict['lines'] ])
 
         height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
         width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
-        gt_length_stats = [int(s) for s in (np.mean( gt_lengths ), np.median(gt_lengths), np.min(gt_lengths), np.max(gt_lengths))]
+        page_gt_length_stats = [int(s) for s in (np.mean( page_gt_lengths ), np.median(page_gt_lengths), np.min(page_gt_lengths), np.max(page_gt_lengths))]
+        line_gt_length_stats = [int(s) for s in (np.mean( line_gt_lengths ), np.median(line_gt_lengths), np.min(line_gt_lengths), np.max(line_gt_lengths))]
 
         stat_list = ('Mean', 'Median', 'Min', 'Max')
-        row_format = "{:>10}" * (len(stat_list) + 1)
+        row_format = "{:>20}"+ ("{:>10}" * len(stat_list))
         return '\n'.join([
             row_format.format("", *stat_list),
             row_format.format("Img height", *height_stats),
             row_format.format("Img width", *width_stats),
-            row_format.format("GT length", *gt_length_stats),
+            row_format.format("GT length (page)", *page_gt_length_stats),
+            row_format.format("GT length (line)", *line_gt_length_stats),
         ])
 
 
