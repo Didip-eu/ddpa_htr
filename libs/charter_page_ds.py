@@ -142,7 +142,9 @@ class PageDataset(VisionDataset):
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
                                     "\n\t + one of the following options: -from_page_dir, -from_work_folder, -from_line_tsv_file")
 
-        self._transforms = transform if transform is not None else v2.ToImage()
+        self._transforms = transform if transform is not None else v2.Compose([
+            v2.ToImage(),
+            v2.ToDtype( torch.float32, scale=True),])
         self.polygon_key = polygon_key
         self._data = []
 
@@ -305,7 +307,7 @@ class PageDataset(VisionDataset):
             annotation_path (Path): annotation path
 
         Returns:
-            tuple[Image,dict]: A tuple containing the image and a dictionary with 'mask', 'boxes' and 'labels' keys.
+            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
         """
         img_whc = Image.open(img_path, 'r')
         
@@ -316,11 +318,10 @@ class PageDataset(VisionDataset):
         elif (annotation_path.name)[-5:]=='.json':
             with open( annotation_path ) as jsonf:
                 page_dict = json.load( jsonf )
-        # one mask per page is enough (!= Mask-RCNN)
-        bboxes_n4, masks_nhw = seglib.line_masks_from_img_segmentation_dict( img_whc, page_dict, polygon_key=self.config['polygon_key']) 
-        bboxes_n4, masks_nhw = torch.tensor(bboxes_n4), torch.tensor(masks_nhw)
+        masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict, polygon_key=self.config['polygon_key'])) 
+        bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
         texts = [ l['text'] for l in page_dict['lines'] ]
-        return img_whc, {'mask': Mask(torch.sum(masks_nhw, axis=0)), 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
+        return img_whc, {'masks': masks_nhw, 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
 
 
     @staticmethod
@@ -331,21 +332,21 @@ class PageDataset(VisionDataset):
         Args:
             sample (tuple[Tensor,dict]): tuple with image (as tensor) and label dictionary.
         """
-        img, target = sample
+        img, label = sample
         img = img.to(device)
+        print(type(img), img.shape)
         img = aug(img)
-        masks, labels, texts = target['masks'].to(device), target['labels'].to(device), target['texts']
-        masks = torch.stack( [ aug(m, is_mask=True) for m in target['masks'] ], axis=0).to(device)
+        masks, texts = label['masks'].to(device), label['texts']
+        masks = torch.stack( [ aug(m, is_mask=True) for m in label['masks'] ], axis=0).to(device) 
 
-        # first, filter empty masks
-        keep = torch.sum( masks, dim=(1,2)) > 10
-        masks, labels = masks[keep], labels[keep]
         # construct boxes, filter out invalid ones
         boxes=BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.shape)
+        print(boxes)
         keep=(boxes[:,0]-boxes[:,2])*(boxes[:,1]-boxes[:,3]) != 0
+        print(keep)
 
-        target['boxes'], target['masks'], target['texts'] = boxes[keep], masks[keep], texts[keep]
-        return (img, target)
+        label['boxes'], label['masks'] = boxes[keep], masks[keep]
+        return (img, label)
 
 
     def dump_lines( self, line_as_tensor=False, resume=False ):

@@ -23,6 +23,7 @@ from pathlib import Path
 import sys
 import fargv
 import random
+import tormentor
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
@@ -42,8 +43,16 @@ p = {
 }
 
 
-args, _ = fargv.fargv( p )
+default_tormentor_dists = {
+        'Rotate': tormentor.Uniform((math.radians(-25.0), math.radians(25.0))),
+        'Perspective': (tormentor.Uniform((0.85, 1.25)), tormentor.Uniform((.85,1.25))),
+        'Wrap': (tormentor.Uniform((0.1, 0.12)), tormentor.Uniform((0.64,0.66))), # no too rough, but intense (large-scale distortion)
+        'Zoom': tormentor.Uniform((1.1,1.6)),
+        'Brightness': tormentor.Uniform((-0.25,0.25)),
+}
 
+
+args, _ = fargv.fargv( p )
 
 random.seed(46)
 imgs = list([ Path( ip ) for ip in args.img_paths ])
@@ -69,33 +78,28 @@ if args.dummy:
 
 # for training, Torment at will
 ds_train = pds.PageDataset( from_page_files=imgs_train, polygon_key='coords')
-print(ds_train)
 ds_val = pds.PageDataset( from_page_files=imgs_val, polygon_key='coords')
+print(ds_train)
 print(ds_val)
+
+
+
+augWrap = tormentor.RandomWrap.override_distributions(roughness=default_tormentor_dists['Wrap'][0], intensity=default_tormentor_dists['Wrap'][1])
+augBrightness = tormentor.RandomBrightness.override_distributions(brightness=default_tormentor_dists['Brightness'])
+aug = augWrap | augBrightness
+ds_train = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
+
+print(ds_train[0])
+print(ds_train[148])
+
 sys.exit()
-aug = tsf.build_tormentor_augmentation_for_crop_training( crop_size=args.img_size, crop_before=False )
-ds_train = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=lsg.LineDetectionDataset.augment_with_bboxes )
 
 if 'train' in args.subsets:
     ds_train_cached = lsg.CachedDataset( data_source = ds_train )
     ds_train_cached.serialize( subdir='cached_train', repeat=args.repeat)
 
-# for validation and test, only crops
-ds_val = lsg.LineDetectionDataset( imgs_val, lbls_val, min_size=args.img_size, polygon_key='coords')
-augCropCenter = tormentor.RandomCropTo.new_size( args.img_size, args.img_size )
-augCropLeft = tormentor.RandomCropTo.new_size( args.img_size, args.img_size ).override_distributions( center_x=tormentor.Uniform((0, .6)))
-augCropRight = tormentor.RandomCropTo.new_size( args.img_size, args.img_size ).override_distributions( center_x=tormentor.Uniform((.4, 1)))
-aug = ( augCropCenter ^ augCropLeft ^ augCropRight ).override_distributions(choice=tormentor.Categorical(probs=(.33, .34, .33)))
-ds_val = tormentor.AugmentedDs( ds_val, aug, computation_device='cpu', augment_sample_function=lsg.LineDetectionDataset.augment_with_bboxes )
-
 if 'val' in args.subsets:
     ds_val_cached = lsg.CachedDataset( data_source = ds_val )
     ds_val_cached.serialize( subdir='cached_val', repeat=args.repeat)
 
-ds_test = lsg.LineDetectionDataset( imgs_test, lbls_test, min_size=args.img_size, polygon_key='coords')
-ds_test = tormentor.AugmentedDs( ds_test, aug, computation_device='cpu', augment_sample_function=lsg.LineDetectionDataset.augment_with_bboxes )
-
-if 'test' in args.subsets:
-    ds_test_cached = lsg.CachedDataset( data_source = ds_test )
-    ds_test_cached.serialize( subdir='cached_test', repeat=4)
 
