@@ -201,20 +201,24 @@ class PageDataset(VisionDataset):
         if not image_paths:
             raise FileNotFoundError("Could not find a dataset source!")
 
-        self._data = self.build_page_data( image_paths, img_suffix, lbl_suffix )
+        self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix )
 
         self.config = {
                 'count': count,
                 'resume_task': resume_task,
                 'lbl_suffix': lbl_suffix,
                 'img_suffix': img_suffix,
+                'reg_img_suffix': '.png',
                 'polygon_key': polygon_key,
         }
 
 
-    def build_page_data( self, image_paths, img_suffix, lbl_suffix ):
+    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix ):
         """
-        Build raw samples (img, page), ensuring that every image has its annotation counterpart.
+        Build raw samples (img, label), with a 1-to-many relationship between original image 
+        and samples:
+        + ensure that every image has its annotation counterpart.
+        + a sample is a page region and a corresponding line dictionary (stored as json)
 
         Args:
             image_paths (list[Path]): a list of image files.
@@ -237,50 +241,44 @@ class PageDataset(VisionDataset):
             lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
             if not lbl_path.exists():
                 continue
-            data.append( (ip, lbl_path) )
+
+            page_dict = {}
+            if (lbl_path.name)[-4:]=='.xml':
+                page_dict = seglib.segmentation_dict_from_xml( lbl_path, get_text=True )
+            elif (lbl_path.name)[-5:]=='json':
+                with open( lbl_path ) as jsonf:
+                    page_dict = json.load( jsonf )
+
+            regions = {}
+            for reg in page_dict['regions']:
+                # - crop and name image
+                reg_dict = {}
+                img_prefix = ip.with_suffix('')
+                reg_dict['image_filename'] = re.sub(r'{}'.format(img_suffix), f"-{reg['id']}.png", str(ip))
+                reg_dict['bbox_ltrb'] = [ *reg['coords'][0], *reg['coords'][2] ]
+                reg_dict['image_width'] = reg_dict['bbox_ltrb'][2]-reg_dict['bbox_ltrb'][0]
+                reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
+                reg_dict['lines']=[]
+                regions[ reg['id'] ]=reg_dict
+            for line in page_dict['lines']:
+                outer_reg = regions[ line['regions'][0] ]
+                polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
+                line['coords'] = (polyg_array - outer_reg['bbox_ltrb'][:2] ).tolist()
+                line['baseline'] = (baseline_array - outer_reg['bbox_ltrb'][:2] ).tolist()
+                del line['regions']
+                outer_reg['lines'].append( line )
+            for r in regions.values():
+                if not r['lines']:
+                    continue
+                new_img = img.crop( r['bbox_ltrb'] )
+                new_img.save( r['image_filename'])
+                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
+                with open( new_lbl_path, 'w') as jsonf:
+                    del r['bbox_ltrb']
+                    jsonf.write( json.dumps(r, indent=4) )
+
+                data.append( (r['image_filename'], new_lbl_path) )
         return data
-
-
-    def download_and_extract( self, root_path: Path, fl_meta: dict, extract=False) -> None:
-        """Download the archive and extract it. If a valid archive already exists in the root location,
-        extract only.
-
-        Args:
-            root_path (Path): where to save and extract the archive
-            fl_meta (dict): a dictionary with file meta-info (keys: url, filename, md5, full-md5, origin, desc)
-            extract (bool): If False (default), skip archive extraction step.
-
-        Raises:
-            OSError: the base folder does not exist.
-        """
-        output_file_path = None
-        # downloadable archive
-        if 'url' in fl_meta:
-            output_file_path = root_path.joinpath( fl_meta['tarball_filename'])
-
-            if 'md5' not in fl_meta or not du.is_valid_archive(output_file_path, fl_meta['md5']):
-                logger.info("Downloading archive...")
-                du.resumable_download(fl_meta['url'], root_path, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
-            else:
-                logger.info("Found valid archive {} (MD5: {})".format( output_file_path, self.dataset_resource['md5']))
-        elif 'file' in fl_meta:
-            output_file_path = Path(fl_meta['file'])
-
-        archive_root_folder_path = root_path.joinpath( self.dataset_resource['tarball_root_name'] ) 
-        # skip if archive already extracted (unless explicit override)
-        if not extract: # and du.check_extracted( raw_data_folder_path.joinpath( self.dataset_resource['tarball_root_name'] ) , fl_meta['full-md5'] ):
-            logger.info("Skipping the extraction stage ('extract' option=F). You should check whether {} contains a valid archive tree.".format( archive_root_folder_path ))
-            return
-        if output_file_path.suffix == '.tgz' or output_file_path.suffixes == [ '.tar', '.gz' ] :
-            with tarfile.open(output_file_path, 'r:gz') as archive:
-                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( root_path )
-        # task description
-        elif output_file_path.suffix == '.zip':
-            with zipfile.ZipFile(output_file_path, 'r' ) as archive:
-                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( root_path )
-
 
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
         """This method returns a page sample.
@@ -300,7 +298,9 @@ class PageDataset(VisionDataset):
 
     def _load_image_and_target(self, img_path, annotation_path):
         """
-        Load an image and its target (bounding boxes and labels).
+        Load an image and its target (bounding boxes and masks). Note that at this point, the
+        data samples are made of regions crops and corresponding JSON labels. The XML switch
+        has been kept anyway, for easy reversal to page-wide processing.
 
         Parameters:
             img_path (Path): image path
@@ -374,16 +374,17 @@ class PageDataset(VisionDataset):
             if page_idx < start:
                 continue
             img_chw, annotation = self[page_idx]
-            img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', annotation['path'].name)
+            img_prefix = re.sub(r'{}'.format( self.config['reg_img_suffix']), '', Path(annotation['path']).name)
             for line_idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
                 line_tensor = img_chw[:,t:b+1, l:r+1]
                 # compressed arrays << compressed tensors
-                mask_array = annotation['mask'][t:b+1, l:r+1].numpy()
+                mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).numpy()
                 line_text = annotation['texts'][line_idx]
                 outfile_prefix = self.line_work_folder_path.joinpath( f"{img_prefix}-{line_idx}")
                 if not line_as_tensor:
-                    ski.io.imsave( f'{outfile_prefix}.png', line_tensor.permute(1,2,0)) 
+                    line_array = (line_tensor.permute(1,2,0).numpy()*255).astype('uint8')
+                    ski.io.imsave( f'{outfile_prefix}.png', line_array )
                 else:
                     with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
                         torch.save( line_tensor, zf )
@@ -490,6 +491,48 @@ class PageDataset(VisionDataset):
                 Line_work folder:\t{self.line_work_folder_path}
                 Data points:\t{len(self._data)}
                 """
+
+
+    def download_and_extract( self, root_path: Path, fl_meta: dict, extract=False) -> None:
+        """Download the archive and extract it. If a valid archive already exists in the root location,
+        extract only.
+
+        Args:
+            root_path (Path): where to save and extract the archive
+            fl_meta (dict): a dictionary with file meta-info (keys: url, filename, md5, full-md5, origin, desc)
+            extract (bool): If False (default), skip archive extraction step.
+
+        Raises:
+            OSError: the base folder does not exist.
+        """
+        output_file_path = None
+        # downloadable archive
+        if 'url' in fl_meta:
+            output_file_path = root_path.joinpath( fl_meta['tarball_filename'])
+
+            if 'md5' not in fl_meta or not du.is_valid_archive(output_file_path, fl_meta['md5']):
+                logger.info("Downloading archive...")
+                du.resumable_download(fl_meta['url'], root_path, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
+            else:
+                logger.info("Found valid archive {} (MD5: {})".format( output_file_path, self.dataset_resource['md5']))
+        elif 'file' in fl_meta:
+            output_file_path = Path(fl_meta['file'])
+
+        archive_root_folder_path = root_path.joinpath( self.dataset_resource['tarball_root_name'] ) 
+        # skip if archive already extracted (unless explicit override)
+        if not extract: # and du.check_extracted( raw_data_folder_path.joinpath( self.dataset_resource['tarball_root_name'] ) , fl_meta['full-md5'] ):
+            logger.info("Skipping the extraction stage ('extract' option=F). You should check whether {} contains a valid archive tree.".format( archive_root_folder_path ))
+            return
+        if output_file_path.suffix == '.tgz' or output_file_path.suffixes == [ '.tar', '.gz' ] :
+            with tarfile.open(output_file_path, 'r:gz') as archive:
+                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
+                archive.extractall( root_path )
+        # task description
+        elif output_file_path.suffix == '.zip':
+            with zipfile.ZipFile(output_file_path, 'r' ) as archive:
+                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
+                archive.extractall( root_path )
+
 
 
 class MonasteriumDataset(PageDataset):

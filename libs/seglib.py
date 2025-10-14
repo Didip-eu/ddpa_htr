@@ -441,7 +441,7 @@ def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_
         tree.write( sys.stdout, encoding='unicode' )
 
 
-def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True, strict=True) -> dict[str,Union[str,list[Any]]]:
+def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True, strict=False) -> dict[str,Union[str,list[Any]]]:
     """Given a pageXML file name, return a JSON dictionary describing the lines.
 
     Args:
@@ -449,9 +449,11 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         get_text (bool): extract line text content, if present (default: False); this
             option causes line with no text to be yanked from the dictionary.
         regions_as_boxes (bool): when regions have more than 4 points or are not rectangular,
-            store their bounding boxes instead (default: True).
-        strict (bool): raise an exception if line coordinates are comprised within
-            their region's boundaries (default: True).
+            store their bounding boxes instead; the boxe's boundary is determined
+            by its pertaining lines, not by its nominal coordinates(default: True).
+        strict (bool): if True, raise an exception if line coordinates are comprised within
+            their region's boundaries; otherwise (default), the region value is automatically
+            extended to encompass the line coordinates.
 
     Returns:
         dict[str,Union[str,list[Any]]]: a dictionary of the form::
@@ -507,6 +509,19 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         reg_l, reg_t, reg_r, reg_b = region_dict['coords']
         return all([ (pt[0] >= reg_l[0] and pt[0] <= reg_r[0] and pt[1] >= reg_t[1] and pt[1] <= reg_b[1]) for pt in line_dict['coords']])
 
+    def extend_box( box_coords, inner_coords ):
+        """Extend box coordinates to encompass inner boundaries """
+        inner_xs, inner_ys = [ pt[0] for pt in inner_coords ], [ pt[1] for pt in inner_coords ]
+        inner_left, inner_right, inner_top, inner_bottom = min(inner_xs), max(inner_xs), min(inner_ys), max(inner_ys)
+        return [ [ inner_left if inner_left < box_coords[0][0] else box_coords[0][0],
+                 inner_top if inner_top < box_coords[0][1] else box_coords[0][1]],
+                [ inner_right if inner_right > box_coords[1][0] else box_coords[1][0],
+                 inner_top if inner_top < box_coords[1][1] else box_coords[1][1]],
+                [ inner_right if inner_right > box_coords[2][0] else box_coords[2][0],
+                 inner_bottom if inner_bottom > box_coords[2][1] else box_coords[2][1]],
+                [ inner_left if inner_left < box_coords[3][0] else box_coords[3][0],
+                 inner_bottom if inner_bottom > box_coords[3][1] else box_coords[3][1]],]
+
     def process_region( region: ET.Element, region_accum: list, line_accum: list, region_ids:list ):
         # order of regions: outer -> inner
         region_ids = region_ids + [ region.get('id') ]
@@ -527,10 +542,14 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         for line_idx, elt in enumerate( list(region.iter())[1:] ):
             if elt.tag == "{{{}}}TextLine".format(ns['pc']):
                 line_entry = construct_line_entry( elt, region_ids )
-                if strict and not check_line_entry(line_entry, region_accum[-1] ):
-                    raise ValueError("Region {}, l. {}: boundaries are not contained within its region.".format(region_ids[-1], line_idx))
-                if line_entry is not None:
-                    line_accum.append( line_entry )
+                if line_entry is None:
+                    continue
+                if not check_line_entry(line_entry, region_accum[-1] ):
+                    if strict:
+                        raise ValueError("Page {}, region {}, l. {}: boundaries are not contained within its region.".format(page, region_ids[-1], line_idx))
+                    else: # extend region's bounding box boundary
+                        region_accum[-1]['coords'] = extend_box( region_accum[-1]['coords'], line_entry['coords']+line_entry['baseline'] )
+                line_accum.append( line_entry )
             elif elt.tag == "{{{}}}TextRegion".format(ns['pc']):
                 process_region(elt, region_accum, line_accum, region_ids)
 
