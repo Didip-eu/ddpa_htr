@@ -441,13 +441,17 @@ def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_
         tree.write( sys.stdout, encoding='unicode' )
 
 
-def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,list[Any]]]:
+def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True, strict=True) -> dict[str,Union[str,list[Any]]]:
     """Given a pageXML file name, return a JSON dictionary describing the lines.
 
     Args:
         page (str): path of a PageXML file.
         get_text (bool): extract line text content, if present (default: False); this
             option causes line with no text to be yanked from the dictionary.
+        regions_as_boxes (bool): when regions have more than 4 points or are not rectangular,
+            store their bounding boxes instead (default: True).
+        strict (bool): raise an exception if line coordinates are comprised within
+            their region's boundaries (default: True).
 
     Returns:
         dict[str,Union[str,list[Any]]]: a dictionary of the form::
@@ -498,6 +502,11 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
                 return None
             return line_dict
 
+    def check_line_entry(line_dict: dict, region_dict: dict):
+        """ Check whether line coords are within region boundaries."""
+        reg_l, reg_t, reg_r, reg_b = region_dict['coords']
+        return all([ (pt[0] >= reg_l[0] and pt[0] <= reg_r[0] and pt[1] >= reg_t[1] and pt[1] <= reg_b[1]) for pt in line_dict['coords']])
+
     def process_region( region: ET.Element, region_accum: list, line_accum: list, region_ids:list ):
         # order of regions: outer -> inner
         region_ids = region_ids + [ region.get('id') ]
@@ -506,17 +515,23 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
         if region_coord_elt is not None:
             rg_points = region_coord_elt.get('points')
             if rg_points is None:
-                return None
+                raise ValueError("Region has no coordinates. Aborting.")
             rg_points = parse_coordinates( rg_points )
+            if regions_as_boxes:
+                xs, ys = [ pt[0] for pt in rg_points ], [ pt[1] for pt in rg_points ] 
+                left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
+                rg_points = [[left,top], [right,top], [right,bottom], [left, bottom]]
+
         region_accum.append( {'id': region.get('id'), 'coords': rg_points } )
 
-        for elt in list(region.iter())[1:]:
+        for line_idx, elt in enumerate( list(region.iter())[1:] ):
             if elt.tag == "{{{}}}TextLine".format(ns['pc']):
                 line_entry = construct_line_entry( elt, region_ids )
+                if strict and not check_line_entry(line_entry, region_accum[-1] ):
+                    raise ValueError("Region {}, l. {}: boundaries are not contained within its region.".format(region_ids[-1], line_idx))
                 if line_entry is not None:
                     line_accum.append( line_entry )
             elif elt.tag == "{{{}}}TextRegion".format(ns['pc']):
-
                 process_region(elt, region_accum, line_accum, region_ids)
 
     with open( page, 'r' ) as page_file:
