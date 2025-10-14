@@ -452,11 +452,18 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
     Returns:
         dict[str,Union[str,list[Any]]]: a dictionary of the form::
 
-            {"text_direction": ..., "type": "baselines", "lines": [{"tags": ..., "baseline": [ ... ]}]}
+            {"metadata": { ... },
+             "text_direction": ..., "type": "baselines", 
+             "lines": [{"id": ..., "coords": [ ... ], "baseline": [ ... ]}, ... ],
+             "regions": [{"id": ..., "coords": [ ... ]}, ... ] }
+
+           Regions are stored as a top-element.
 
     """
-    def construct_line_entry(line: ET.Element, regions: list = [] ) -> dict:
-            #print(regions)
+    def parse_coordinates( pts ):
+        return [ [ int(p) for p in pt.split(',') ] for pt in pts.split(' ') ]
+
+    def construct_line_entry(line: ET.Element, region_ids: list = [] ) -> dict:
             line_id = line.get('id')
             baseline_elt = line.find('./pc:Baseline', ns)
             if baseline_elt is None:
@@ -464,14 +471,14 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
             bl_points = baseline_elt.get('points')
             if bl_points is None:
                 return None
-            baseline_points = [ [ int(p) for p in pt.split(',') ] for pt in bl_points.split(' ') ]
+            baseline_points = parse_coordinates( bl_points )
             coord_elt = line.find('./pc:Coords', ns)
             if coord_elt is None:
                 return None
             c_points = coord_elt.get('points')
             if c_points is None:
                 return None
-            polygon_points = [ [ int(p) for p in pt.split(',') ] for pt in c_points.split(' ') ]
+            polygon_points = parse_coordinates( c_points )
 
             line_text, line_custom_attribute = '', ''
             if get_text:
@@ -482,7 +489,7 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
                 if unicode_elt is not None:
                     line_text = unicode_elt.text 
             line_dict = {'line_id': line_id, 'baseline': baseline_points, 
-                        'coords': polygon_points, 'regions': regions}
+                        'coords': polygon_points, 'regions': region_ids}
             if line_text and not re.match(r'\s*$', line_text):
                 line_dict['text'] = line_text 
                 if line_custom_attribute:
@@ -491,15 +498,26 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
                 return None
             return line_dict
 
-    def process_region( region: ET.Element, line_accum: list, regions:list ):
-        regions = regions + [ region.get('id') ]
+    def process_region( region: ET.Element, region_accum: list, line_accum: list, region_ids:list ):
+        # order of regions: outer -> inner
+        region_ids = region_ids + [ region.get('id') ]
+        
+        region_coord_elt = region.find('./pc:Coords', ns)
+        if region_coord_elt is not None:
+            rg_points = region_coord_elt.get('points')
+            if rg_points is None:
+                return None
+            rg_points = parse_coordinates( rg_points )
+        region_accum.append( {'id': region.get('id'), 'coords': rg_points } )
+
         for elt in list(region.iter())[1:]:
             if elt.tag == "{{{}}}TextLine".format(ns['pc']):
-                line_entry = construct_line_entry( elt, regions )
+                line_entry = construct_line_entry( elt, region_ids )
                 if line_entry is not None:
-                    line_accum.append( construct_line_entry( elt, regions ))
+                    line_accum.append( line_entry )
             elif elt.tag == "{{{}}}TextRegion".format(ns['pc']):
-                process_region(elt, line_accum, regions)
+
+                process_region(elt, region_accum, line_accum, region_ids)
 
     with open( page, 'r' ) as page_file:
 
@@ -516,6 +534,7 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
             raise ValueError(f"Could not find a name space in file {page}. Parsing aborted.")
 
         lines = []
+        regions = []
         page_dict = {}
 
         page_tree = ET.parse( page_file )
@@ -543,11 +562,13 @@ def segmentation_dict_from_xml(page: str, get_text=False) -> dict[str,Union[str,
         
         page_dict['image_filename']=pageElement.get('imageFilename')
         page_dict['image_width'], page_dict['image_height']=[ int(pageElement.get('imageWidth')), int(pageElement.get('imageHeight'))]
+
         
         for textRegionElement in pageElement.findall('./pc:TextRegion', ns):
-            process_region( textRegionElement, lines, [] )
+            process_region( textRegionElement, regions, lines, [] )
 
         page_dict['lines'] = lines
+        page_dict['regions'] = regions
 
     return page_dict 
 
