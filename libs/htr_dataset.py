@@ -33,7 +33,7 @@ class DataException( Exception ):
 
 
 """
-Utility classes to manage charter data.
+Utility classes to manage line-based HTR datasets.
 
 """
 
@@ -43,11 +43,12 @@ logger = logging.getLogger(__name__)
 
 
 class HTRDataset(VisionDataset):
-    """A generic dataset class for HTR tasks, with minimal functionalities for accessing 
-    ready-made line samples.
+    """A generic dataset class for HTR tasks, with minimal functionalities for 
+    + generating lines out of page or region datasets 
+    + accessing ready-made line samples.
     + if the folder contains a TSV, the names of the files to be included are read from it.
     + if the folder has no TSV, all present files are assumed to be in the dataset
-    The class handles load and manipulates line samples, where each sample is a dictionary with
+    The class generates, loads and manipulates line samples, where each sample is a dictionary with
     { line_img, polygon mask, target }
     What this class does _not_ do:
     + compile lines out of PageXML and images (augmented or not)

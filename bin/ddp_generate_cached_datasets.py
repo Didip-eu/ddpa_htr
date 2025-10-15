@@ -81,35 +81,41 @@ if args.dummy:
 
 
 # for training, Torment at will
-ds_train = pds.PageDataset( from_page_files=imgs_train, polygon_key='coords')
-ds_val = pds.PageDataset( from_page_files=imgs_val, polygon_key='coords')
+ds_train = pds.PageDataset( from_page_files=imgs_train, polygon_key='coords', line_work_folder='dataset/htr_line_dataset/train')
+ds_val = pds.PageDataset( from_page_files=imgs_val, polygon_key='coords', line_work_folder='dataset/htr_line_dataset/val')
 
 
 augWrap = tormentor.RandomWrap.override_distributions(roughness=default_tormentor_dists['Wrap'][0], intensity=default_tormentor_dists['Wrap'][1])
 augBrightness = tormentor.RandomBrightness.override_distributions(brightness=default_tormentor_dists['Brightness'])
 augPlasmaBrightness = tormentor.RandomPlasmaBrightness.override_distributions(roughness=default_tormentor_dists['PlasmaBrightness'][0], intensity=default_tormentor_dists['PlasmaBrightness'][1])
-aug = augPlasmaBrightness | augWrap
-ds_aug = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
+ds_train.augmentation_class = augPlasmaBrightness #| augWrap
+
+
+
+#ds_aug = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
     
 if args.visual_check:
     plt.close()
     for i in range(10):
         fig, (ax0, ax1, ax2, ax3) = plt.subplots(ncols=4, figsize=(15, 4))
-        ax0.imshow( ds_train[i][0].permute(1,2,0))
-        ax1.imshow( torch.sum( ds_train[i][1]['masks'], axis=0) )
-        tsf_sample = ds_aug[i]
-        ax2.imshow( tsf_sample[0].permute(1,2,0))
-        ax3.imshow( torch.sum( tsf_sample[1]['masks'], axis=0) )
+        tsf_sample = ds_train[i]
+        ax0.imshow( tsf_sample[0].permute(1,2,0))
+        ax1.imshow( torch.sum( tsf_sample[1]['masks'], axis=0) )
+        #tsf_sample = ds_aug[i]
+        #ax2.imshow( tsf_sample[0].permute(1,2,0))
+        #ax3.imshow( torch.sum( tsf_sample[1]['masks'], axis=0) )
         plt.show()
 
     sys.exit()
 
 if 'train' in args.subsets:
-    ds_train_cached = lsg.CachedDataset( data_source = ds_train )
-    ds_train_cached.serialize( subdir='cached_train', repeat=args.repeat)
+    #ds_train_cached = pds.CachedDataset( data_source = ds_train )
+    #ds_train_cached.serialize( subdir='cached_train', repeat=args.repeat)
+    ds_train.dump_lines()
 
 if 'val' in args.subsets:
-    ds_val_cached = lsg.CachedDataset( data_source = ds_val )
-    ds_val_cached.serialize( subdir='cached_val', repeat=args.repeat)
+    #ds_val_cached = pds.CachedDataset( data_source = ds_val )
+    #ds_val_cached.serialize( subdir='cached_val', repeat=args.repeat)
+    ds_val.dump_lines()
 
 

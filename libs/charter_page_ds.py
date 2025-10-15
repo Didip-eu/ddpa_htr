@@ -90,13 +90,9 @@ class PageDataset(VisionDataset):
                 from_page_files: list=[],
                 from_region_files: list=[],
                 transform: Optional[Callable] = None,
-                target_transform: Optional[Callable] = lambda x: x,
+                augmentation_class: Callable= None,
                 extract_pages: bool = False,
                 dry_run: bool = False,
-                channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
-                channel_suffix: str='',
-                count: int = 0,
-                line_padding_style: str = None,
                 resume_task: bool = False,
                 lbl_suffix: str = '.xml',
                 img_suffix: str = '.jpg',
@@ -118,16 +114,12 @@ class PageDataset(VisionDataset):
                 be contained in the same folder.
             from region_files (list[Path]): if set, supersedes previous options; all files must
                 be contained in the same folder.
-            transform (Callable): Function to apply to the PIL image at loading time.
-            target_transform (Callable): Function to apply to the transcription ground
-                truth at loading time.
+            transform (Callable): A v2.transform to apply to the PIL image at loading time.
+            augmentation_class (Callable[tuple[Tensor,dict]]): any transform that takes a tensor as an input
+                and cannot be safely composed as a v2.transform. Eg. Tormentor augmentation
             extract_pages (bool): if True, extract the archive's content into the base
                 folder no matter what; otherwise (default), check first for a file tree 
                 with matching name and checksum.
-            channel_func (Callable): function that takes image and binary polygon mask as inputs,
-                and generates an additional channel in the sample. Default: None.
-            channel_suffix (str): when loading items from a work folder, which suffix
-                to read for the channel file. Default: '' (=ignore channel file).
             dry_run (bool): if True (default), compute all paths (root, page_work_folder, line_work_folder)
                 but does not write anything.
             resume_task (bool): If True, the work folder is not purged. Only those page
@@ -145,9 +137,13 @@ class PageDataset(VisionDataset):
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
                                     "\n\t + one of the following options: -from_page_dir, -from_work_folder, -from_line_tsv_file")
 
-        self._transforms = transform if transform is not None else v2.Compose([
-            v2.ToImage(),
-            v2.ToDtype( torch.float32, scale=True),])
+        self._transforms = v2.Compose([
+                            v2.ToImage(),
+                            v2.ToDtype( torch.float32, scale=True),])
+        if transform is not None:
+            self._transforms = v2.Compose([ self._transforms, tranform] )
+        self.augmentation_class = augmentation_class
+
         self.polygon_key = polygon_key
         self._data = []
 
@@ -214,7 +210,6 @@ class PageDataset(VisionDataset):
             self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix )
 
         self.config = {
-                'count': count,
                 'resume_task': resume_task,
                 'lbl_suffix': lbl_suffix,
                 'img_suffix': img_suffix,
@@ -223,7 +218,7 @@ class PageDataset(VisionDataset):
         }
 
 
-    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix, check_existing=True ):
+    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix):
         """
         Build and save data samples (img, label), with a 1-to-many relationship between original image 
         and samples:
@@ -300,13 +295,15 @@ class PageDataset(VisionDataset):
             tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
         """
         img_path, label_path = self._data[index]
-        img_whc, target = self._load_image_and_target(img_path, label_path)
+        img_whc, label = self._load_image_and_label(img_path, label_path)
 
         if self._transforms:
-            img_chw, target = self._transforms( img_whc, target )
-        return (img_chw, target)
+            img_chw, target = self._transforms( img_whc, label )
+        if self.augmentation_class:
+            img_chw, label = self.augment_with_bboxes( self.augmentation_class(), img_chw, label )
+        return (img_chw, label)
 
-    def _load_image_and_target(self, img_path, annotation_path):
+    def _load_image_and_label(self, img_path:Path, annotation_path:Path, augmentation:Callable=None):
         """
         Load an image and its target (bounding boxes and masks). Note that at this point, the
         data samples are made of regions crops and corresponding JSON labels. The XML switch
@@ -315,6 +312,7 @@ class PageDataset(VisionDataset):
         Parameters:
             img_path (Path): image path
             annotation_path (Path): annotation path
+            augmentation (Callable): suitable augmentation function
 
         Returns:
             tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
@@ -331,31 +329,36 @@ class PageDataset(VisionDataset):
         masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict, polygon_key=self.config['polygon_key'])) 
         bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
         texts = [ l['text'] for l in page_dict['lines'] ]
+
         return img_whc, {'masks': masks_nhw, 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
 
 
     @staticmethod
-    def augment_with_bboxes( sample, aug, device ):
+    def augment_with_bboxes( augmentation: Callable, img_chw:Tensor, label:dict, device='cpu' ):
         """  Augment a sample (img + masks), and add bounding boxes to the target.
         (For Tormentor only.)
 
         Args:
-            sample (tuple[Tensor,dict]): tuple with image (as tensor) and label dictionary.
+            augmentation (Callable): a Tormentor-style augmentation function.
+            img_chw (Tensor): image (as tensor)
+            label (dict): dictionary of annotations
+
+        Returns:
+            Tensor: the transformed image.
+            dict: the labels, with the appropriate changes on the masks and bounding boxes.
         """
-        img, label = sample
-        img = img.to(device)
-        img = aug(img)
+        img_chw = img_chw.to(device)
+        img_chw = augmentation(img_chw)
         masks, texts = label['masks'].to(device), label['texts']
-        masks = torch.stack( [ aug(m, is_mask=True) for m in label['masks'] ], axis=0).to(device) 
+        masks = torch.stack( [ augmentation(m, is_mask=True) for m in label['masks'] ], axis=0).to(device) 
 
         # construct boxes, filter out invalid ones
-        boxes=BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img.shape)
-        print(boxes)
+        boxes=BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img_chw.shape)
         keep=(boxes[:,0]-boxes[:,2])*(boxes[:,1]-boxes[:,3]) != 0
-        print(keep)
-
-        label['boxes'], label['masks'] = boxes[keep], masks[keep]
-        return (img, label)
+        
+        
+        label['boxes'], label['masks'], label['texts'] = boxes[keep], masks[keep], [ t for (t,k) in zip(label['texts'], keep) if k ]
+        return (img_chw, label)
 
 
     def dump_lines( self, line_as_tensor=False, resume=False ):
