@@ -56,7 +56,7 @@ class PageDataset(VisionDataset):
     - a <root> folder where archives are saved and decompressed (set at initialization time, with a reasonable default in the current location)
     - a page work folder
     - defaults to the root directory of the tarball, in last resort
-    - OR: implied from <from_page_files> option, when loading data from existing pages
+    - OR: implied from <from_page_files> or <from_region_files> option, when loading data from existing pages or regions
     - OR: implied from <from_page_dir> option, when loading data from existing page folder
     - OR: specified at initialization time through the <page_work_folder> parameter - archive is checked; after extraction, page files
                   are copied in the work folder
@@ -87,7 +87,8 @@ class PageDataset(VisionDataset):
                 page_work_folder: str = '',
                 line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_dir: str = '',
-                from_page_files: list= [],
+                from_page_files: list=[],
+                from_region_files: list=[],
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 extract_pages: bool = False,
@@ -114,6 +115,8 @@ class PageDataset(VisionDataset):
                 raw page data contained in the given directory. GT metadata are either
                 JSON files or PageXML.
             from page_files (list[Path]): if set, supersedes previous options; all files must
+                be contained in the same folder.
+            from region_files (list[Path]): if set, supersedes previous options; all files must
                 be contained in the same folder.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
@@ -153,8 +156,10 @@ class PageDataset(VisionDataset):
         self.page_work_folder_path = self.archive_root_folder_path
 
         from_page_files = list(from_page_files)
-        if from_page_files:
-            dataset_dirs = set( [ img.parent for img in from_page_files ] )
+        from_region_files = list(from_region_files)
+
+        if from_region_files or from_page_files:
+            dataset_dirs = set( [ img.parent for img in (from_region_files if from_region_files else from_page_files) ] )
             if len(dataset_dirs) > 1:
                 raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
             self.page_work_folder_path = list(dataset_dirs)[0]
@@ -172,13 +177,15 @@ class PageDataset(VisionDataset):
         # Folder creation, when needed
         if from_page_dir != '' and not self.page_work_folder_path.exists():
            raise FileNotFoundError(f"Work folder {self.page_work_folder_path} does not exist. Abort.")
-        elif not from_page_files:
+        elif not (from_page_files or from_region_files):
             self.root_path.mkdir( parents=True, exist_ok=True )
             self.page_work_folder_path.mkdir( parents=True, exist_ok=True)
 
         image_paths = []
         # Assume pages are already there = ignore archive
-        if from_page_files:
+        if from_region_files:
+            image_paths = sorted( from_region_files )
+        elif from_page_files:
             image_paths = sorted( from_page_files )
         elif from_page_dir:
             image_paths = sorted( self.page_work_folder_path.glob('*{}'.format(img_suffix)))
@@ -201,7 +208,10 @@ class PageDataset(VisionDataset):
         if not image_paths:
             raise FileNotFoundError("Could not find a dataset source!")
 
-        self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix )
+        if from_region_files:
+            self._data = [ (ip, Path( re.sub(r'\.png$', '.json', str(ip)))) for ip in image_paths ]
+        else:
+            self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix )
 
         self.config = {
                 'count': count,
@@ -213,20 +223,20 @@ class PageDataset(VisionDataset):
         }
 
 
-    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix ):
+    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix, check_existing=True ):
         """
-        Build raw samples (img, label), with a 1-to-many relationship between original image 
+        Build and save data samples (img, label), with a 1-to-many relationship between original image 
         and samples:
         + ensure that every image has its annotation counterpart.
         + a sample is a page region and a corresponding line dictionary (stored as json)
 
         Args:
-            image_paths (list[Path]): a list of image files.
-            img_suffix (str): suffix of image file
-            lbl_suffix (str): suffix of annotation file
+            image_paths (list[Path]): a list of page image files.
+            img_suffix (str): suffix of page image file
+            lbl_suffix (str): suffix of page annotation file
 
         Return:
-            list[tuple(Path,Path)]: a list of pairs (<img_file_path>, <annotation_file_path>)
+            list[tuple(Path,Path)]: a list of pairs (<region_img_file_path.png>, <annotation_file_path.json>)
         """
         warnings.simplefilter('error', Image.DecompressionBombWarning)
         data = []
@@ -277,7 +287,7 @@ class PageDataset(VisionDataset):
                     del r['bbox_ltrb']
                     jsonf.write( json.dumps(r, indent=4) )
 
-                data.append( (r['image_filename'], new_lbl_path) )
+                data.append( (Path(r['image_filename']), new_lbl_path) )
         return data
 
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
@@ -334,7 +344,6 @@ class PageDataset(VisionDataset):
         """
         img, label = sample
         img = img.to(device)
-        print(type(img), img.shape)
         img = aug(img)
         masks, texts = label['masks'].to(device), label['texts']
         masks = torch.stack( [ aug(m, is_mask=True) for m in label['masks'] ], axis=0).to(device) 

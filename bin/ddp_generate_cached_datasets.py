@@ -24,6 +24,8 @@ import sys
 import fargv
 import random
 import tormentor
+import matplotlib.pyplot as plt
+import torch
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
@@ -40,15 +42,17 @@ p = {
         'dummy': 0,
         'img_suffix': '.jpg',
         'lbl_suffix': '.xml',
+        'visual_check': (0, "Dry-run: no serialization + visual check of transformed samples."),
 }
 
 
 default_tormentor_dists = {
         'Rotate': tormentor.Uniform((math.radians(-25.0), math.radians(25.0))),
         'Perspective': (tormentor.Uniform((0.85, 1.25)), tormentor.Uniform((.85,1.25))),
-        'Wrap': (tormentor.Uniform((0.1, 0.12)), tormentor.Uniform((0.64,0.66))), # no too rough, but intense (large-scale distortion)
+        'Wrap': (tormentor.Uniform((0.1, 0.6)), tormentor.Uniform((0.1,0.15))), # quite rough (low-scale), but low intensity
         'Zoom': tormentor.Uniform((1.1,1.6)),
         'Brightness': tormentor.Uniform((-0.25,0.25)),
+        'PlasmaBrightness': (tormentor.Uniform((0.1, 0.6)), tormentor.Uniform((0.1,0.5))), # quite rough (low-scale), but low intensity
 }
 
 
@@ -79,20 +83,26 @@ if args.dummy:
 # for training, Torment at will
 ds_train = pds.PageDataset( from_page_files=imgs_train, polygon_key='coords')
 ds_val = pds.PageDataset( from_page_files=imgs_val, polygon_key='coords')
-print(ds_train)
-print(ds_val)
-
 
 
 augWrap = tormentor.RandomWrap.override_distributions(roughness=default_tormentor_dists['Wrap'][0], intensity=default_tormentor_dists['Wrap'][1])
 augBrightness = tormentor.RandomBrightness.override_distributions(brightness=default_tormentor_dists['Brightness'])
-aug = augWrap | augBrightness
-ds_train = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
+augPlasmaBrightness = tormentor.RandomPlasmaBrightness.override_distributions(roughness=default_tormentor_dists['PlasmaBrightness'][0], intensity=default_tormentor_dists['PlasmaBrightness'][1])
+aug = augPlasmaBrightness | augWrap
+ds_aug = tormentor.AugmentedDs( ds_train, aug, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
+    
+if args.visual_check:
+    plt.close()
+    for i in range(10):
+        fig, (ax0, ax1, ax2, ax3) = plt.subplots(ncols=4, figsize=(15, 4))
+        ax0.imshow( ds_train[i][0].permute(1,2,0))
+        ax1.imshow( torch.sum( ds_train[i][1]['masks'], axis=0) )
+        tsf_sample = ds_aug[i]
+        ax2.imshow( tsf_sample[0].permute(1,2,0))
+        ax3.imshow( torch.sum( tsf_sample[1]['masks'], axis=0) )
+        plt.show()
 
-print(ds_train[0])
-print(ds_train[148])
-
-sys.exit()
+    sys.exit()
 
 if 'train' in args.subsets:
     ds_train_cached = lsg.CachedDataset( data_source = ds_train )
