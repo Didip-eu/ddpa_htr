@@ -42,23 +42,31 @@ logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(m
 logger = logging.getLogger(__name__)
 
 
-class HTRDataset(VisionDataset):
+class HTRLineDataset(VisionDataset):
     """A generic dataset class for HTR tasks, with minimal functionalities for 
-    + generating lines out of page or region datasets 
-    + accessing ready-made line samples.
+
+    + accessing ready-made line samples (eg. as generated from PageDataset class)
     + if the folder contains a TSV, the names of the files to be included are read from it.
     + if the folder has no TSV, all present files are assumed to be in the dataset
-    The class generates, loads and manipulates line samples, where each sample is a dictionary with
+
+    The class loads and manipulates line samples, where each sample is a dictionary with
     { line_img, polygon mask, target }
+
     What this class does _not_ do:
-    + compile lines out of PageXML and images (augmented or not)
+
+    + compile regions or lines out of PageXML and images
+    + augment data the page or region level
     + construct train, validation and test subsets (it is the responsibility of the training class)
+
+    What it could do:
+
+    + take a PageDataset as a source
     """
 
     def __init__(self,
                 from_line_tsv_file: str='',
                 from_work_folder: str='dataset',
-                from_page_dir: str='',
+                from_line_files: list[Path]=[],
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 expansion_masks = False,
@@ -73,10 +81,9 @@ class HTRDataset(VisionDataset):
                 (containing folder is assumed to be the work folder, superceding the
                 from_work_folder option).
             from_work_folder (str): if set, the samples are to be loaded from the
-                given directory, without prior processing.
-            from_page_dir (str): if set, the samples have to be extracted from the
-                raw page data contained in the given directory. GT metadata are either
-                JSON files or PageXML.
+                given directory.
+            from_line_files (list[Path]): if set, supersedes previous options; all files must be contained
+                in the same folder.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
@@ -93,6 +100,14 @@ class HTRDataset(VisionDataset):
         """
 
         data = []
+
+        from_line_files = list( from_line_files ) # if passed as Path.glob()
+
+        if from_line_files:
+            dataset_dirs = set( [ img.parent for img in from_line_files ] )
+            if len(dataset_dirs) > 1:
+                raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
+            self.work_folder_path = 
         if from_line_tsv_file:
             tsv_path = Path( from_line_tsv_file )
             if tsv_path.exists():
