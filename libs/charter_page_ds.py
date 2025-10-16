@@ -2,15 +2,13 @@
 # stdlib
 import sys
 import warnings
-import random
 import tarfile
 import json
 import shutil
 import re
 import os
 from pathlib import *
-from typing import *
-import time
+from typing import Callable, Union, Optional
 
 # 3rd-party
 from tqdm import tqdm
@@ -51,20 +49,25 @@ class PageDataset(VisionDataset):
     * page augmentation functionalities
     * region and line/transcription extraction methods (from original page images and XML metadata)
 
-    File-management logic:
+    File-management logic relies on several locations:
 
-    - a <root> folder where archives are saved and decompressed (set at initialization time, with a reasonable default in the current location)
-    - a page work folder
-    - defaults to the root directory of the tarball, in last resort
-    - OR: implied from <from_page_files> or <from_region_files> option, when loading data from existing pages or regions
-    - OR: implied from <from_page_dir> option, when loading data from existing page folder
-    - OR: specified at initialization time through the <page_work_folder> parameter - archive is checked; after extraction, page files
-                  are copied in the work folder
+    - a **root** folder where archives are saved and decompressed (set at initialization time, with a 
+      reasonable default in the current location); after this step all write operations happen in 
+      the work folders described below.
+    - a **page work folder**
+      + defaults to the root directory of the tarball, in last resort
+      + OR: implied from <from_page_files> or <from_region_files> option, when loading data from existing
+        pages or regions
+      + OR: implied from <from_page_dir> option, when loading data from existing page folder
+      + OR: specified at initialization time through the <page_work_folder> parameter - archive is checked;
+        after extraction, page files are copied in the work folder
     - [optional] a cache for augmented pages
-    - a line work folder where line samples extracted from the page are to be saved
+    - a **line work folder** where line samples extracted from the page are to be saved.
 
-    Depending on the options passed at initialization time, the page work folder may be under <root> or not.
-    So far, we assume that there is a one-to-one relationship between PageXML files and an image. In practice,
+    Remarks:
+
+    - Depending on the options passed at initialization time, the page work folder may be under <root> or not.
+    - So far, we assume that there is a one-to-one relationship between PageXML files and an image. In practice,
     this is not always true for all datasets.
 
 
@@ -74,7 +77,7 @@ class PageDataset(VisionDataset):
 
     dataset_resource = {
             'file': '',
-            'tarball_filename': 'NONE',
+            'tarball_filename': '-',
             'md5': '-',
             'desc': 'Constructed from files.',
             'origin': 'local',
@@ -87,8 +90,8 @@ class PageDataset(VisionDataset):
                 page_work_folder: str = '',
                 line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_dir: str = '',
-                from_page_files: list=[],
-                from_region_files: list=[],
+                from_page_files: list[Path]=[],
+                from_region_files: list[Path]=[],
                 transform: Optional[Callable] = None,
                 augmentation_class: Callable= None,
                 extract_pages: bool = False,
@@ -268,6 +271,7 @@ class PageDataset(VisionDataset):
             for line in page_dict['lines']:
                 outer_reg = regions[ line['regions'][0] ]
                 polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
+                # shifting crop coordinates
                 line['coords'] = (polyg_array - outer_reg['bbox_ltrb'][:2] ).tolist()
                 line['baseline'] = (baseline_array - outer_reg['bbox_ltrb'][:2] ).tolist()
                 del line['regions']
@@ -285,7 +289,7 @@ class PageDataset(VisionDataset):
                 data.append( (Path(r['image_filename']), new_lbl_path) )
         return data
 
-    def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
+    def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
         """This method returns a page sample.
 
         Args:
@@ -319,7 +323,6 @@ class PageDataset(VisionDataset):
         """
         img_whc = Image.open(img_path, 'r')
         
-        start_time = time.time()
         page_dict = {}
         if (annotation_path.name)[-4:]=='.xml':
             page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) 
