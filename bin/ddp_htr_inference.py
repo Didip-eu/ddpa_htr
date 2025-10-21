@@ -198,11 +198,11 @@ if __name__ == "__main__":
         output_file_path = ''
         # stdout and tsv for extra data
         if args.output_format in ('stdout', 'tsv'):
-            header_row = ['index', 'id', 'prediction']
+            header_row = ['Index', 'Id', 'Prediction']
             if 'gt' in args.output_data:
-                header_row.append( 'gt' )
+                header_row.append( 'GT' )
             if 'scores' in args.output_data:
-                header_row.append( 'scores')
+                header_row.append( 'Scores')
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(dataset.page_dict['lines']):
                 output_row = [ str(idx), line_dict['line_id'], line_dict['text'] ]
