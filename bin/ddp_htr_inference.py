@@ -212,11 +212,12 @@ if __name__ == "__main__":
                     output_row.append( str(line_dict['scores']) )
                 output_rows.append( '\t'.join( output_row ) )
             if args.output_format == 'stdout':
-                print('\n'.join(output_rows), end='')
+                print('\n'.join(output_rows))
             else:
                 output_file_path = output_dir.joinpath(f'{stem}{args.htr_file_suffix}.tsv')
                 with open( output_file_path, 'w') as htr_outfile:
                     htr_outfile.write( '\n'.join( output_rows) )
+                    htr_outfile.write( '\n')
 
         # Json and Xml for standard page annotation
         elif args.output_format in ('json', 'xml'):
