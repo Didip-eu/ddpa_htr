@@ -110,7 +110,7 @@ class InferenceDataset( VisionDataset ):
         """ Update a given line dictionary with prediction data, whatever they are."""
         this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
         if keep_gt:
-            this_line['gt']=kv['text']
+            this_line['gt']=this_line['text']
         this_line.update( kv )
 
     def __getitem__(self, index: int):
