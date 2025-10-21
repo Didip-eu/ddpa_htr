@@ -42,11 +42,12 @@ p = {
     #"charter_dirs": set(["./"]),
     "charter_dirs": set([]),
     "segmentation_dir": ['', 'Alternate location to search for the image segmentation data files (for testing).'], # for testing purpose
-    "segmentation_file_suffix": "lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
+    "segmentation_file_suffix": ".lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
-    "htr_file_suffix": "htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
-    "output_format": [ ("json", "stdout", "tsv"), "Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively."],
-    "output_data": [ ("pred", "logits", "all"), "By default, the application yields character predictions; 'logits' have it returns logits instead."],
+    "img_file_suffix": ".img.jpg",
+    "htr_file_suffix": ".htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
+    "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
+    "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt' (if available in the input data)"],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
@@ -80,7 +81,7 @@ class InferenceDataset( VisionDataset ):
         img_path = Path( img_path ) if type(img_path) is str else img_path
         segmentation_data = Path( segmentation_data ) if type(segmentation_data) is str else segmentation_data
 
-        # extract line images: functions line_images_from_img_* return tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)
+        # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
         line_extraction_func = seglib.line_images_from_img_json_files if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
 
         line_padding_func = lambda x, m, channel_dim=2: x # by default, identity function
@@ -91,22 +92,26 @@ class InferenceDataset( VisionDataset ):
         elif padding_style == 'zero':
             line_padding_func = tsf.bbox_zero_pad
 
-        self.pagedict = line_extraction_func( img_path, segmentation_data )
+        self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
         self.data = []
-        for (img_hwc, mask_hwc, linedict) in self.pagedict['lines']:
+        for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
             mask_hw = mask_hwc[:,:,0]
             self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #tsf.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
-                                'line_id': str(linedict['id']),
+                                'line_id': str(line_dict['line_id']),
                                } )
-        # restoring original line dictionaries into the page data
-        self.pagedict['lines'] = [ triplet[2] for triplet in self.pagedict['lines'] ]
-        self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.pagedict['lines']) }
+        # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
+        self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
+        self.line_id_to_index = { str(lrecord['line_id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
         
 
-    def update_pagedict_line(self, line_id:str, kv: dict ):
-        self.pagedict['lines'][ self.line_id_to_index[ line_id ]].update( kv )
+    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
+        """ Update a given line dictionary with prediction data, whatever they are."""
+        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
+        if keep_gt:
+            this_line['gt']=kv['text']
+        this_line.update( kv )
 
     def __getitem__(self, index: int):
         sample = self.data[index].copy()
@@ -128,7 +133,6 @@ if __name__ == "__main__":
         logger.debug(f"Charter Dir: {charter_dir}")
         if charter_dir_path.is_dir() and charter_dir_path.joinpath("CH.cei.xml").exists():
             charter_images = [str(f) for f in charter_dir_path.glob("*.img.*")]
-            print(charter_images)
             all_img_paths += charter_images
         else:
             logger.error("Skipping directory {}: check that it is an existing charter directory and that it contains a {} file.".format( charter_dir_path, "CH.cei.xml"))
@@ -144,7 +148,8 @@ if __name__ == "__main__":
         # remove any dot-prefixed substring from the file name
         # (Path.suffix() only removes the last suffix)
         #stem = re.sub(r'\..+', '',  img_path.name )
-        stem = img_path.name.replace('.img.jpg','')
+        #stem = img_path.name.replace('.img.jpg','')
+        stem = re.sub(r'{}$'.format(args.img_file_suffix), '', img_path.name )
 
         segmentation_dir = img_path.parent
 
@@ -154,8 +159,9 @@ if __name__ == "__main__":
             else:
                 raise FileNotFoundError(f"Provided segmentation directory {args.segmentation_dir} does not exists!")
 
-        segmentation_file_path = segmentation_dir.joinpath(f'{stem}.{args.segmentation_file_suffix}')
-        print(segmentation_file_path)
+        segmentation_file_path = segmentation_dir.joinpath(f'{stem}{args.segmentation_file_suffix}')
+        logger.debug("segmentation file={}".format(segmentation_file_path))
+        
 
         dataset = None
         if not segmentation_file_path.exists():
@@ -168,40 +174,63 @@ if __name__ == "__main__":
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")
          
         # 2. HTR inference
-
         model = HTR_Model.load( args.model_path )
         if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
             model.decoder = HTR_Model.decode_beam_search
 
-        predictions = []
-
+        # Idea: the live page dictionary is updated with all the info that may be of interest
+        # depending on the output format chosen, some of it get deleted later.
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
             # since batch is 1, flattening batch values
-            
             line_id = sample['line_id'][0] # for some reason, the transform wraps the id into an array
-            line_dict = { 'id': line_id }
-            if args.output_data == 'all' or args.output_data == 'pred':
-                line_dict['text'] = predicted_string[0]
-            if args.output_data == 'all' or args.output_data == 'logits':
-                line_dict['scores'] = lu.flatten(line_scores.tolist())
-            dataset.update_pagedict_line( line_id, line_dict )
+            line_dict = { 'line_id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
+            dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
+        
+        logger.debug(dataset.page_dict)
 
         # 3. Output
-        if args.output_format == 'stdout':
-            print( '\n'.join( str(p) for p in predictions) )
+        if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
+            logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
 
-        elif args.output_format in ('json', 'tsv'):
+        output_dir = Path( img_path ).parent
+        output_file_path = ''
+        # stdout and tsv for extra data
+        if args.output_format in ('stdout', 'tsv'):
+            header_row = ['index', 'id', 'prediction']
+            if 'gt' in args.output_data:
+                header_row.append( 'gt' )
+            if 'scores' in args.output_data:
+                header_row.append( 'scores')
+            output_rows=[ '\t'.join( header_row ) ]
+            for idx, line_dict in enumerate(dataset.page_dict['lines']):
+                output_row = [ str(idx), line_dict['line_id'], line_dict['text'] ]
+                if 'gt' in args.output_data and 'gt' in line_dict:
+                    output_row.append( line_dict['gt'] )
+                if 'scores' in args.output_data and 'scores' in line_dict:
+                    output_row.append( str(line_dict['scores']) )
+                output_rows.append( '\t'.join( output_row ) )
+            if args.output_format == 'stdout':
+                print('\n'.join(output_rows), end='')
+            else:
+                output_file_path = output_dir.joinpath(f'{stem}{args.htr_file_suffix}.tsv')
+                with open( output_file_path, 'w') as htr_outfile:
+                    htr_outfile.write( '\n'.join( output_rows) )
 
-            output_dir = Path( img_path ).parent
-            output_file_name = output_dir.joinpath(f'{stem}.{args.htr_file_suffix}.{args.output_format}')
-            with open( output_file_name, 'w') as htr_outfile:
-                if args.output_format == 'json':
-                    json.dump( dataset.pagedict, htr_outfile, indent=4)
-                elif args.output_format == 'tsv':
-                    print( '\n'.join( [ f'{line_dict["line_id"]}\t{line_dict["transcription"]}' for line_dict in predictions ] ), file=htr_outfile )
-                logger.info(f"Output transcriptions in file {output_file_name}")
+        # Json and Xml for standard page annotation
+        elif args.output_format in ('json', 'xml'):
+            for line in dataset.page_dict['lines']:
+                del line['scores']
+                del line['gt']
+            output_file_path = output_dir.joinpath(f'{stem}{args.htr_file_suffix}.{args.output_format}')
+            if args.output_format == 'json':
+                with open( output_file_path, 'w') as htr_outfile:
+                    json.dump( dataset.page_dict, htr_outfile , indent=4)
+            elif args.output_format == 'xml':
+                seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
+        if output_file_path:
+            logger.info(f"Output transcriptions in file {output_file_path}")
 
             
 

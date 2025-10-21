@@ -204,7 +204,7 @@ def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='
     return []
 
 
-def line_images_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.ndarray, np.ndarray]]:
+def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation PageXML file describing polygons, return
     a list of pairs (<line cropped BB>, <polygon mask>).
 
@@ -212,6 +212,8 @@ def line_images_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.nd
         img (str): the input image's file path
         page_xml: :type page_xml: str a Page XML file describing the
             lines.
+        as_dictionary (bool): return segmentation dict where each line is a tuple (<img>,<msk>,<line_dict>); useful
+            for keeping track of line ids when running inference.
 
     Returns:
         list: a list of pairs (<line image BB>: np.ndarray (HWC), mask:
@@ -219,22 +221,35 @@ def line_images_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.nd
     """
     with Image.open(img, 'r') as img_wh:
         segmentation_dict = segmentation_dict_from_xml( page_xml )
-        return line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
+        line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
+        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, segmentation_dict['lines']) ]
+        if as_dictionary:
+            segmentation_dict['lines'] = line_triplets
+            return segmentation_dict
+        return line_pairs
 
 
-def line_images_from_img_json_files( img: str, segmentation_json: str ) -> list[tuple[np.ndarray, np.ndarray]]:
+def line_images_from_img_json_files( img: str, segmentation_json: str, as_dictionary=False ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation JSON file describing polygons, return
     a list of pairs (<line cropped BB>, <polygon mask>).
 
     Args:
         img (str): the input image's file path
         segmentation_json (str): path of a JSON file
+        as_dictionary (bool): return segmentation dict where each line is a tuple (<img>,<msk>,<line_dict>); useful
+            for keeping track of line ids when running inference.
 
     Returns:
-        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
+        Union[list,dict]: a segmentation dictionary or a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
-        return line_images_from_img_segmentation_dict( img_wh, json.load( json_file ))
+        segmentation_dict = json.load( json_file )
+        line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
+        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, segmentation_dict['lines']) ]
+        if as_dictionary:
+            segmentation_dict['lines'] = line_triplets
+            return segmentation_dict
+        return line_pairs
 
 def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict, polygon_key='coords' ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From a segmentation dictionary describing polygons, return 
@@ -242,7 +257,7 @@ def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_di
 
     Args:
         img_whc (Image.Image): the input image (needed for the size information).
-        segmentation_dict: :type segmentation_dict: dict a dictionary, typically constructed from a JSON file.
+        segmentation_dict (dict) a dictionary, typically constructed from a JSON file.
 
     Returns:
         list[tuple[np.ndarray, np.ndarray]]: a list of pairs (<line
