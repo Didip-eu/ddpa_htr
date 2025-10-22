@@ -99,11 +99,11 @@ class InferenceDataset( VisionDataset ):
             self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), #tsf.bbox_median_pad( img_hwc, mask_hw, channel_dim=2 ), 
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
-                                'line_id': str(line_dict['line_id']),
+                                'id': str(line_dict['id']),
                                } )
         # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
         self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
-        self.line_id_to_index = { str(lrecord['line_id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
+        self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
         
 
     def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
@@ -184,8 +184,8 @@ if __name__ == "__main__":
             # strings, np.ndarray
             predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
             # since batch is 1, flattening batch values
-            line_id = sample['line_id'][0] # for some reason, the transform wraps the id into an array
-            line_dict = { 'line_id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
+            line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
+            line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
             dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
         
         logger.debug(dataset.page_dict)
@@ -205,7 +205,7 @@ if __name__ == "__main__":
                 header_row.append( 'Scores')
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(dataset.page_dict['lines']):
-                output_row = [ str(idx), line_dict['line_id'], line_dict['text'] ]
+                output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
                 if 'gt' in args.output_data and 'gt' in line_dict:
                     output_row.append( line_dict['gt'] )
                 if 'scores' in args.output_data and 'scores' in line_dict:
