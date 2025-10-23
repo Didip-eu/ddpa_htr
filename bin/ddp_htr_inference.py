@@ -47,7 +47,7 @@ p = {
     "img_file_suffix": ".img.jpg",
     "htr_file_suffix": ".htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
-    "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt' (if available in the input data)"],
+    "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
 }
 
@@ -79,7 +79,7 @@ class InferenceDataset( VisionDataset ):
         super().__init__(root, transform=trf )
 
         img_path = Path( img_path ) if type(img_path) is str else img_path
-        segmentation_data = Path( segmentation_data ) if type(segmentation_data) is str else segmentation_data
+        segmentation_data = Path( segmentation_data ) 
 
         # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
         line_extraction_func = seglib.line_images_from_img_json_files if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
@@ -93,6 +93,7 @@ class InferenceDataset( VisionDataset ):
             line_padding_func = tsf.bbox_zero_pad
 
         self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
+        
         self.data = []
         for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
             mask_hw = mask_hwc[:,:,0]
@@ -100,6 +101,7 @@ class InferenceDataset( VisionDataset ):
                                 'height':img_hwc.shape[0],
                                 'width': img_hwc.shape[1],
                                 'id': str(line_dict['id']),
+                                'img_filename': str(img_path),
                                } )
         # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
         self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
@@ -140,6 +142,10 @@ if __name__ == "__main__":
         args.img_paths = list(all_img_paths)
 
     logger.debug(args)
+    
+    model = HTR_Model.load( args.model_path )
+    if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
+        model.decoder = HTR_Model.decode_beam_search
 
     for img_path in list( args.img_paths):
 
@@ -161,12 +167,12 @@ if __name__ == "__main__":
 
         segmentation_file_path = segmentation_dir.joinpath(f'{stem}{args.segmentation_file_suffix}')
         logger.debug("segmentation file={}".format(segmentation_file_path))
-        
 
         dataset = None
         if not segmentation_file_path.exists():
             logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
             continue
+    
         dataset = InferenceDataset( img_path, segmentation_file_path,
                                     transform = Compose([ tsf.ResizeToHeight(128,2048), tsf.PadToWidth(2048),]),)
         
@@ -174,9 +180,6 @@ if __name__ == "__main__":
             raise FileNotFoundError("Could not build a proper dataset. Aborting.")
          
         # 2. HTR inference
-        model = HTR_Model.load( args.model_path )
-        if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
-            model.decoder = HTR_Model.decode_beam_search
 
         # Idea: the live page dictionary is updated with all the info that may be of interest
         # depending on the output format chosen, some of it get deleted later.
@@ -203,6 +206,8 @@ if __name__ == "__main__":
                 header_row.append( 'GT' )
             if 'scores' in args.output_data:
                 header_row.append( 'Scores')
+            if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(dataset.page_dict['lines']):
                 output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
@@ -210,6 +215,8 @@ if __name__ == "__main__":
                     output_row.append( line_dict['gt'] )
                 if 'scores' in args.output_data and 'scores' in line_dict:
                     output_row.append( str(line_dict['scores']) )
+                if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                    output_row.extend([ str(elt) for elt in dataset.page_dict['metadata'].values() ])
                 output_rows.append( '\t'.join( output_row ) )
             if args.output_format == 'stdout':
                 print('\n'.join(output_rows))
