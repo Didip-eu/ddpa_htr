@@ -70,6 +70,9 @@ class PageDataset(VisionDataset):
     - So far, we assume that there is a one-to-one relationship between PageXML files and an image. In practice,
     this is not always true for all datasets.
 
+    TODO:
+    - ability to extract line polygons with scaled height (JSON-only)
+
 
     Attributes:
         dataset_resource (dict): meta-data (URL, archive name, type of repository).
@@ -374,7 +377,6 @@ class PageDataset(VisionDataset):
         Args:
             line_as_tensor (bool): save line crops as tensors (compressed).
             resume (bool): resume a dump task---work folder is checked for existing, completed pages.
-
         """
         self.line_work_folder_path.mkdir( parents=True, exist_ok=True)
 

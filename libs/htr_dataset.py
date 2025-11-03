@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 class HTRLineDataset(VisionDataset):
-    """A generic dataset class for HTR tasks, with minimal functionalities for 
+    """A generic dataset class for HTR training tasks, with minimal functionalities for 
 
     + accessing ready-made line samples (eg. as generated from PageDataset class)
     + if the folder contains a TSV, the names of the files to be included are read from it.
@@ -55,7 +55,9 @@ class HTRLineDataset(VisionDataset):
     What this class does _not_ do:
 
     + compile regions or lines out of PageXML and images
-    + augment data the page or region level
+    + apply geometrical transformations on polygons (polygons are handled by the PageDataset class;
+      at this stage, we know only about pixel masks)
+    + augment data at page or region level
     + construct train, validation and test subsets (it is the responsibility of the training class)
 
     What it could do:
@@ -495,65 +497,6 @@ class HTRLineDataset(VisionDataset):
         return img_out.transpose(1,2,0) if (channel_dim==2 and len(img.shape) > 2) else img_out
 
 
-class PadToWidth():
-    """Pad an image to desired length."""
-
-    def __init__( self, max_w ):
-        self.max_w = max_w
-
-    def __call__(self, sample: dict) -> dict:
-        """Transform a sample: only the image is modified, not the nominal height and width.
-        """
-        t_chw, w = [ sample[k] for k in ('img', 'width' ) ]
-        if w > self.max_w:
-            warnings.warn("Cannot pad an image that is wider ({}) than the padding size ({})".format( w, self.max_w))
-            return sample
-        new_t_chw = torch.zeros( t_chw.shape[:2] + (self.max_w,))
-        new_t_chw[:,:,:w] = t_chw
-
-        transformed_sample = sample.copy()
-        transformed_sample.update( {'img': new_t_chw } )
-        return transformed_sample
-
-
-
-class ResizeToHeight():
-    """Resize an image with fixed height, preserving aspect ratio as long as the resulting width
-    does not exceed the specified max. width. If that is the case, the image is horizontally
-    squeezed to fix this.
-
-    """
-
-    def __init__( self, target_height, max_width ):
-        self.target_height = target_height
-        self.max_width = max_width
-
-    def __call__(self, sample: dict) -> dict:
-        """Transform a sample
-
-           + resize 'img' value to desired height
-           + modify 'height' and 'width' accordingly
-
-        """
-        t_chw, h, w = [ sample[k] for k in ('img', 'height', 'width') ]
-        # freak case (marginal annotations): original height is the larger
-        # dimension -> specify the width too
-        if h > w:
-            t_chw = v2.Resize( size=(self.target_height, int(w*self.target_height/h) ), antialias=True)( t_chw )
-        # default case: original height is the smaller dimension and
-        # gets picked up by Resize()
-        else:
-            t_chw = v2.Resize(size=self.target_height, antialias=True)( t_chw )
-            
-        if t_chw.shape[-1] > self.max_width:
-            t_chw = v2.Resize(size=(self.target_height, self.max_width), antialias=True)( t_chw )
-        h_new, w_new = [ int(d) for d in t_chw.shape[1:] ]
-
-        transformed_sample = sample.copy()
-        transformed_sample.update( {'img': t_chw, 'height': h_new, 'width': w_new } )
-
-        return transformed_sample
-        
 
 
 def dummy():
