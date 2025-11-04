@@ -2,6 +2,11 @@
 
 """
 HTR inference on page, with segmentation provided.
+
+- high-level script: deal with charter images and segmentation data (either XML or JSON)
+- (mostly) self-contained: it relies on a minimal dataset class for extracting lines out of a single charter (image, seg) pair.
+- TODO: extract scaled-up polygons from JSON files.
+
 """
 
 # stdlib
@@ -197,7 +202,7 @@ if __name__ == "__main__":
         if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
             logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
 
-        output_dir = Path( img_path ).parent
+        output_dir = Path( img_path ).parent if not args.output_dir else Path(args.output_dir)
         output_file_path = ''
         # stdout and tsv for extra data
         if args.output_format in ('stdout', 'tsv'):
@@ -229,14 +234,16 @@ if __name__ == "__main__":
         # Json and Xml for standard page annotation
         elif args.output_format in ('json', 'xml'):
             for line in dataset.page_dict['lines']:
-                del line['scores']
-                del line['gt']
+                if 'scores' in line:
+                    del line['scores']
+                if 'gt' in line:
+                    del line['gt']
             output_file_path = output_dir.joinpath(f'{stem}{args.htr_file_suffix}.{args.output_format}')
             if args.output_format == 'json':
                 with open( output_file_path, 'w') as htr_outfile:
                     json.dump( dataset.page_dict, htr_outfile , indent=4)
             elif args.output_format == 'xml':
-                seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
+                seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path, with_text=True )
         if output_file_path:
             logger.info(f"Output transcriptions in file {output_file_path}")
 

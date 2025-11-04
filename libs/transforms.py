@@ -2,7 +2,70 @@ import numpy as np
 import torch
 from torchvision.transforms import v2
 
+
 def bbox_median_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
+    """Pad a polygon BBox with the median value of the polygon. Used by
+    the line extraction method.
+
+    Args:
+        img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
+        mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+        param channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
+    
+    Returns:
+        np.ndarray: the padded image, with same shape as input.
+    """
+    img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
+    
+    if len(img.shape)==2:
+        img = img[None]
+    padding_bg = np.zeros( img.shape, dtype=img.dtype)
+
+    for ch in range( img.shape[0] ):
+        med = np.median( img[ch][mask_hw] ).astype( img.dtype )
+        padding_bg[ch] += np.logical_not(mask_hw) * med
+        padding_bg[ch] += img[ch] * mask_hw
+    return padding_bg.transpose(1,2,0) if (channel_dim==2 and len(img_chw.shape)>2) else padding_bg[0]
+
+def bbox_noise_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
+    """Pad a polygon BBox with noise. Used by the line extraction method.
+
+    Args:
+        img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C) or (H,W)
+        mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+        channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
+
+    Returns:
+        np.ndarray: the padded image, with same shape as input.
+    """
+    img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
+    padding_bg = np.random.randint(0, 255, img.shape, dtype=img_chw.dtype)
+    
+    padding_bg *= np.logical_not(mask_hw) 
+    if len(img.shape)>2:
+        mask_hw = np.stack( [ mask_hw, mask_hw, mask_hw ] )
+
+    padding_bg += img * mask_hw
+    return padding_bg.transpose(1,2,0) if (channel_dim==2 and len(img.shape) > 2) else padding_bg
+
+def bbox_zero_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
+    """Pad a polygon BBox with zeros. Used by the line extraction method.
+
+    Args:
+        img_chw (np.ndarray): an array (C,H,W). Optionally: (H,W,C)
+        mask_hw (np.ndarray): a 2D Boolean mask (H,W).
+        channel_dim (int): the channel dimension: 2 for (H,W,C) images. Default is 0.
+
+    Returns:
+        np.ndarray: the padded image, with same shape as input.
+    """
+    img = img_chw.transpose(2,0,1) if (channel_dim == 2 and len(img_chw.shape) > 2) else img_chw
+    if len(img.shape)>2:
+        mask_hw = np.stack( [ mask_hw, mask_hw, mask_hw ] )
+    img_out = img * mask_hw
+    return img_out.transpose(1,2,0) if (channel_dim==2 and len(img.shape) > 2) else img_out
+
+def bbox_median_pad_old(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
     """ Pad a polygon BBox with the median value of the polygon. Used by
     the line extraction method.
 
@@ -29,7 +92,7 @@ def bbox_median_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0
 
 
 
-def bbox_noise_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
+def bbox_noise_pad_old(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
     """ Pad a polygon BBox with noise. Used by the line extraction method.
 
     :param img_chw: an array (C,H,W). Optionally: (H,W,C)
@@ -52,7 +115,7 @@ def bbox_noise_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 
     padding_bg += img * mask_chw
     return padding_bg.transpose(1,2,0) if channel_dim==2 else padding_bg
 
-def bbox_zero_pad(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
+def bbox_zero_pad_old(img_chw: np.ndarray, mask_hw: np.ndarray, channel_dim: int=0 ) -> np.ndarray:
     """ Pad a polygon BBox with zeros. Used by the line extraction method.
 
     :param img_chw: an array (C,H,W). Optionally: (H,W,C)
