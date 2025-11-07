@@ -193,14 +193,25 @@ def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='
     Returns:
         list[list[int]]: a list of lists of coordinates.
     """
-    # Two possible structures:
-    # 
-    # 1. Top-level list of lines  (no region or only region id as a line attribute)
     if 'lines' in segmentation_dict:
         return [ line[polygon_key] for line in segmentation_dict['lines'] ]
-    # 2. Text lines are nested into regions
     elif 'regions' in segmentation_dict:
         return [ line[polygon_key] for reg in segmentation_dict['regions'] for line in reg['lines']] 
+    return []
+
+def line_dicts_from_segmentation_dict( segmentation_dict: dict) -> list[dict]:
+    """From a segmentation dictionary, return a list of all line dictionaries.
+
+    Args:
+        segmentation_dict (dict): a dictionary, typically constructed from a JSON file. The 'lines' entry is either
+        top-level key, or nested as in 'regions > region > lists'.
+    Returns:
+        list[dict]: a list of dictionaries.
+    """
+    if 'lines' in segmentation_dict:
+        return segmentation_dict['lines']
+    elif 'regions' in segmentation_dict:
+        return [ line for reg in segmentation_dict['regions'] for line in reg['lines']]
     return []
 
 
@@ -222,7 +233,7 @@ def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False 
     with Image.open(img, 'r') as img_wh:
         segmentation_dict = segmentation_dict_from_xml( page_xml )
         line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
-        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, segmentation_dict['lines']) ]
+        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, line_dicts_from_segmentation_dict(segmentation_dict)) ]
         if as_dictionary:
             segmentation_dict['lines'] = line_triplets
             return segmentation_dict
@@ -245,7 +256,7 @@ def line_images_from_img_json_files( img: str, segmentation_json: str, as_dictio
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
         segmentation_dict = json.load( json_file )
         line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
-        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, segmentation_dict['lines']) ]
+        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, line_dicts_from_segmentation_dict(segmentation_dict)) ]
         if as_dictionary:
             segmentation_dict['lines'] = line_triplets
             return segmentation_dict
@@ -407,6 +418,7 @@ def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_
         pagexml_filename (str): if provided, output is saved in a PageXML file (standard output is the default).
         polygon_key (str): if the segmentation dictionary contain alternative polygons (f.i. 'extBoundary'),
             use them, instead of the usual line 'coords'.
+        with_text (bool): encode line transcription, if it exists. Default is False.
     """
     def boundary_to_point_string( list_of_pts ):
         return ' '.join([ f"{pair[0]:.0f},{pair[1]:.0f}" for pair in list_of_pts ] )
@@ -622,16 +634,46 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
 
     return page_dict 
 
-def merge_seals_regseg_lineseg( regseg: dict, region_labels: list[str], *linesegs: list[str]) -> dict:
+
+def segdict_sink_lines(segdict: dict):
+    """Convert a segmentation dictionary with top-level line array ('lines') 
+    to a nested dictionary where each region in the 'regions' array contains its 
+    corresponding 'lines' array. No change applied if lines are already wrapped
+    into the regions.
+
+    Args:
+        segdict (dict): segmentation dictionary of the form::
+
+            {..., "lines": [ {"id":..., regions=[...]}, ... ], "regions": [ ... ] }
+
+    Returns:
+        dict: a modified copy of the original dictionary::
+
+            {..., "regions": [ {"id":..., lines=[{"id": ... }, ... ]}, ... ] }
+    """
+    segdict = segdict.copy()
+    if 'lines' not in segdict:
+        return segdict
+    for line in segdict['lines']:
+        if line['regions']:
+            this_reg=[ reg for reg in segdict['regions'] if reg['id']==line['regions'][0] ][0]
+            if 'lines' not in this_reg:
+                this_reg['lines']=[]
+            this_reg['lines'].append(line)
+    del segdict['lines']
+    return segdict
+
+
+def merge_layout_regseg_lineseg( regseg: dict, region_labels: list[str], *linesegs: list[str]) -> dict:
     """Merge 2 segmentation outputs into a single one:
 
-    * the page-wide yolo/seals segmentation (with OldText, ... regions)
+    * the page-wide yolo/layout segmentation (with OldText, ... regions)
     * the line segmentation for the regions defined in the first one
 
     The resulting file is a page-wide line-segmentation JSON.
 
     Args:
-        regseg (dict): the regional segmentation json, as given by the 'seals' app
+        regseg (dict): the regional segmentation json, as given by the 'layout' app
         *linesegs (list[str]): a number of local line segmentations for the region defined in the
             first file, of the form::
 
@@ -688,13 +730,13 @@ def merge_seals_regseg_lineseg( regseg: dict, region_labels: list[str], *lineseg
 
     return merged_seg
         
-def seals_regseg_to_crops( img: Image.Image, regseg: dict, region_labels: list[str] ) -> tuple[list[Image.Image], list[str]]:
-    """From a seals-app segmentation dictionary, returns the regions with matching
+def layout_regseg_to_crops( img: Image.Image, regseg: dict, region_labels: list[str] ) -> tuple[list[Image.Image], list[str]]:
+    """From a layout-app segmentation dictionary, returns the regions with matching
     labels as a list of images.
 
     Args:
         img (Image.Image): Image to crop.
-        regseg (dict): the regional segmentation json, as given by the 'seals' app
+        regseg (dict): the regional segmentation json, as given by the 'layout' app
         region_labels (list[str]): Labels to be extracted.
 
     Returns:
@@ -711,12 +753,12 @@ def seals_regseg_to_crops( img: Image.Image, regseg: dict, region_labels: list[s
                 clsid_2_clsname[ regseg['rect_classes'][i]]) for i in to_keep ])
 
 
-def seals_regseg_check_class(regseg: dict, region_labels: list[str] ) -> list[bool]:
-    """From a seals-app segmentation dictionary, check if rectangle with given labels
+def layout_regseg_check_class(regseg: dict, region_labels: list[str] ) -> list[bool]:
+    """From a layout-app segmentation dictionary, check if rectangle with given labels
     have been detected.
 
     Args:
-        regseg (dict): the regional segmentation json, as given by the 'seals' app
+        regseg (dict): the regional segmentation json, as given by the 'layout' app
         region_labels (list[str]): Labels to check.
 
     Returns:
