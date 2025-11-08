@@ -96,8 +96,8 @@ class InferenceDataset( VisionDataset ):
         self.data = []
         try:
             # This creates a page dict with a convenient top-level 'lines' array, raised from 
-            # its containing region(s): allow for easy update of all lines object - the top-level 
-            # entry is then deleted before serializing the ouput.
+            # its containing region(s): allow for easy update of all line objects - this top-level 
+            # reference to the line array is later deleted, before serializing the ouput.
             self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
             for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
                 mask_hw = mask_hwc[:,:,0]
@@ -131,13 +131,16 @@ class InferenceDataset( VisionDataset ):
         return len(self.data)
 
 
-def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ):
+def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple]:
     """
-    Process arguments into a tuple of the form. It is a triplet::
+    Compile image files and/or charter paths in the CLI arguments.
+    No existence check on the dependency (segmentation path).
 
-        ( <img path>, <line segmentation path>, <HTR prediction path> )
-
-    No existence check on the line segmentation path.
+    Args:
+        dict: the parsed arguments.
+        segmentation_suffix (str): suffix of the expected segmentation file.
+    Returns:
+        list[tuple]: a list of triplets (<img file path>, <segmentation file path>, <output file path>)
     """
     all_img_paths = set([ Path(p) for p in args.img_paths ])
 
@@ -184,8 +187,8 @@ if __name__ == "__main__":
          
         # 2. HTR inference
 
-        # Idea: the live page dictionary is updated with all the info that may be of interest
-        # depending on the output format chosen, some of it get deleted later.
+        # Idea: the live page dictionary is updated with all the info that may be of interest:
+        # depending on the output format chosen, some of it gets deleted later.
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             try:
                 # strings, np.ndarray
