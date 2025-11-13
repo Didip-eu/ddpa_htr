@@ -250,8 +250,5 @@ if __name__ == "__main__":
                 seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
         if output_file_path.exists():
             logger.info(f"HTR output saved in {output_file_path}")
-            pass
-
             
-
 

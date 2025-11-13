@@ -230,7 +230,7 @@ def char_confusion_integer_matrix( x:str, y:str, alpha=None ) -> Tuple[int, np.n
     return (cm[-1][-1], cm)
     
 
-def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -> Tuple[np.ndarray,dict]:
+def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None, normalized=True ) -> Tuple[np.ndarray,dict]:
     """
     Character confusion matrix, for a batch, normalized.
 
@@ -241,6 +241,7 @@ def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -
             mapping; it determines the size of the square matrix, that has as many rows
             as there are unique values in the alphabet. By default, a one-to-one alphabet
             is constructed from the input strings.
+        normalized (True): yield the normalized matrix; otherwise, the raw integers.
 
     Returns:
         Tuple[np.ndarray,dict]: pair with 
@@ -254,7 +255,7 @@ def batch_char_confusion_matrix( xs:List[str], ys:List[str], alpha:dict=None ) -
     alph = alphabet(''.join( itertools.chain( xs, ys))) if alpha is None else alpha
     #print('length=', len(xs))
     integer_matrix = np.sum( np.stack([ char_confusion_integer_matrix(x, y, alpha=alph)[1] for (x,y) in zip( xs, ys) ]), axis=0 )
-    return (integer_matrix / np.expand_dims(np.sum(integer_matrix, axis=1), axis=1), alph)
+    return (integer_matrix / np.expand_dims(np.sum(integer_matrix, axis=1), axis=1) if normalized else integer_matrix, alph)
 
 def edit_dist_with_mask(x, y, masks=[]):
     """
