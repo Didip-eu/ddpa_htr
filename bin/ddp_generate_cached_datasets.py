@@ -29,7 +29,7 @@ import torch
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
-from libs import charter_page_ds as pds
+from libs import charter_page_datasets as pds
 from libs import transforms as tsf
 from libs.train_utils import split_set
 

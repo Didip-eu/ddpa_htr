@@ -33,7 +33,9 @@ class DataException( Exception ):
 
 
 """
-Utility classes to manage line-based HTR datasets.
+Utility classes to manage line-based HTR datasets used for training/validation tasks.
+
+For charter-wide inference, see 'ddp_htr_inference.InferenceDataset'.
 
 """
 
@@ -43,11 +45,13 @@ logger = logging.getLogger(__name__)
 
 
 class HTRLineDataset(VisionDataset):
-    """A generic dataset class for HTR training tasks, with minimal functionalities for 
-
-    + accessing ready-made line samples (eg. as generated from PageDataset class)
-    + if the folder contains a TSV, the names of the files to be included are read from it.
-    + if the folder has no TSV, all present files are assumed to be in the dataset
+    """A generic dataset class for HTR training tasks, with minimal functionalities for accessing ready-made 
+    line samples (eg. as generated from PageDataset class) in a location that is either:
+    + a folder path: all files in it are then included in the dataset.
+    + a list of files in a common location → for building any dataset on-the-fly.
+    + a TSV file: its parent folder is assumed to contain the sample files; the TSV lists. those files that
+      are to be included in the dataset.
+    The first two options allow serializing the dataset into a TSV, for later reuse.
 
     The class loads and manipulates line samples, where each sample is a dictionary with
     { line_img, polygon mask, target }
@@ -69,6 +73,7 @@ class HTRLineDataset(VisionDataset):
                 from_line_tsv_file: str='',
                 from_work_folder: str='dataset',
                 from_line_files: list[Path]=[],
+                to_tsv_file: str='',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
                 expansion_masks = False,
@@ -102,14 +107,8 @@ class HTRLineDataset(VisionDataset):
         """
 
         data = []
-
         from_line_files = list( from_line_files ) # if passed as Path.glob()
 
-        if from_line_files:
-            dataset_dirs = set( [ img.parent for img in from_line_files ] )
-            if len(dataset_dirs) > 1:
-                raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
-            self.work_folder_path = 
         if from_line_tsv_file:
             tsv_path = Path( from_line_tsv_file )
             if tsv_path.exists():
@@ -120,12 +119,18 @@ class HTRLineDataset(VisionDataset):
                 #logger.debug("height: {} type={}".format( data[0]['height'], type(data[0]['height'])))
             else:
                 raise FileNotFoundError(f'File {tsv_path} does not exist!')
-
-        elif from_work_folder:
-            self.work_folder_path = Path(from_work_folder)
-            logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
-            self.data = self.load_line_items_from_dir( self.work_folder_path, channel_suffix )
-            self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(f"charters_ds_{ss}.tsv")) )
+        else:
+            if from_line_files:
+                dataset_dirs = set( [ img.parent for img in from_line_files ] )
+                if len(dataset_dirs) > 1:
+                    raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
+                self.work_folder_path = list(dataset_dirs)[0]
+            elif from_work_folder:
+                self.work_folder_path = Path(from_work_folder)
+                logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
+                self.data = self.load_line_items_from_dir( self.work_folder_path, channel_suffix )
+            if to_tsv_file:
+                self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(to_tsv_file)) )
 
         if not self.data:
             raise DataException("No data found. from_tsv_file={}, from_work_folder={}".format(from_tsv_file, from_work_folder))
@@ -290,54 +295,6 @@ class HTRLineDataset(VisionDataset):
                     of.write('\t{}'.format( sample['img_channel'].name ))
                 of.write('\n')
                                             
-    @staticmethod
-    def dataset_stats( samples: list[dict] ) -> str:
-        """Compute basic stats about sample sets.
-
-        + avg, median, min, max on image heights and widths
-        + avg, median, min, max on transcriptions
-
-        Args:
-            samples (list[dict]): a list of samples.
-
-        Returns:
-            str: a string.
-        """
-        heights = np.array([ s['height'] for s in samples  ], dtype=int)
-        widths = np.array([ s['width'] for s in samples  ], dtype=int)
-        gt_lengths = np.array([ len(s['transcription']) for s in samples  ], dtype=int)
-
-        height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
-        width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
-        gt_length_stats = [int(s) for s in (np.mean( gt_lengths ), np.median(gt_lengths), np.min(gt_lengths), np.max(gt_lengths))]
-
-        stat_list = ('Mean', 'Median', 'Min', 'Max')
-        row_format = "{:>10}" * (len(stat_list) + 1)
-        return '\n'.join([
-            row_format.format("", *stat_list),
-            row_format.format("Img height", *height_stats),
-            row_format.format("Img width", *width_stats),
-            row_format.format("GT length", *gt_length_stats),
-        ])
-
-
-    def _generate_readme( self, filename: str, params: dict )->None:
-        """Create a metadata file in the work directory.
-
-        Args:
-            filename (str): a filepath.
-            params (dict): dictionary of parameters passed to the dataset task builder.
-
-        Returns:
-            None
-        """
-        filepath = Path(self.work_folder_path, filename )
-        
-        with open( filepath, "w") as of:
-            print('Task was built with the following options:\n\n\t+ ' + 
-                  '\n+ '.join( [ f"{k}={v}" for (k,v) in params.items() ] ),
-                  file=of)
-            print( repr(self), file=of)
 
 
     def __getitem__(self, index) -> Dict[str, Union[Tensor, int, str]]:
@@ -430,6 +387,37 @@ class HTRLineDataset(VisionDataset):
                 f"\n{summary}"
                 "\n________________________________\n")
 
+
+
+    @staticmethod
+    def dataset_stats( samples: list[dict] ) -> str:
+        """Compute basic stats about sample sets.
+
+        + avg, median, min, max on image heights and widths
+        + avg, median, min, max on transcriptions
+
+        Args:
+            samples (list[dict]): a list of samples.
+
+        Returns:
+            str: a string.
+        """
+        heights = np.array([ s['height'] for s in samples  ], dtype=int)
+        widths = np.array([ s['width'] for s in samples  ], dtype=int)
+        gt_lengths = np.array([ len(s['transcription']) for s in samples  ], dtype=int)
+
+        height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
+        width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
+        gt_length_stats = [int(s) for s in (np.mean( gt_lengths ), np.median(gt_lengths), np.min(gt_lengths), np.max(gt_lengths))]
+
+        stat_list = ('Mean', 'Median', 'Min', 'Max')
+        row_format = "{:>10}" * (len(stat_list) + 1)
+        return '\n'.join([
+            row_format.format("", *stat_list),
+            row_format.format("Img height", *height_stats),
+            row_format.format("Img width", *width_stats),
+            row_format.format("GT length", *gt_length_stats),
+        ])
 
 
 
