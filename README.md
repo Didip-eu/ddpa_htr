@@ -9,9 +9,8 @@ Prototype of a Kraken/VGSL-based, HTR app. The current draft contains:
 
 TODO: 
 
-+ HTR output keeps line coordinates
-+ online retrieval of charters images
-+ decoding options
++ decoding options?
++ integrate PyLemmatizer in the training/inference scripts
 + proper testing (the existing testing modules are obsoletes)
 + ...
 
@@ -44,96 +43,127 @@ unzip MonasteriumTeklia_htr_precompiled.zip
 ## How to use
 
 
-### Training
+### 1. Precompiling the dataset pages
 
-#### Precompiling the dataset pages
+The `libs/charter_htr_datasets.py` module defines two classes
 
-The `libs/charters_htr.py` module provides generic functionalities for handling charters datasets, including downloading/compiling a few specific datasets into line samples, on-disk and in-memory. 
-For instance, the following Python call compiles line samples from an existing directory containing page images and their meta-data:
++ `PageDataset` handles data at the page level, for 
+   - downloading specific HTR datasets
+   - compiling and augmenting regions out of pages (images + XML or JSON metadata)
+   - extracting and serializing line samples 
++ `HTRLineDataset` uses the resulting line samples for training, with options for masking and line-wide transforms
 
+#### 1.1. Obtaining lines out of pages and regions: the `PageDataset` class
 
-```python
-sys.path.append('.')
-from libs import charters_htr, maskutils as msk
-charters_htr.ChartersDataset(from_page_dir=f'{os.environ["HOME"]}/tmp/data/Monasterium/MonasteriumTekliaGTDataset', work_folder='./data/MonasteriumTeklia', channel_func=msk.bbox_blurry_channel)
+For the sake of clarity, we illustrate the workflow by skipping the downloading stage and assume that the relative location `dataset/page_ds` already contains charter images and their PageXML metadata:
+
+```
+1976 dataset/page_ds/NA-CG-L_14300811_206_r.jpg
+  40 dataset/page_ds/NA-CG-L_14300811_206_r.xml
+1604 dataset/page_ds/NA-CG-L_14310725_216_r.jpg
+  16 dataset/page_ds/NA-CG-L_14310725_216_r.xml
+  ...
 ```
 
-The resulting work folder (it is created if it does not exist) stores 
+We can compile lines out of an explicit list of charter image files through the following steps:
 
-+ the line images  (`*.png`)
-+ the transcription ground truth files (`*.gt.txt`)
-+ binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice
-+ in this particular case, for each line image,  an extra flat, gray channel that is to be concatenated to the image tensor at loading time
-+ a TSV file `charters_ds_train.tsv` that lists all samples in the training subset, with 70% of the total number of samples, as shown below:
+1. Extract text regions:
+   
+   ```
+   ds=PageDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
+   2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
+   100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
+   2025-11-16 11:49:58,963 - __init__:
+                   Root path:	data
+                   Archive path:	data/-
+                   Archive root folder:	data/-
+                   Page_work folder:	dataset/page_ds
+                   Data points:	5
+   ```
+   
+   Note that the number of data points (i.e. 5 regions) typically exceeds the number of charter images (4 in our example). At this point, the **page work folder** (in addition the pre-existing charter-wide data) contains one image crop and one JSON label file for each region:
+   
+   ```
+     140 dataset/page_ds/NA-ACK_14611216_01686_r-r1.json
+   19816 dataset/page_ds/NA-ACK_14611216_01686_r-r1.png
+       4 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.json
+     380 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.png
+     120 dataset/page_ds/NA_ACK_338_13500216_r-r1.json
+    7064 dataset/page_ds/NA_ACK_338_13500216_r-r1.png
+     120 dataset/page_ds/NA_ACK_339_13500216_r-r1.json
+    6324 dataset/page_ds/NA_ACK_339_13500216_r-r1.png
+      80 dataset/page_ds/NA-CG-L_14330730_216_r-r1.json
+    5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
+   
+   ```
+   
+2. Serialize the lines:
+   
+   ```
+   ds.dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+   100%|===================================================================| 5/5 [00:15<00:00,  3.05s/it]
+   ```
 
-```tsv
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.png     Üllein Müllner von Gemünd       133     770     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l1.channel.npy.gz
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.png     Els Witbelein sein Swester      132     733     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l2.channel.npy.gz
-Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.png     der Öheim von Gemünd    134     681     Rst_Nbg-Briefbücher-Nr_2_0003_left-r1l3.channel.npy.gz
-...
+   The resulting **line work folder** stores:
+
+   + the line images  (`*.png`)
+   + the transcription ground truth files (`*.gt.txt`)
+   + binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice.
+
+   ```
+  4 dataset/htr_line_dataset/445m-r4-0.bool.npy.gz
+  4 dataset/htr_line_dataset/445m-r4-0.gt.txt
+304 dataset/htr_line_dataset/445m-r4-0.png
+  4 dataset/htr_line_dataset/445m-r4-10.bool.npy.gz
+  4 dataset/htr_line_dataset/445m-r4-10.gt.txt
+152 dataset/htr_line_dataset/445m-r4-10.png
+  ...
+  ```
+
+
+Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
+ 
+```
+PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
+100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
+2025-11-16 12:14:29,804 - __init__:
+                Root path:	data
+                Archive path:	data/-
+                Archive root folder:	data/-
+                Page_work folder:	dataset/page_ds
+                Data points:	3
+
+100%|======================================================================| 3/3 [00:02<00:00,  1.16it/s]
+2025-11-16 12:14:32,406 - dump_lines: Compiled 74 lines
+
 ```
 
-At this point, all sample data have been generated. To obtain the validation and test sets, we simply read from the existing work folder. The  command generates 3 TSV files for the training, validation, and test subsets, respectively:
-
-```python
-myTrainingSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset_ratios={.8, .1, .1})
-```
-The `line_padding_style` keyword specifies how the polygon mask should be used at loading time (other options: `median`, `zero`, or `none`).
-By default, the constructor above returns a training set object, but any particular live subset can be loaded:
-```python
-myTestSet=charters_htr.ChartersDataset(from_work_folder='/home/nicolas/ddpa_htr/data/MonasteriumTeklia', line_padding_style='noise', subset='test')
-```
-
-For further options in  `libs/charters_htr.py` module, look at the embedded documentation or at the mother repo [DiDip_handwriting_datasets](https://github.com/Didip-eu/didip_handwriting_datasets).
+The script `bin/ddp_generate_htr_line_dataset.py` shows how to compile lines out of Tormentor-augmented regions.
 
 
-#### Training from compiled line samples
+#### 1.2. Packing up line samples for training: the `HTRLineDataset` class
 
-Because the preprocessing step is costly and in order to avoid unwanted complexity into the training logic, the 
-current training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as well as 3 TSV files, one for each of the training, validation, and test subsets.
-The training script only uses `libs/charters_htr.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.ds`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the TSV list has an extra field for a flat channel file (`*.npy.gz`), it is automatically concatenated to the tensor at loading time.
+Use the `HTRLineDataset`class.
 
-For a charter dataset to play with, look at the [Data section](#Data) above.
+![](doc/_static/8257576.png)
 
 
-#### Syntax
+### 2. Training from compiled line samples (DEPRECATED: 11/2025)
 
-```bash	
-python3 ./bin/ddp_htr_train.py [ -<option> ...]
-```
+The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above.
+<!--, as well as 3 TSV files, one for each of the training, validation, and test subsets.-->
+The training script only uses `libs/data.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.tsv`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the TSV list has an extra field for a flat channel file (`*.npy.gz`), it is automatically concatenated to the tensor at loading time.
 
-where optional flags are one or more of the following:
+<!--For a charter dataset to play with, look at the [Data section](#Data) above.-->
 
-```bash
--appname=<class 'str'>  Default 'htr_train' . Passed 'htr_train'
--batch_size=<class 'int'>  Default 2 . Passed 2
--img_height=<class 'int'>  Default 128 . Passed 128
--img_width=<class 'int'>  Default 2048 . Passed 2048
--max_epoch=<class 'int'>  Default 200 . Passed 200
--dataset_path_train=<class 'str'> TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions. Default 'data/current_working_set/charters_ds_train.tsv' . Passed 'data/current_working_set/charters_ds_train.tsv'
--dataset_path_validate=<class 'str'> TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions. Default 'data/current_working_set/charters_ds_validate.tsv' . Passed 'data/current_working_set/charters_ds_validate.tsv'
--dataset_path_test=<class 'str'> TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions. Default 'data/current_working_set/charters_ds_test.tsv' . Passed 'data/current_working_set/charters_ds_test.tsv'
--ignored_chars=<class 'list'>  Default [] . Passed []
--learning_rate=<class 'float'>  Default 0.001 . Passed 0.001
--dry_run=<class 'bool'> Iterate over the batches once, but do not run the network. Default False . Passed False
--validation_freq=<class 'int'>  Default 1 . Passed 1
--save_freq=<class 'int'>  Default 1 . Passed 1
--resume_fname=<class 'str'> Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option. Default 'model_save.mlmodel' . Passed 'model_save.mlmodel'
--reset_epochs=<class 'bool'> Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset. Default False . Passed False
--mode=<class 'tuple'>  Default ('train', 'validate', 'test') . Passed 'train'
--auxhead=<class 'bool'> ([BROKEN]Combine output with CTC shortcut Default False . Passed False
--help=<class 'bool'> Print help and exit. Default False . Passed False
--bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False . Passed False
--h=<class 'bool'> Print help and exit Default False . Passed True
--v=<class 'int'> Set verbosity level. Default 1 . Passed 1
-```
 
 #### Example:
 
 ```bash	
 python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1
 ```
-### Inference
+### 3. Inference
 
 ```bash
 python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
@@ -141,23 +171,6 @@ python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
 
 where optional flags are one or more of the following:
 
-```bash
--appname=<class 'str'>  Default 'ddpa_htr_inference' . Passed 'ddpa_htr_inference'
--model_path=<class 'str'>  Default '/tmp/model_monasterium-2024-10-28.mlmodel' . Passed '/tmp/model_monasterium-2024-10-28.mlmodel'
--img_paths=<class 'set'>  Default set() . Passed set()
--charter_dirs=<class 'set'>  Default set() . Passed set()
--segmentation_dir=<class 'str'> Alternate location to search for the image segmentation data files (for testing). Default '' . Passed ''
--segmentation_file_suffix=<class 'str'>  Default 'lines.pred.json' . Passed 'lines.pred.json'
--output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default '' . Passed ''
--htr_file_suffix=<class 'str'>  Default 'htr.pred' . Passed 'htr.pred'
--output_format=<class 'tuple'> Output format: 'stdout' for sending decoded lines on the standard output; 'json' and 'tsv' create JSON and TSV files, respectively. Default ('json', 'stdout', 'tsv') . Passed 'json'
--output_data=<class 'tuple'> By default, the application yields character predictions; 'logits' have it returns logits instead. Default ('pred', 'logits', 'all') . Passed 'pred'
--padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none') . Passed 'median'
--help=<class 'bool'> Print help and exit. Default False . Passed False
--bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False . Passed False
--h=<class 'bool'> Print help and exit Default False . Passed True
--v=<class 'int'> Set verbosity level. Default 1 . Passed 1
-```
 
 #### Example:
 
@@ -166,7 +179,7 @@ export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_
 ```
 
 
-### Additional scripts and modules
+### 4. Additional scripts and modules
 
 
 The following scripts are one-offs, that are not meant for public consumption:
@@ -174,5 +187,5 @@ The following scripts are one-offs, that are not meant for public consumption:
 + `bin/ddp_htr_train_with_abbrev.py`: (for experiments) training script that uses abbreviation masks on the GT transcriptions, as well as a custom edit distance function, in order to evaluate the abbreviations contribution to the CER.
 + `bin/ddp_htr_viewer.py`: visualizing confidence scores for a given HTR (color + transcription overlay)
 + some of the local modules are not part of the core HTR dependencies. For example:
-  * pre-processing/compilation step: `seglib.py`, `download__utils.py`
+  * pre-processing/compilation step: `seglib.py`, `download_utils.py`
   * for convenience only: `maskutils.py`, `visuals.py`
