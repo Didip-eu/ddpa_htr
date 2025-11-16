@@ -672,6 +672,8 @@ class HTRLineDataset(VisionDataset):
                 from_line_tsv_file: str='',
                 from_work_folder: str='dataset',
                 from_line_files: list[Path]=[],
+                img_suffix: str='.png',
+                gt_suffix: str='.gt.txt',
                 to_tsv_file: str='',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
@@ -690,6 +692,8 @@ class HTRLineDataset(VisionDataset):
                 given directory.
             from_line_files (list[Path]): if set, supersedes previous options; all files must be contained
                 in the same folder.
+            img_suffix (str): suffix of line image (default: '.png').
+            gt_suffix (str): suffix of gt transcription file (default: '.gt.txt').
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
@@ -708,6 +712,10 @@ class HTRLineDataset(VisionDataset):
         data = []
         from_line_files = list( from_line_files ) # if passed as Path.glob()
 
+        self.img_suffix = img_suffix
+        self.gt_suffix = gt_suffix
+        self.channel_suffix = channel_suffix
+
         if from_line_tsv_file:
             tsv_path = Path( from_line_tsv_file )
             if tsv_path.exists():
@@ -724,15 +732,16 @@ class HTRLineDataset(VisionDataset):
                 if len(dataset_dirs) > 1:
                     raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
                 self.work_folder_path = list(dataset_dirs)[0]
+                self.data = self.load_line_items_from_files( from_line_files )
             elif from_work_folder:
                 self.work_folder_path = Path(from_work_folder)
                 logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
-                self.data = self.load_line_items_from_dir( self.work_folder_path, channel_suffix )
+                self.data = self.load_line_items_from_dir( self.work_folder_path )
             if to_tsv_file:
                 self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(to_tsv_file)) )
 
         if not self.data:
-            raise DataException("No data found. from_tsv_file={}, from_work_folder={}".format(from_tsv_file, from_work_folder))
+            raise DataException("No data found. from_line_tsv_file={}, from_work_folder={}, from_line_files={}".format(from_line_tsv_file, from_work_folder, from_line_files))
 
         trf = v2.Compose( [ v2.ToDtype(torch.float32, scale=True) ])  
         if transform is not None:
@@ -753,31 +762,42 @@ class HTRLineDataset(VisionDataset):
         }
 
 
-    @staticmethod
-    def load_line_items_from_dir( work_folder_path: Union[Path,str], channel_suffix:str='' ) -> list[dict]:
+    def load_line_items_from_dir(self, work_folder_path: Union[Path,str] ) -> list[dict]:
         """Construct a list of samples from a directory that has been populated with
         line images and line transcriptions
 
         Args:
             work_folder_path (Union[Path,str]): a folder containing images (`*.png`), transcription 
                 files (`*.gt.txt`) and optional extra channel.
-            channel_suffix (str): default suffix for the extra channel ('*.channel.npy.gz')
+
+        Returns:
+            list[dict]: a list of samples.
+        """
+        if type(work_folder_path) is str:
+            work_folder_path = Path( work_folder_path )
+        file_paths = list( work_folder_path.glob('*{}'.format( self.img_suffix )))
+        return self.load_line_items_from_files( file_paths )
+
+                
+    def load_line_items_from_files(self, file_paths:list[Path] ) -> list[dict]:
+        """Construct a list of samples from a list of line images.
+
+        Args:
+            file_paths (list[Path]): images paths (typically `*.png`)
 
         Returns:
             list[dict]: a list of samples.
         """
         samples = []
-        if type(work_folder_path) is str:
-            work_folder_path = Path( work_folder_path )
-        for img_file_path in work_folder_path.glob('*.png'):
+        for img_file_path in file_paths:
             sample=dict()
             logger.debug(img_file_path)            
-            gt_file_name = img_file_path.with_suffix('.gt.txt')
+            gt_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.gt_suffix, str(img_file_path)))
             sample['img']=img_file_path
             with Image.open( img_file_path, 'r') as img:
                 sample['width'], sample['height'] = img.size
             
-            with open(gt_file_name, 'r') as gt_if:
+            with open(gt_file_path, 'r') as gt_if:
                 transcription=gt_if.read().rstrip()
                 expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', transcription)
                 if expansion_masks_match is not None:
@@ -787,13 +807,13 @@ class HTRLineDataset(VisionDataset):
                     sample['transcription']=transcription
 
             # optional mask
-            channel_file_path = img_file_path.with_suffix( channel_suffix )
+            channel_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.channel_suffix, str(img_file_path)))
             if channel_file_path.exists():
                 sample['img_channel']=channel_file_path
 
             samples.append( sample )
 
-        logger.debug(f"Loaded {len(samples)} samples from {work_folder_path}")
+        logger.debug("Loaded {} samples from {} image files.".format( len(samples), len(file_paths)))
         return samples
                 
 

@@ -31,6 +31,7 @@ root = Path(__file__).parents[1]
 sys.path.append( str(root) )
 
 from libs import metrics, transforms as tsf, list_utils as lu, visuals
+from libs.train_utils import split_set, duration_estimate
 from model_htr import HTR_Model
 from kraken import vgsl
 from libs.charters_htr import ChartersDataset
@@ -49,9 +50,10 @@ p = {
     "img_height": 128,
     "img_width": 2048,
     "max_epoch": 200,
-    "dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
-    "dataset_path_validate": [str(root.joinpath('data','current_working_set', 'charters_ds_validate.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
-    "dataset_path_test": [str(root.joinpath('data','current_working_set', 'charters_ds_test.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
+    "img_paths": set([]),
+    "img_file_suffix": '.png',
+    "gt_file_suffix": '.gt.txt',
+    #"dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "learning_rate": 1e-3,
@@ -64,14 +66,6 @@ p = {
     "confusion_matrix": 0,
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
 }
-
-
-def duration_estimate( iterations_past, iterations_total, current_duration ):
-    time_left = time.gmtime((iterations_total - iterations_past) * current_duration)
-    return ''.join([
-     '{} d '.format( time_left.tm_mday-1 ) if time_left.tm_mday > 0 else '',
-     '{} h '.format( time_left.tm_hour ) if time_left.tm_hour > 0 else '',
-     '{} mn'.format( time_left.tm_min ) ])
 
 
 if __name__ == "__main__":
@@ -101,29 +95,35 @@ if __name__ == "__main__":
 
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
    
-    if args.dataset_path_train == '' or args.dataset_path_validate == '':
-        sys.exit()
-
     #-------------- Dataset ---------------
 
+    # to be deprecated
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
     # name prefixes for img and target are read from the provided TSV file,
     # that is in the same folder as the samples themselves
-    ds_train = ChartersDataset(
-        from_line_tsv_file=args.dataset_path_train,
-        line_padding_style='median',
-        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-        target_transform=filter_transcription,)
 
+    imgs_train, lbls_train, imgs_val, lbl_val = [], [], [], []
+    imgs = list( args.img_paths )
+    if not len(list(args.img_paths)):
+        logger.warning("Could not find valid training samples.")
+        sys.exit()
+    lbls =  [ re.sub(r'{}$'.format(args.img_file_suffix), args.gt_file_suffix, str(img_path)) for img_path in imgs ]
+    # split sets
+    imgs_train, imgs_test, lbls_train, lbls_test = split_set( imgs, lbls )
+    imgs_train, imgs_val, lbls_train, lbls_val = split_set( imgs_train, lbls_train )
+
+
+    ds_train = HTRLineDataset( 
+            from_line_files=imgs_train, 
+            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+            target_transform=filter_transcription,)
     logger.debug( str(ds_train) )
 
-    ds_val = ChartersDataset(
-        from_line_tsv_file=args.dataset_path_validate,
-        line_padding_style='median',
-        transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-        target_transform=filter_transcription,)
-
+    ds_val = HTRLineDataset( 
+            from_line_files=imgs_val, 
+            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+            target_transform=filter_transcription,)
     logger.debug( str(ds_val) )
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
