@@ -8,6 +8,7 @@ import time
 import logging
 import random
 import itertools
+import re
 from typing import NamedTuple
 
 # 3rd-party
@@ -34,12 +35,12 @@ from libs import metrics, transforms as tsf, list_utils as lu, visuals
 from libs.train_utils import split_set, duration_estimate
 from model_htr import HTR_Model
 from kraken import vgsl
-from libs.charters_htr import ChartersDataset
+from libs.charter_htr_datasets import HTRLineDataset
 import character_classes as cc
 
 # local logger
 # root logger
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -53,13 +54,15 @@ p = {
     "img_paths": set([]),
     "img_file_suffix": '.png',
     "gt_file_suffix": '.gt.txt',
+    "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
     #"dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "learning_rate": 1e-3,
-    "dry_run": [False, "Iterate over the batches once, but do not run the network."],
+    "dry_run": [0, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."],
     "validation_freq": 1,
     "save_freq": 1,
+    "device": [('cpu','cuda'), "Computing device"],
     "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
     "reset_epochs": [ False, "Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
     "mode": ('train', 'test'),
@@ -72,6 +75,8 @@ if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
     logger.debug("CLI arguments: {}".format( args ))
+    if args.dry_run:
+        import matplotlib.pyplot as plt
 
     #------------- Model ------------
     model_spec_rnn_top = vgsl.build_spec_from_chunks(
@@ -116,18 +121,22 @@ if __name__ == "__main__":
 
     ds_train = HTRLineDataset( 
             from_line_files=imgs_train, 
+            padding_style=args.padding_style,
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
             target_transform=filter_transcription,)
     logger.debug( str(ds_train) )
 
+
     ds_val = HTRLineDataset( 
-            from_line_files=imgs_val, 
+            from_line_files=imgs_val,
+            padding_style=args.padding_style,
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
             target_transform=filter_transcription,)
     logger.debug( str(ds_val) )
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     val_loader = DataLoader( ds_val, batch_size=args.batch_size)
+
 
     # ------------ Training features ----------
 
@@ -196,7 +205,7 @@ if __name__ == "__main__":
         model.net.train()
         return (mean_cer, mean_wer)
 
-    def train_epoch(epoch ):
+    def train_epoch(epoch, dry_run=False ):
         """ Training step.
 
         :param epoch: epoch index.
@@ -210,15 +219,22 @@ if __name__ == "__main__":
             batch = next( batches )
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             labels, target_lengths = model.alphabet.encode_batch( transcriptions, padded=False ) 
-            img, labels = img.cuda(), labels.cuda()
+            if args.device == 'cuda':
+                img_nwhc, labels = img.cuda(), labels.cuda()
 
 
-            if args.dry_run:
+            if args.dry_run > 0 and args.device=='cpu':
+                plt.close()
+                fig, ax = plt.subplots(len(batch), 1)
+                for i, label in zip(range(len(batch)), labels):
+                    logger.debug("{},{}".format( type(img[i]), transcriptions[i]))
+                    ax[i].imshow( img[i].permute(1,2,0))
+                #plt.show()
                 continue
 
             optimizer.zero_grad()
 
-            outputs_nchw, output_lengths_n = model.net( img, lengths )
+            outputs_nchw, output_lengths_n = model.net( img_nwhc, lengths )
             logger.debug(f"Output_nchw shape: {outputs_nchw.shape} Lengths: {output_lengths_n}")
             outputs_ncw = outputs_nchw.squeeze(2)
             logger.debug(f"Output_ncw shape: {outputs_ncw.shape}")
@@ -234,6 +250,7 @@ if __name__ == "__main__":
 
             optimizer.step()
 
+            # this should in the top-level train loop
             #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
             if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
 
@@ -256,8 +273,10 @@ if __name__ == "__main__":
         if epoch_start > 0: 
             logger.info(f"Resuming training for epoch {epoch_start}")
 
-        for epoch in range(epoch_start, 0 if args.dry_run else args.max_epoch ):
-            train_epoch( epoch )
+        for epoch in range(epoch_start, args.max_epoch ):
+            train_epoch( epoch, args.dry_run )
+            if args.dry_run:
+                continue
 
             if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
                 model.save( args.resume_fname )

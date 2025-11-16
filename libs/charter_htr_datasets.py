@@ -33,6 +33,7 @@ import torchvision.transforms as transforms
 # local
 from . import download_utils as du
 from . import seglib
+from . import transforms as tsf
 #from . import alphabet, character_classes.py
 
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
@@ -680,7 +681,7 @@ class HTRLineDataset(VisionDataset):
                 expansion_masks = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
-                line_padding_style: str = None,
+                padding_style: str = 'median',
                 ) -> None:
         """Initialize a dataset instance.
 
@@ -703,14 +704,14 @@ class HTRLineDataset(VisionDataset):
                 and generates an additional channel in the sample. Default: None.
             channel_suffix (str): when loading items from a work folder, which suffix
                 to read for the channel file. Default: '' (=ignore channel file).
-            line_padding_style (str): When extracting line bounding boxes, padding to be 
+            padding_style (str): When extracting line bounding boxes, padding to be 
                 used around the polygon: 'median'=median value of the polygon; 'noise'=random;
                 'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
                 Default is None.
         """
 
         data = []
-        from_line_files = list( from_line_files ) # if passed as Path.glob()
+        from_line_files = [ Path(f) for f in from_line_files ] 
 
         self.img_suffix = img_suffix
         self.gt_suffix = gt_suffix
@@ -748,7 +749,7 @@ class HTRLineDataset(VisionDataset):
             trf = v2.Compose( [ trf, transform ] ) 
         super().__init__(root=self.work_folder_path, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
-        if line_padding_style and line_padding_style not in ['noise', 'zero', 'median', 'none']:
+        if padding_style and padding_style not in ['noise', 'zero', 'median', 'none']:
             raise ValueError(f"Incorrect padding style: '{line_padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
 
         # bbox or polygons and/or masks
@@ -757,7 +758,7 @@ class HTRLineDataset(VisionDataset):
                 'from_work_folder': from_work_folder,
                 'channel_func': channel_func,
                 'channel_suffix': channel_suffix,
-                'line_padding_style': line_padding_style,
+                'padding_style': padding_style,
                 'expansion_masks': expansion_masks,
         }
 
@@ -805,6 +806,10 @@ class HTRLineDataset(VisionDataset):
                     sample['expansion_masks']=eval(expansion_masks_match.group(2))
                 else:
                     sample['transcription']=transcription
+            # binary mask
+            binary_mask_path = Path(  re.sub(r'{}$'.format( self.img_suffix ), '.bool.npy.gz', str(img_file_path)))
+            assert binary_mask_path.exists()
+            sample['binary_mask']=binary_mask_path
 
             # optional mask
             channel_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.channel_suffix, str(img_file_path)))
@@ -936,16 +941,16 @@ class HTRLineDataset(VisionDataset):
 
         img_array_hwc = ski.io.imread( img_path ) # img path --> img ndarray
 
-        if self.config['line_padding_style'] is not None:
+        if self.config['padding_style'] is not None:
             assert 'binary_mask' in sample and sample['binary_mask'].exists()
             with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
                 binary_mask_hw = np.load( mask_in )
                 padding_func = lambda x, m, channel_dim=2: x
-                if self.config['line_padding_style']=='noise':
+                if self.config['padding_style']=='noise':
                     padding_func = tsf.bbox_noise_pad
-                elif self.config['line_padding_style']=='zero':
+                elif self.config['padding_style']=='zero':
                     padding_func = tsf.bbox_zero_pad
-                elif self.config['line_padding_style']=='median':
+                elif self.config['padding_style']=='median':
                     padding_func = tsf.bbox_median_pad
                 img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
                 if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
