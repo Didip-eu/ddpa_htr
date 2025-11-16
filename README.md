@@ -110,15 +110,15 @@ We can compile lines out of an explicit list of charter image files through the 
    + the transcription ground truth files (`*.gt.txt`)
    + binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice.
 
+   ``` 
+     4 dataset/htr_line_dataset/445m-r4-0.bool.npy.gz
+     4 dataset/htr_line_dataset/445m-r4-0.gt.txt
+   304 dataset/htr_line_dataset/445m-r4-0.png
+     4 dataset/htr_line_dataset/445m-r4-10.bool.npy.gz
+     4 dataset/htr_line_dataset/445m-r4-10.gt.txt
+   152 dataset/htr_line_dataset/445m-r4-10.png
+   ... 
    ```
-  4 dataset/htr_line_dataset/445m-r4-0.bool.npy.gz
-  4 dataset/htr_line_dataset/445m-r4-0.gt.txt
-304 dataset/htr_line_dataset/445m-r4-0.png
-  4 dataset/htr_line_dataset/445m-r4-10.bool.npy.gz
-  4 dataset/htr_line_dataset/445m-r4-10.gt.txt
-152 dataset/htr_line_dataset/445m-r4-10.png
-  ...
-  ```
 
 
 Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
@@ -136,7 +136,6 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 
 100%|======================================================================| 3/3 [00:02<00:00,  1.16it/s]
 2025-11-16 12:14:32,406 - dump_lines: Compiled 74 lines
-
 ```
 
 The script `bin/ddp_generate_htr_line_dataset.py` shows how to compile lines out of Tormentor-augmented regions.
