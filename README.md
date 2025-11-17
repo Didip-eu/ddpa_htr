@@ -100,7 +100,7 @@ We can compile lines out of an explicit list of charter image files through the 
 2. Serialize the lines:
    
    ```python
-   ds.dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+   ds.dump_lines('dataset/htr_line_ds', overwrite_existing=True)
    100%|===================================================================| 5/5 [00:15<00:00,  3.05s/it]
    ```
 
@@ -111,12 +111,12 @@ We can compile lines out of an explicit list of charter image files through the 
    + binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice.
 
    ```bash
-     4 dataset/htr_line_dataset/445m-r4-0.bool.npy.gz
-     4 dataset/htr_line_dataset/445m-r4-0.gt.txt
-   304 dataset/htr_line_dataset/445m-r4-0.png
-     4 dataset/htr_line_dataset/445m-r4-10.bool.npy.gz
-     4 dataset/htr_line_dataset/445m-r4-10.gt.txt
-   152 dataset/htr_line_dataset/445m-r4-10.png
+     4 dataset/htr_line_ds/445m-r4-0.bool.npy.gz
+     4 dataset/htr_line_ds/445m-r4-0.gt.txt
+   304 dataset/htr_line_ds/445m-r4-0.png
+     4 dataset/htr_line_ds/445m-r4-10.bool.npy.gz
+     4 dataset/htr_line_ds/445m-r4-10.gt.txt
+   152 dataset/htr_line_ds/445m-r4-10.png
    ... 
    ```
 
@@ -124,7 +124,7 @@ We can compile lines out of an explicit list of charter image files through the 
 Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
  
 ```python
-PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_ds', overwrite_existing=True)
 2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
 100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
 2025-11-16 12:14:29,804 - __init__:
@@ -141,7 +141,7 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 #### 1.2 Compiling lines out of augmented regions
 
 
-The script `bin/generate_htr_line_dataset.py` is an example of how to compile lines out of Tormentor-augmented regions.
+The script `bin/generate_htr_line_ds.py` is an example of how to compile lines out of Tormentor-augmented regions.
 The compilation follows the general pattern shown above, with an extra transformation step that precedes the line compilation:
 
 + Regions are serialized out of the page metadata.
@@ -180,7 +180,7 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 
 ### 2. Train from compiled line samples 
 
-The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. Therefore, it only needs to split the set of lines and initialize  `HTRLineDataset` objects accordingly. There are two main ways to accomplish this:
+The training script assumes that there already exists a directory (eg. `./dataset/htr_line_ds`) that contains all line images and transcriptions, as obtained through the step described above. Therefore, it only needs to split the set of lines and to initialize  `HTRLineDataset` objects accordingly. There are two main ways to accomplish this:
 
 #### 2.1 A list of training/validation line images
 
