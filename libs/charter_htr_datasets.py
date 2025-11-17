@@ -21,6 +21,7 @@ from tqdm import tqdm
 from PIL import Image
 import skimage as ski
 import gzip
+import pandas
 
 import numpy as np
 import torch
@@ -647,10 +648,12 @@ class NurembergLetterbooks(PageDataset):
 class HTRLineDataset(VisionDataset):
     """A generic dataset class for HTR training tasks, with minimal functionalities for accessing ready-made 
     line samples (eg. as generated from PageDataset class) in a location that is either:
+
     + a folder path: all files in it are then included in the dataset.
     + a list of files in a common location → for building any dataset on-the-fly.
-    + a TSV file: its parent folder is assumed to contain the sample files; the TSV lists. those files that
+    + a TSV file: its parent folder is assumed to contain the sample files; the TSV lists those entries that
       are to be included in the dataset.
+
     The first two options allow serializing the dataset into a TSV, for later reuse.
 
     The class loads and manipulates line samples, where each sample is a dictionary with
@@ -662,11 +665,11 @@ class HTRLineDataset(VisionDataset):
     + apply geometrical transformations on polygons (polygons are handled by the PageDataset class;
       at this stage, we know only about pixel masks)
     + augment data at page or region level
-    + construct train, validation and test subsets (it is the responsibility of the training class)
+    + construct train, validation and test subsets (this the the training script's responsibility)
 
     What it could do:
 
-    + take a PageDataset as a source
+    - take a PageDataset as a source
     """
 
     def __init__(self,
@@ -723,7 +726,7 @@ class HTRLineDataset(VisionDataset):
             if tsv_path.exists():
                 self.work_folder_path = tsv_path.parent
                 # paths are assumed to be absolute
-                self.data = self.load_from_tsv( tsv_path, expansion_masks )
+                self._data = self.load_from_tsv( tsv_path, expansion_masks )
                 logger.debug("data={}".format( data[:6]))
                 #logger.debug("height: {} type={}".format( data[0]['height'], type(data[0]['height'])))
             else:
@@ -734,18 +737,18 @@ class HTRLineDataset(VisionDataset):
                 if len(dataset_dirs) > 1:
                     raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
                 self.work_folder_path = list(dataset_dirs)[0]
-                self.data = self.load_line_items_from_files( from_line_files )
+                self._data = self.load_line_items_from_files( from_line_files )
             elif from_work_folder:
                 self.work_folder_path = Path(from_work_folder)
                 logger.info("Building samples from existing images and transcription files in {}".format(self.work_folder_path))
-                self.data = self.load_line_items_from_dir( self.work_folder_path )
+                self._data = self.load_line_items_from_dir( self.work_folder_path )
             if to_tsv_file:
-                self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(to_tsv_file)) )
+                self.dump_data_to_tsv(self._data, Path(self.work_folder_path.joinpath(to_tsv_file)) )
 
-        if not self.data:
+        if not self._data:
             raise DataException("No data found. from_tsv_file={}, from_work_folder={}, from_line_files={}".format(from_tsv_file, from_work_folder, from_line_files))
 
-        trf = v2.Compose( [ v2.ToDtype(torch.float32, scale=True) ])  
+        trf = v2.Compose( [ v2.ToImage(), v2.ToDtype(torch.float32, scale=True) ])  
         if transform is not None:
             trf = v2.Compose( [ trf, transform ] ) 
         super().__init__(root=self.work_folder_path, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
@@ -848,41 +851,27 @@ class HTRLineDataset(VisionDataset):
 
         """
         work_folder_path = file_path.parent
-        samples=[]
-        logger.debug("work_folder_path={}".format(work_folder_path))
-        logger.debug("tsv file={}".format(file_path))
-        with open( file_path, 'r') as infile:
-            # Detection: 
-            # - is the transcription passed as a filepath or as text?
-            first_line = next( infile )[:-1]
-            img_path, file_or_text, height, width = first_line.split('\t')[:4]
-            inline_transcription = False if Path(file_or_text).exists() else True
-            # - Is there a field for an extra channel
-            has_channel = len(first_line.split('\t')) > 4
-            infile.seek(0)
+        sample_df = pandas.read_csv( file_path, sep='\t', header=0)
+        samples = []
+        for row in range( sample_df.shape[0] ):
+            img_file, gt_field, height, width = sample_df.loc[ row ][:4]
+            channel_file = sample_df.loc[ row ][4] if len(sample_df.columns)>4 else None
+            binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
 
-            for tsv_line in infile:
-                fields = tsv_line[:-1].split('\t')
-                img_file, gt_field, height, width = fields[:4]
-                binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
+            expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
+            if expansion_masks_match is not None:
+                gt_field = expansion_masks_match.group(1)
 
-                expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
-                if not inline_transcription:
-                    with open( work_folder_path.joinpath( gt_field ), 'r') as igt:
-                        gt_field = '\n'.join( igt.readlines() )
-                elif expansion_masks_match is not None:
-                    gt_field = expansion_masks_match.group(1)
+            spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
+                    'height': int(height), 'width': int(width) }
+            if channel_file is not None:
+                spl['img_channel']=work_folder_path.joinpath( channel_file )
+            if expansion_masks and expansion_masks_match is not None:
+                spl['expansion_masks']=eval( expansion_masks_match.group(2))
+            if binary_mask_file.exists():
+                spl['binary_mask']=binary_mask_file
 
-                spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
-                        'height': int(height), 'width': int(width) }
-                if has_channel:
-                    spl['img_channel']=work_folder_path.joinpath(fields[4])
-                if expansion_masks and expansion_masks_match is not None:
-                    spl['expansion_masks']=eval( expansion_masks_match.group(2))
-                if binary_mask_file.exists():
-                    spl['binary_mask']=binary_mask_file
-
-                samples.append( spl )
+            samples.append( spl )
                                
         return samples
 
@@ -908,6 +897,8 @@ class HTRLineDataset(VisionDataset):
                       gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'), int(height), int(width)))
             return
         with open( file_path, 'w' ) as of:
+            # header: ImgPath  GT  Height  Width [Channel]
+            of.write('ImgPath\tGT\tHeight\tWidth{}\n'.format( '\tChannel' if 'img_channel' in samples[0] else ''))
             for sample in samples:
                 img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
                 #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
@@ -933,49 +924,51 @@ class HTRLineDataset(VisionDataset):
         Returns:
             dict[str,Union[Tensor,int,str]]: a sample dictionary
         """
-        img_path = self.data[index]['img']
+        img_path = self._data[index]['img']
         
         assert isinstance(img_path, Path) or isinstance(img_path, str)
 
-        sample = self.data[index].copy()
+        sample = self._data[index].copy()
         sample['transcription']=self.target_transform( sample['transcription'] )
 
-        img_array_hwc = ski.io.imread( img_path ) # img path --> img ndarray
+        with Image.open( img_path ) as img:
+            
+            img_array_hwc = np.array( img ) # img path --> img ndarray
 
-        if self.config['padding_style'] is not None:
-            assert 'binary_mask' in sample and sample['binary_mask'].exists()
-            with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
-                binary_mask_hw = np.load( mask_in )
-                padding_func = lambda x, m, channel_dim=2: x
-                if self.config['padding_style']=='noise':
-                    padding_func = tsf.bbox_noise_pad
-                elif self.config['padding_style']=='zero':
-                    padding_func = tsf.bbox_zero_pad
-                elif self.config['padding_style']=='median':
-                    padding_func = tsf.bbox_median_pad
-                img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
-                if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
-                    img_array_hwc=img_array_hwc[:,:,None]
-        del sample['binary_mask']
+            if self.config['padding_style'] is not None:
+                assert 'binary_mask' in sample and sample['binary_mask'].exists()
+                with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
+                    binary_mask_hw = np.load( mask_in )
+                    padding_func = lambda x, m, channel_dim=2: x
+                    if self.config['padding_style']=='noise':
+                        padding_func = tsf.bbox_noise_pad
+                    elif self.config['padding_style']=='zero':
+                        padding_func = tsf.bbox_zero_pad
+                    elif self.config['padding_style']=='median':
+                        padding_func = tsf.bbox_median_pad
+                    img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
+                    if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
+                        img_array_hwc=img_array_hwc[:,:,None]
+            del sample['binary_mask']
 
-        # img ndarray --> tensor
-        sample['img']=v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])(img_array_hwc)
-        logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
+            # img ndarray --> tensor
+            sample['img']=img_array_hwc 
+            logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
+            sample = self.transform( sample )
 
-        if 'img_channel' in self.data[index]:
-            channel_t = None
-            if self.data[index]['img_channel'].suffix == '.gz':
-                with gzip.GzipFile(self.data[index]['img_channel'], 'r') as channel_in:
-                    channel_t = torch.from_numpy( np.load( channel_in ) )/255
-            else:
-                channel_t = np.load(self.data[index]['img_channel'])/255
-            sample['img']=torch.cat( [sample['img'], channel_t[None,:,:]] )
+            if 'img_channel' in self._data[index]:
+                channel_t = None
+                if self._data[index]['img_channel'].suffix == '.gz':
+                    with gzip.GzipFile(self._data[index]['img_channel'], 'r') as channel_in:
+                        channel_t = torch.from_numpy( np.load( channel_in ) )/255
+                else:
+                    channel_t = np.load(self._data[index]['img_channel'])/255
+                sample['img']=torch.cat( [sample['img'], channel_t[None,:,:]] )
 
-        sample = self.transform( sample )
-        sample['id'] = Path(img_path).name
+            sample['id'] = Path(img_path).name
 
-        logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
-        return sample
+            logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
+            return sample
 
     def __getitems__(self, indexes: list ) -> list[dict]:
         """To help with batching.
@@ -995,16 +988,16 @@ class HTRLineDataset(VisionDataset):
         Returns:
             int: number of data points.
         """
-        return len( self.data )
+        return len( self._data )
 
 
     def __repr__(self) -> str:
 
         summary = '\n'.join([
                     f"Work folder:\t{self.work_folder_path}",
-                    f"Data points:\t{len(self.data)}",
+                    f"Data points:\t{len(self._data)}",
                     "Stats:",
-                    f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
+                    f"{self.dataset_stats(self._data)}" if self._data else 'No data',])
         if self.config['from_tsv_file']:
              summary += "\nBuilt from TSV input:\t{}".format( self.config['from_tsv_file'] )
         

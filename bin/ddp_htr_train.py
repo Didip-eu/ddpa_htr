@@ -51,11 +51,13 @@ p = {
     "img_height": 128,
     "img_width": 2048,
     "max_epoch": 200,
-    "img_paths": set([]),
+    "img_paths": [set([]), "Line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
+    "dataset_path": ['', "Directory with line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
     "img_file_suffix": '.png',
     "gt_file_suffix": '.gt.txt',
+    "from_tsv": ['', "To build the train and validation subsets, look for TSV files (train.tsv and val.tsv) in the image folder."],
+    "to_tsv": [False, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
     "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
-    #"dataset_path_train": [str(root.joinpath('data','current_working_set', 'charters_ds_train.tsv')), "TSV file containing the image paths and transcriptions. The parent folder is assumed to contain both images and transcriptions."],
     "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "learning_rate": 1e-3,
@@ -105,34 +107,52 @@ if __name__ == "__main__":
     # to be deprecated
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
-    # name prefixes for img and target are read from the provided TSV file,
-    # that is in the same folder as the samples themselves
+    resize_func = Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ])
 
     imgs_train, lbls_train, imgs_val, lbl_val = [], [], [], []
-    imgs = list( args.img_paths )
-    if not len(list(args.img_paths)):
-        logger.warning("Could not find valid training samples.")
-        sys.exit()
-    lbls =  [ re.sub(r'{}$'.format(args.img_file_suffix), args.gt_file_suffix, str(img_path)) for img_path in imgs ]
-    # split sets
-    imgs_train, imgs_test, lbls_train, lbls_test = split_set( imgs, lbls )
-    imgs_train, imgs_val, lbls_train, lbls_val = split_set( imgs_train, lbls_train )
+    
+    # Option 1: a directory of images files
+    if args.dataset_path:
+        args.dataset_path = Path( args.dataset_path)
+        # Compose each subset from the existing TSV
+        if args.from_tsv:
+            train_tsv_path, val_tsv_path = [ Path( args.dataset_path ).joinpath( tsv_filename ) for tsv_filename in ('train.tsv', 'val.tsv') ] 
+            assert train_tsv_path.exists() and val_tsv_path.exists()
+            ds_train, ds_val = [ HTRLineDataset( from_tsv_file=tsv_path, padding_style=args.padding_style, transform=resize_func, target_transform=filter_transcription,) for tsv_path in ( train_tsv_path, val_tsv_path ) ]
+            logger.debug("Constructed subsets in {} from TSV files {} and {}".format( args.dataset_path, train_tsv_path, val_tsv_path))
+        # ... or include all images
+        else:
+            imgs = list( Path(args.dataset_path).glob('*{}'.format(args.img_file_suffix)))
+    # Option 2: a list of images
+    elif args.img_paths:
+        imgs = list( args.img_paths )
 
+    # Given all images, split
+    if not args.from_tsv:
+        if not len(list( imgs )):
+            logger.warning("Could not find valid training samples.")
+            sys.exit()
+        lbls =  [ re.sub(r'{}$'.format(args.img_file_suffix), args.gt_file_suffix, str(img_path)) for img_path in imgs ]
+        # split sets
+        imgs_train, imgs_test, lbls_train, lbls_test = split_set( imgs, lbls )
+        imgs_train, imgs_val, lbls_train, lbls_val = split_set( imgs_train, lbls_train )
 
-    ds_train = HTRLineDataset( 
-            from_line_files=imgs_train, 
-            padding_style=args.padding_style,
-            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-            target_transform=filter_transcription,)
-    logger.debug( str(ds_train) )
+        ds_train = HTRLineDataset( 
+                from_line_files=imgs_train, 
+                padding_style=args.padding_style,
+                transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+                target_transform=filter_transcription,
+                to_tsv_file='train.tsv' if args.to_tsv else '',)
 
-
-    ds_val = HTRLineDataset( 
-            from_line_files=imgs_val,
-            padding_style=args.padding_style,
-            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-            target_transform=filter_transcription,)
+        ds_val = HTRLineDataset( 
+                from_line_files=imgs_val,
+                padding_style=args.padding_style,
+                transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+                target_transform=filter_transcription,
+                to_tsv_file='val.tsv' if args.to_tsv else '',)
+    
     logger.debug( str(ds_val) )
+    logger.debug( str(ds_train) )
 
     train_loader = DataLoader( ds_train, batch_size=args.batch_size, shuffle=True) 
     val_loader = DataLoader( ds_val, batch_size=args.batch_size)
@@ -229,7 +249,7 @@ if __name__ == "__main__":
                 for i, label in zip(range(len(batch)), labels):
                     logger.debug("{},{}".format( type(img[i]), transcriptions[i]))
                     ax[i].imshow( img[i].permute(1,2,0))
-                #plt.show()
+                plt.show()
                 continue
 
             optimizer.zero_grad()

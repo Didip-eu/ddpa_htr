@@ -155,9 +155,9 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 
   ```
   # create and store as TSV
-  >>> HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds' )
+  >>> HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds.tsv' )
   # instantiate from TSV list
-  >>> ds=HTRLineDataset( from_tsv_file='dataset/htr_line_ds/train_ds' )
+  >>> ds=HTRLineDataset( from_tsv_file='dataset/htr_line_ds/train_ds.tsv' )
   ```
 
 + as a full directory:
@@ -170,20 +170,53 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 <!--![](doc/_static/8257576.png)-->
 
 
-### 2. Training from compiled line samples (DEPRECATED: 11/2025)
+### 2. Training from compiled line samples 
 
-The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above.
-<!--, as well as 3 TSV files, one for each of the training, validation, and test subsets.-->
-The training script only uses `libs/data.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.tsv`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the TSV list has an extra field for a flat channel file (`*.npy.gz`), it is automatically concatenated to the tensor at loading time.
+The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. There are several way to initialize the training sets:
+
+#### 2.1 Passing list of training/validation line images
+
+```
+$ PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
+```
+
+The set of all relevant images and metadata files is then split into training, validation, and test subsets.
+
++ the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
+
+
+#### 2.2 Passing a directory of line images
+
+```
+$ PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
+```
+The set of all relevant images and metadata files is then split into training, validation, and test subsets.
+
++ the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
++ alternatively, with the `-from_tsv` flag, the set splitting step is skipped and the training subsets are constructed from the TSV lists in the directory.
+
+
+
+<!--The training script only uses `libs/data.py` module to load the sample from this location; the lists of samples to be included in the training, validation, and test subsets is stored in the corresponding TSV files (`charters_ds_train.tsv`, `charters_ds_validate.tsv`, and `charters_ds_test.tsv`, respectively). If the TSV list has an extra field for a flat channel file (`*.npy.gz`), it is automatically concatenated to the tensor at loading time.-->
 
 <!--For a charter dataset to play with, look at the [Data section](#Data) above.-->
 
 
-#### Example:
+#### 2.3 Usual options
+
+To learn about the usual parameters of a training sessions (epochs, patience, etc.) run:
+
+```
+$ python3 ./bin/ddp_htr_train.py -h
+```
+
+Example:
 
 ```bash	
-python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1
+python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1 -dataset_path dataset/htr_line_ds
 ```
+
+
 ### 3. Inference
 
 ```bash
