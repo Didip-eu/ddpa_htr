@@ -172,25 +172,26 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 
 ### 2. Training from compiled line samples 
 
-The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. There are several way to initialize the training sets:
+The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. There are several ways to initialize the training session:
 
-#### 2.1 Passing list of training/validation line images
+#### 2.1 A list of training/validation line images
 
 ```
 $ PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
 ```
 
-The set of all relevant images and metadata files is then split into training, validation, and test subsets.
+The script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
 
 + the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
 
 
-#### 2.2 Passing a directory of line images
+#### 2.2 A directory of line images
 
 ```
 $ PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
 ```
-The set of all relevant images and metadata files is then split into training, validation, and test subsets.
+
+By default, the script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
 
 + the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
 + alternatively, with the `-from_tsv` flag, the set splitting step is skipped and the training subsets are constructed from the TSV lists in the directory.
@@ -236,10 +237,8 @@ export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_
 ### 4. Additional scripts and modules
 
 
-The following scripts are one-offs, that are not meant for public consumption:
+The following scripts are one-offs or deprecated. They are not meant for public consumption:
 
 + `bin/ddp_htr_train_with_abbrev.py`: (for experiments) training script that uses abbreviation masks on the GT transcriptions, as well as a custom edit distance function, in order to evaluate the abbreviations contribution to the CER.
 + `bin/ddp_htr_viewer.py`: visualizing confidence scores for a given HTR (color + transcription overlay)
 + some of the local modules are not part of the core HTR dependencies. For example:
-  * pre-processing/compilation step: `seglib.py`, `download_utils.py`
-  * for convenience only: `maskutils.py`, `visuals.py`
