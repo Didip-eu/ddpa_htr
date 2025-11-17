@@ -151,10 +151,10 @@ class PageDataset(VisionDataset):
         """
 
         # A dataset resource dictionary needed, unless we build from existing files
-        if self.dataset_resource is None and not (from_page_folder or from_line_tsv_file or from_work_folder):
+        if self.dataset_resource is None and not (from_page_folder or from_tsv_file or from_work_folder):
             raise FileNotFoundError("In order to create a dataset instance, you need either:" +
                                     "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
-                                    "\n\t + one of the following options: -from_page_folder, -from_work_folder, -from_line_tsv_file")
+                                    "\n\t + one of the following options: -from_page_folder, -from_work_folder, -from_tsv_file")
 
         self._transforms = v2.Compose([
                             v2.ToImage(),
@@ -670,7 +670,7 @@ class HTRLineDataset(VisionDataset):
     """
 
     def __init__(self,
-                from_line_tsv_file: str='',
+                from_tsv_file: str='',
                 from_work_folder: str='dataset',
                 from_line_files: list[Path]=[],
                 img_suffix: str='.png',
@@ -686,7 +686,7 @@ class HTRLineDataset(VisionDataset):
         """Initialize a dataset instance.
 
         Args:
-            from_line_tsv_file (str): if set, the data are to be loaded from the given file
+            from_tsv_file (str): if set, the data are to be loaded from the given file
                 (containing folder is assumed to be the work folder, superceding the
                 from_work_folder option).
             from_work_folder (str): if set, the samples are to be loaded from the
@@ -695,6 +695,7 @@ class HTRLineDataset(VisionDataset):
                 in the same folder.
             img_suffix (str): suffix of line image (default: '.png').
             gt_suffix (str): suffix of gt transcription file (default: '.gt.txt').
+            to_tsv_file (str): serialize the dataset list as a TSV in the work folder.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
                 truth at loading time.
@@ -717,8 +718,8 @@ class HTRLineDataset(VisionDataset):
         self.gt_suffix = gt_suffix
         self.channel_suffix = channel_suffix
 
-        if from_line_tsv_file:
-            tsv_path = Path( from_line_tsv_file )
+        if from_tsv_file:
+            tsv_path = Path( from_tsv_file )
             if tsv_path.exists():
                 self.work_folder_path = tsv_path.parent
                 # paths are assumed to be absolute
@@ -742,7 +743,7 @@ class HTRLineDataset(VisionDataset):
                 self.dump_data_to_tsv(self.data, Path(self.work_folder_path.joinpath(to_tsv_file)) )
 
         if not self.data:
-            raise DataException("No data found. from_line_tsv_file={}, from_work_folder={}, from_line_files={}".format(from_line_tsv_file, from_work_folder, from_line_files))
+            raise DataException("No data found. from_tsv_file={}, from_work_folder={}, from_line_files={}".format(from_tsv_file, from_work_folder, from_line_files))
 
         trf = v2.Compose( [ v2.ToDtype(torch.float32, scale=True) ])  
         if transform is not None:
@@ -754,7 +755,7 @@ class HTRLineDataset(VisionDataset):
 
         # bbox or polygons and/or masks
         self.config = {
-                'from_line_tsv_file': from_line_tsv_file,
+                'from_tsv_file': from_tsv_file,
                 'from_work_folder': from_work_folder,
                 'channel_func': channel_func,
                 'channel_suffix': channel_suffix,
@@ -1004,8 +1005,8 @@ class HTRLineDataset(VisionDataset):
                     f"Data points:\t{len(self.data)}",
                     "Stats:",
                     f"{self.dataset_stats(self.data)}" if self.data else 'No data',])
-        if self.config['from_line_tsv_file']:
-             summary += "\nBuilt from TSV input:\t{}".format( self.config['from_line_tsv_file'] )
+        if self.config['from_tsv_file']:
+             summary += "\nBuilt from TSV input:\t{}".format( self.config['from_tsv_file'] )
         
         return ("\n________________________________\n"
                 f"\n{summary}"
