@@ -180,7 +180,7 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 
 ### 2. Train from compiled line samples 
 
-The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. There are several ways to initialize the training session:
+The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. Therefore, it only needs to split the set of lines and initialize  `HTRLineDataset` objects accordingly. There are two main ways to accomplish this:
 
 #### 2.1 A list of training/validation line images
 
