@@ -40,7 +40,7 @@ import character_classes as cc
 
 # local logger
 # root logger
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +66,7 @@ p = {
     "save_freq": 1,
     "device": [('cpu','cuda'), "Computing device"],
     "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
-    "reset_epochs": [ False, "Ignore the the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
+    "reset_epochs": [ False, "Ignore the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
     "mode": ('train', 'test'),
     "confusion_matrix": 0,
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
