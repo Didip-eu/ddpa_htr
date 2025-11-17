@@ -9,9 +9,9 @@ Prototype of a Kraken/VGSL-based, HTR app. The current draft contains:
 
 TODO: 
 
-+ decoding options?
 + integrate PyLemmatizer in the training/inference scripts
-+ proper testing (the existing testing modules are obsoletes)
++ proper testing (the existing testing modules are obsolete)
++ decoding options?
 + ...
 
 ## Installing
@@ -27,13 +27,12 @@ pip install -r requirements.txt
 
 ### Data
 
-A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ)
+A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ) and extracted in the data folder of your choice.
 
 Alternatively, run the following commands:
 
 ```bash
-pip install gdown
-cd ./data
+mkdir -p ./dataset/page_ds && cd $_
 gdown https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ
 unzip MonasteriumTeklia_htr_precompiled.zip
 ```
@@ -43,7 +42,7 @@ unzip MonasteriumTeklia_htr_precompiled.zip
 ## How to use
 
 
-### 1. Precompiling the dataset pages
+### 1. Compile the dataset: pages, regions, and lines
 
 The `libs/charter_htr_datasets.py` module defines two classes
 
@@ -52,6 +51,8 @@ The `libs/charter_htr_datasets.py` module defines two classes
    - compiling and augmenting regions out of pages (images + XML or JSON metadata)
    - extracting and serializing line samples 
 + `HTRLineDataset` uses the resulting line samples for training, with options for masking and line-wide transforms
+
+Although it is possible to combine these classes in a single script in order to initialize a line-based HTR training set right out of a downloadable archive, it is better practice to  decompose the task into discrete stages, where intermediate outputs are stored on-disk, where they can easily be re-used for different downstream tasks. The recommended workflow is shown below.
 
 #### 1.1. Obtaining lines out of pages and regions: the `PageDataset` class
 
@@ -137,10 +138,18 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 2025-11-16 12:14:32,406 - dump_lines: Compiled 74 lines
 ```
 
-The script `bin/ddp_generate_htr_line_dataset.py` shows how to compile lines out of Tormentor-augmented regions.
+#### 1.2 Compiling lines out of augmented regions
 
 
-#### 1.2. Packing up line samples for training: the `HTRLineDataset` class
+The script `bin/generate_htr_line_dataset.py` is an example of how to compile lines out of Tormentor-augmented regions.
+The compilation follows the general pattern shown above, with an extra transformation step that precedes the line compilation:
+
++ Regions are serialized out of the page metadata.
++ For each resulting data sample (i.e. a region), apply a Tormentor transform and then serialize its lines 
++ A loop at the end of the script allows for running the line compilation step more than once for each region, in order to obtain a variety of random transformations.
+
+
+#### 1.3. Packing up line samples for training: the `HTRLineDataset` class
 
 Use the `HTRLineDataset`class. It assumes the set has been split before. The respective subsets can be then passsed
 
@@ -169,7 +178,7 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 <!--![](doc/_static/8257576.png)-->
 
 
-### 2. Training from compiled line samples 
+### 2. Train from compiled line samples 
 
 The training script assumes that there already exists a directory (default: `./data/current_working_set`) that contains all line images and transcriptions, as obtained by the step described above. There are several ways to initialize the training session:
 
@@ -225,11 +234,28 @@ python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
 
 where optional flags are one or more of the following:
 
+```
+-model_path=<class 'str'>  Default './best.mlmodel'.
+-img_paths=<class 'set'>  Default set().
+-charter_dirs=<class 'set'>  Default set().
+-segmentation_suffix=<class 'str'>  Default '.lines.pred.json'.
+-output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default ''.
+-img_suffix=<class 'str'>  Default '.img.jpg'.
+-htr_suffix=<class 'str'>  Default '.htr.pred'.
+-output_format=<class 'tuple'> Output formats: 'stdout' and 'tsv' = 3-column output '<index>	<line id>	<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file. Default ('stdout', 'json', 'tsv', 'xml').
+-output_data=<class 'set'> By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below). Default {'pred'}.
+-overwrite_existing=<class 'int'> Write over existing output file (default). Default 1.
+-line_padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none').
+-help=<class 'bool'> Print help and exit. Default False.
+-bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False.
+-h=<class 'bool'> Print help and exit Default False.
+```
+
 
 #### Example:
 
 ```bash
-export PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
+PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
 ```
 
 
