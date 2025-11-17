@@ -247,8 +247,6 @@ where optional flags are one or more of the following:
 -overwrite_existing=<class 'int'> Write over existing output file (default). Default 1.
 -line_padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none').
 -help=<class 'bool'> Print help and exit. Default False.
--bash_autocomplete=<class 'bool'> Print a set of bash commands that enable autocomplete for current program. Default False.
--h=<class 'bool'> Print help and exit Default False.
 ```
 
 
