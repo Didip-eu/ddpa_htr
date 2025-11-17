@@ -69,8 +69,8 @@ We can compile lines out of an explicit list of charter image files through the 
 
 1. Extract text regions:
    
-   ```
-   >>> ds=PageDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
+   ```python
+   ds=PageDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
    2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
    100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
    2025-11-16 11:49:58,963 - __init__:
@@ -83,7 +83,7 @@ We can compile lines out of an explicit list of charter image files through the 
    
    Note that the number of data points (i.e. 5 regions) typically exceeds the number of charter images (4 in our example). At this point, the **page work folder** (in addition the pre-existing charter-wide data) contains one image crop and one JSON label file for each region:
    
-   ```
+   ```bash
      140 dataset/page_ds/NA-ACK_14611216_01686_r-r1.json
    19816 dataset/page_ds/NA-ACK_14611216_01686_r-r1.png
        4 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.json
@@ -94,13 +94,12 @@ We can compile lines out of an explicit list of charter image files through the 
     6324 dataset/page_ds/NA_ACK_339_13500216_r-r1.png
       80 dataset/page_ds/NA-CG-L_14330730_216_r-r1.json
     5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
-   
    ```
    
 2. Serialize the lines:
    
-   ```
-   >>> ds.dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+   ```python
+   ds.dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
    100%|===================================================================| 5/5 [00:15<00:00,  3.05s/it]
    ```
 
@@ -110,7 +109,7 @@ We can compile lines out of an explicit list of charter image files through the 
    + the transcription ground truth files (`*.gt.txt`)
    + binary masks generated from each line polygon boundaries (`*.bool.npy.gz`), to be used at loading time with a masking function of choice.
 
-   ``` 
+   ```bash
      4 dataset/htr_line_dataset/445m-r4-0.bool.npy.gz
      4 dataset/htr_line_dataset/445m-r4-0.gt.txt
    304 dataset/htr_line_dataset/445m-r4-0.png
@@ -123,8 +122,8 @@ We can compile lines out of an explicit list of charter image files through the 
 
 Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
  
-```
->>> PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
+```python
+PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_dataset', overwrite_existing=True)
 2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
 100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
 2025-11-16 12:14:29,804 - __init__:
@@ -153,17 +152,17 @@ Use the `HTRLineDataset`class. It assumes the set has been split before. The res
 
 + as a TSV file storing a list of samples. Eg.
 
-  ```
+  ```python
   # create and store as TSV
-  >>> HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds.tsv' )
+  HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds.tsv' )
   # instantiate from TSV list
-  >>> ds=HTRLineDataset( from_tsv_file='dataset/htr_line_ds/train_ds.tsv' )
+  ds=HTRLineDataset( from_tsv_file='dataset/htr_line_ds/train_ds.tsv' )
   ```
 
 + as a full directory:
 
-  ```
-  >>> ds=HTRLineDataset( from_work_folder='dataset/htr_line_ds/train')
+  ```python
+  ds=HTRLineDataset( from_work_folder='dataset/htr_line_ds/train')
   ```
 
 
@@ -176,8 +175,8 @@ The training script assumes that there already exists a directory (default: `./d
 
 #### 2.1 A list of training/validation line images
 
-```
-$ PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
+```bash
+PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
 ```
 
 The script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
@@ -187,8 +186,8 @@ The script takes care of splitting all relevant images and metadata files into t
 
 #### 2.2 A directory of line images
 
-```
-$ PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
+```bash
+PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
 ```
 
 By default, the script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
@@ -207,8 +206,8 @@ By default, the script takes care of splitting all relevant images and metadata 
 
 To learn about the usual parameters of a training sessions (epochs, patience, etc.) run:
 
-```
-$ python3 ./bin/ddp_htr_train.py -h
+```bash
+python3 ./bin/ddp_htr_train.py -h
 ```
 
 Example:
