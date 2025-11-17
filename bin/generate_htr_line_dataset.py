@@ -26,20 +26,20 @@ import torch
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
-from libs import charter_page_datasets as pds
+from libs import charter_htr_datasets as pds
 from libs import transforms as tsf
 from libs.train_utils import split_set
 
 
 p = {
-        'img_paths': set(list(Path("dataset").glob('*.jpg'))),
-        'repeat': (1, "Number of patch samples to generate from one image."),
-        'subsets': set(['train', 'val']),
-        'log_tsv': 1,
+        'img_paths': [ set([]), 'Image paths'],
+        'repeat': [1, "Number of samples to generate from one image."],
+        'log_tsv': 0,
         'dummy': 0,
         'img_suffix': '.jpg',
         'lbl_suffix': '.xml',
-        'visual_check': (0, "Dry-run: no serialization + visual check of transformed samples."),
+        'visual_check': [0, "Dry-run: no serialization + visual check of transformed samples."],
+        'line_ds_path': ['', "Where lines are to be serialized."]
 }
 
 
@@ -75,17 +75,18 @@ if args.dummy:
 
 
 # for training, Torment at will
-ds = pds.PageDataset( from_page_files=imgs )
+ds = pds.PageDataset( from_page_files=imgs, device='cuda' )
 
 
 augWrap = tormentor.RandomWrap.override_distributions(roughness=default_tormentor_dists['Wrap'][0], intensity=default_tormentor_dists['Wrap'][1])
 augBrightness = tormentor.RandomBrightness.override_distributions(brightness=default_tormentor_dists['Brightness'])
 augPlasmaBrightness = tormentor.RandomPlasmaBrightness.override_distributions(roughness=default_tormentor_dists['PlasmaBrightness'][0], intensity=default_tormentor_dists['PlasmaBrightness'][1])
-#ds.augmentation_class = augPlasmaBrightness #| augWrap
+augGaussianAdditiveNoise = tormentor.RandomGaussianAdditiveNoise
 
 
 
-ds_aug = tormentor.AugmentedDs( ds, augPlasmaBrightness, computation_device='cpu', augment_sample_function=pds.PageDataset.augment_with_bboxes )
+# Note: this hides the dump_line() method
+# ds_aug = tormentor.AugmentedDs( ds, augGaussianAdditiveNoise|augPlasmaBrightness, computation_device='cuda', augment_sample_function=pds.PageDataset.augment_with_bboxes )
     
 if args.visual_check:
     plt.close()
@@ -102,6 +103,10 @@ if args.visual_check:
 
     sys.exit()
 
-ds.dump_lines('dataset/htr_line_dataset')
+if args.line_ds_path:# and Path( args.line_ds_path).exists():
+    ds.dump_lines( args.line_ds_path, iteration=0)
+    ds.augmentation_class = augGaussianAdditiveNoise|augPlasmaBrightness 
+    for rp in range(1,args.repeat+1):
+        ds.dump_lines( args.line_ds_path, iteration=rp )
 
 

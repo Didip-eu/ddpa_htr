@@ -118,6 +118,7 @@ class PageDataset(VisionDataset):
                 resume_task: bool = False,
                 lbl_suffix: str = '.xml',
                 img_suffix: str = '.jpg',
+                device: str = 'cpu',
                 ) -> None:
         """Initialize a dataset instance.
 
@@ -163,6 +164,7 @@ class PageDataset(VisionDataset):
         if transform is not None:
             self._transforms = v2.Compose([ self._transforms, tranform] )
         self.augmentation_class = augmentation_class
+        self.device = device
 
         self._data = []
 
@@ -326,7 +328,7 @@ class PageDataset(VisionDataset):
         if self._transforms:
             img_chw, target = self._transforms( img_whc, label )
         if self.augmentation_class:
-            img_chw, label = self.augment_with_bboxes( self.augmentation_class(), img_chw, label )
+            img_chw, label = self.augment_with_bboxes( (img_chw, label), self.augmentation_class(), device=self.device)
         return (img_chw, label)
 
     def _load_image_and_label(self, img_path:Path, annotation_path:Path, augmentation:Callable=None):
@@ -383,10 +385,10 @@ class PageDataset(VisionDataset):
         
         
         label['boxes'], label['masks'], label['texts'] = boxes[keep], masks[keep], [ t for (t,k) in zip(label['texts'], keep) if k ]
-        return (img_chw, label)
+        return (img_chw.cpu(), label)
 
 
-    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=False, line_as_tensor=False, resume=False ):
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=False, line_as_tensor=False, resume=False, iteration=-1 ):
         """
         Save line samples in the line work folder; each line yields:
         - line crop (as PNG, by default)
@@ -395,18 +397,21 @@ class PageDataset(VisionDataset):
         
         Args:
             line_work_folder (Union[str,Path]): where to serialize the lines.
+            overwrite_existing (bool): write over existing line files.
             line_as_tensor (bool): save line crops as tensors (compressed).
             resume (bool): resume a dump task---work folder is checked for existing, completed pages.
+            iteration (int): integer suffix to be added to sample filename (when generating randomly augmented samples).
         """
         line_work_folder_path = Path( line_work_folder )
         line_work_folder_path.mkdir( parents=True, exist_ok=True)
 
-        if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
-            logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
-            return
-
-        if not resume:
-            self._purge( line_work_folder_path )
+        # when this routine is called only once per region
+        if iteration==-1:
+            if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
+                logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
+                return
+            if not resume:
+                self._purge( line_work_folder_path )
         start = 0
         sentinel_path = line_work_folder_path.joinpath('.sentinel')
         if sentinel_path.exists():
@@ -420,13 +425,16 @@ class PageDataset(VisionDataset):
             img_prefix = re.sub(r'{}'.format( self.config['reg_img_suffix']), '', Path(annotation['path']).name)
             for line_idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
-                line_tensor = img_chw[:,t:b+1, l:r+1]
+                line_tensor = (img_chw.cpu().numpy())[:,t:b+1, l:r+1]
                 # compressed arrays << compressed tensors
-                mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).numpy()
+                mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).cpu().numpy()
                 line_text = annotation['texts'][line_idx]
-                outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-{line_idx}")
+                outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
+                if iteration >= 0:
+                    outfile_prefix = f"{outfile_prefix}-i{iteration}"
+                    print("outfile_prefix={}".format( outfile_prefix ))
                 if not line_as_tensor:
-                    line_array = (line_tensor.permute(1,2,0).numpy()*255).astype('uint8')
+                    line_array = (line_tensor.transpose(1,2,0)*255).astype('uint8')
                     ski.io.imsave( f'{outfile_prefix}.png', line_array )
                 else:
                     with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
