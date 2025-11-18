@@ -104,9 +104,9 @@ if args.visual_check:
     sys.exit()
 
 if args.line_ds_path:# and Path( args.line_ds_path).exists():
-    ds.dump_lines( args.line_ds_path, iteration=0)
+    ds.dump_lines( args.line_ds_path, overwrite_existing=True)
     ds.augmentation_class = augGaussianAdditiveNoise|augPlasmaBrightness 
-    for rp in range(1,args.repeat+1):
+    for rp in range(args.repeat):
         ds.dump_lines( args.line_ds_path, iteration=rp )
 
 
