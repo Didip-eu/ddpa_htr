@@ -154,7 +154,7 @@ ds = charter_htr_datasets.PageDataset( from_page_files=imgs, device='cuda' )
 ds.dump_lines( args.line_ds_path, overwrite_existing=True)
 
 # 1+ line dumps from augmented region images
-ds.augmentation_class = augGaussianAdditiveNoise|augPlasmaBrightness
+ds.augmentation_class = tormentor.RandomGaussianAdditiveNoise|tormentor.RandomPlasmaBrightness
 for rp in range(args.repeat):
    ds.dump_lines( args.line_ds_path, iteration=rp )
 ```
@@ -163,7 +163,7 @@ for rp in range(args.repeat):
 
 #### 1.3. Packing up line samples for training: the `HTRLineDataset` class
 
-Use the `HTRLineDataset`class. It assumes the set has been split before. The respective subsets can be then passsed
+Initialize a `HTRLineDataset` object out of the desired samples (typically, a train or validation subset resulting from splitting the original data). Samples can be passed
 
 + as a list of image files:
 
