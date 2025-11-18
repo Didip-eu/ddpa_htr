@@ -27,7 +27,7 @@ from torchvision.datasets import VisionDataset
 # local
 root = str( Path(__file__).parents[1] ) 
 sys.path.append( root ) 
-from model_htr import HTR_Model
+from libs.htr_model import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
 

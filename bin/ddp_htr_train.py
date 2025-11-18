@@ -35,7 +35,7 @@ sys.path.append( str(root) )
 
 from libs import metrics, transforms as tsf, list_utils as lu, visuals
 from libs.train_utils import split_set, duration_estimate
-from model_htr import HTR_Model
+from libs.htr_model import HTR_Model
 from kraken import vgsl
 from libs.charter_htr_datasets import HTRLineDataset
 import character_classes as cc
