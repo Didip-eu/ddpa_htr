@@ -27,13 +27,14 @@ pip install -r requirements.txt
 
 ### Data
 
-A training set with pre-compiled line images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link—no `wget` with UniCloud!—and extract it:
+A toy training set with pre-compiled line images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link—no `wget` with UniCloud!—and extract it:
 
 ```bash
 mkdir -p ./data/page_ds
 tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 ```
 
+The dataset is too small to allow for actual training, but allows for exercising and debugging the HTR modules provided here.
 
 
 ## How to use
