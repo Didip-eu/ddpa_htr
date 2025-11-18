@@ -113,7 +113,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#b12f53033aa3a1045bd15c01ffd020e6.img.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/b12f53033aa3a1045bd15c01ffd020e6.img.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Image" version="0" id="O1">
@@ -139,7 +139,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#2ac6ee1db52720383c3c332e44a4ab6b.img.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/2ac6ee1db52720383c3c332e44a4ab6b.img.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Image" version="0" id="O2">
@@ -165,7 +165,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#16b7be3c912822bfd8bf2cf247b4fb60.img.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/16b7be3c912822bfd8bf2cf247b4fb60.img.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:group>
@@ -598,7 +598,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#2ac6ee1db52720383c3c332e44a4ab6b-r0.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/2ac6ee1db52720383c3c332e44a4ab6b-r0.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Image" version="0" id="O19">
@@ -624,7 +624,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#16b7be3c912822bfd8bf2cf247b4fb60-r0.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/16b7be3c912822bfd8bf2cf247b4fb60-r0.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Image" version="0" id="O20">
@@ -650,7 +650,7 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="file">
-        <dia:string>#b12f53033aa3a1045bd15c01ffd020e6-r0.png#</dia:string>
+        <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/b12f53033aa3a1045bd15c01ffd020e6-r0.png#</dia:string>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Text" version="1" id="O21">
@@ -1147,7 +1147,7 @@
             <dia:boolean val="true"/>
           </dia:attribute>
           <dia:attribute name="file">
-            <dia:string>#2ac6ee1db52720383c3c332e44a4ab6b-l0.png#</dia:string>
+            <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/2ac6ee1db52720383c3c332e44a4ab6b-l0.png#</dia:string>
           </dia:attribute>
         </dia:object>
         <dia:group>
@@ -1398,7 +1398,7 @@
             <dia:boolean val="true"/>
           </dia:attribute>
           <dia:attribute name="file">
-            <dia:string>#2ac6ee1db52720383c3c332e44a4ab6b-l1.png#</dia:string>
+            <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/2ac6ee1db52720383c3c332e44a4ab6b-l1.png#</dia:string>
           </dia:attribute>
         </dia:object>
         <dia:group>
@@ -1649,7 +1649,7 @@
             <dia:boolean val="true"/>
           </dia:attribute>
           <dia:attribute name="file">
-            <dia:string>#2ac6ee1db52720383c3c332e44a4ab6b-l2.png#</dia:string>
+            <dia:string>#/home/nicolas/graz/htr/vre/ddpa_htr/doc/_static/2ac6ee1db52720383c3c332e44a4ab6b-l2.png#</dia:string>
           </dia:attribute>
         </dia:object>
         <dia:group>
