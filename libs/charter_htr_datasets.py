@@ -388,7 +388,7 @@ class PageDataset(VisionDataset):
         return (img_chw.cpu(), label)
 
 
-    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=False, line_as_tensor=False, resume=False, iteration=-1 ):
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1 ):
         """
         Save line samples in the line work folder; each line yields:
         - line crop (as PNG, by default)
@@ -400,7 +400,8 @@ class PageDataset(VisionDataset):
             overwrite_existing (bool): write over existing line files.
             line_as_tensor (bool): save line crops as tensors (compressed).
             resume (bool): resume a dump task---work folder is checked for existing, completed pages.
-            iteration (int): integer suffix to be added to sample filename (when generating randomly augmented samples).
+            iteration (int): integer suffix to be added to sample filename (useful when generating 
+                randomly augmented samples, with multiple calls to the functions on the same region).
         """
         line_work_folder_path = Path( line_work_folder )
         line_work_folder_path.mkdir( parents=True, exist_ok=True)
@@ -432,7 +433,6 @@ class PageDataset(VisionDataset):
                 outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
                 if iteration >= 0:
                     outfile_prefix = f"{outfile_prefix}-i{iteration}"
-                    print("outfile_prefix={}".format( outfile_prefix ))
                 if not line_as_tensor:
                     line_array = (line_tensor.transpose(1,2,0)*255).astype('uint8')
                     ski.io.imsave( f'{outfile_prefix}.png', line_array )

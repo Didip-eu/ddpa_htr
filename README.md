@@ -144,9 +144,21 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 The script `bin/generate_htr_line_ds.py` is an example of how to compile lines out of Tormentor-augmented regions.
 The compilation follows the general pattern shown above, with an extra transformation step that precedes the line compilation:
 
-+ Regions are serialized out of the page metadata.
-+ For each resulting data sample (i.e. a region), apply a Tormentor transform and then serialize its lines 
-+ A loop at the end of the script allows for running the line compilation step more than once for each region, in order to obtain a variety of random transformations.
+```python
+# list of images
+imgs = list([ Path( ip ) for ip in args.img_paths ])
+# construct a page datasets (1 sample = 1 region)
+ds = charter_htr_datasets.PageDataset( from_page_files=imgs, device='cuda' )
+
+# 1 line dump from original region images
+ds.dump_lines( args.line_ds_path, overwrite_existing=True)
+
+# 1+ line dumps from augmented region images
+ds.augmentation_class = augGaussianAdditiveNoise|augPlasmaBrightness
+for rp in range(args.repeat):
+   ds.dump_lines( args.line_ds_path, iteration=rp )
+```
+
 
 
 #### 1.3. Packing up line samples for training: the `HTRLineDataset` class
