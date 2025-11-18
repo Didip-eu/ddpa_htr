@@ -54,7 +54,7 @@ The `libs/charter_htr_datasets.py` module defines two classes
 
 Although it is possible to combine these classes in a single script in order to initialize a line-based HTR training set right out of a downloadable archive, it is better practice to  decompose the task into discrete stages, where intermediate outputs are stored on-disk, where they can easily be re-used for different downstream tasks. The recommended workflow is shown below.
 
-![](doc/_static/workflow.svg)
+![](doc/_static/workflow.png)
 
 #### 1.1. Obtaining lines out of pages and regions: the `PageDataset` class
 
