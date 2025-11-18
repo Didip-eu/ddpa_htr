@@ -25,6 +25,8 @@ import fargv
 
 """
 Todo:
++ clearer training/validation loop 
++ integrate PyLemmatizer to feeding logic
 """
 
 
@@ -38,8 +40,6 @@ from kraken import vgsl
 from libs.charter_htr_datasets import HTRLineDataset
 import character_classes as cc
 
-# local logger
-# root logger
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,7 @@ p = {
     "img_height": 128,
     "img_width": 2048,
     "max_epoch": 200,
+    "patience": 50,
     "img_paths": [set([]), "Line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
     "dataset_path": ['', "Directory with line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
     "img_file_suffix": '.png',
@@ -60,13 +61,15 @@ p = {
     "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
     "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
-    "learning_rate": 1e-3,
+    "lr": 1e-3,
     "dry_run": [0, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."],
-    "validation_freq": 1,
-    "save_freq": 1,
-    "device": [('cpu','cuda'), "Computing device"],
-    "resume_fname": ['model_save.mlmodel', "Model *.mlmodel to load. By default, the epoch count will start from the epoch that has been last stored in this file's meta-data. To ignore this and reset the epoch count, set the -reset_epoch option."],
+    "scheduler": 1,
+    "scheduler_patience": 10,
+    "scheduler_cooldown": 5,
+    "scheduler_factor": 0.8,
+    "device": [("cpu","cuda"), "Computing device"],
     "reset_epochs": [ False, "Ignore the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
+    "resume_file": 'last.mlmodel',
     "mode": ('train', 'test'),
     "confusion_matrix": 0,
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
@@ -80,6 +83,13 @@ if __name__ == "__main__":
     if args.dry_run:
         import matplotlib.pyplot as plt
 
+
+    hyper_params = { varname:v for varname,v in vars(args).items() if varname in (
+        'batch_size',
+        'lr','scheduler', 'scheduler patience','scheduler_cooldown','schedular_factor',
+        'max_epoch','patience'
+    )}
+
     #------------- Model ------------
     model_spec_rnn_top = vgsl.build_spec_from_chunks(
             [ ('Input','0,0,0,{}'.format(args.input_channels)),
@@ -88,11 +98,13 @@ if __name__ == "__main__":
           ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do')],
           height = args.img_height)
 
-    model = HTR_Model.resume( args.resume_fname, 
+    
+    model = HTR_Model.resume( args.resume_file, 
                              #height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              reset_epochs=args.reset_epochs,
-                             add_output_layer=True,)
+                             add_output_layer=True,
+                             device=args.device)
    
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
@@ -100,7 +112,7 @@ if __name__ == "__main__":
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
 
-    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / args.batch_size
+    criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / hyper_params['batch_size']
    
     #-------------- Dataset ---------------
 
@@ -160,36 +172,32 @@ if __name__ == "__main__":
 
     # ------------ Training features ----------
 
-    optimizer = torch.optim.AdamW(list(model.net.parameters()), args.learning_rate, weight_decay=0.00005)
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*args.max_epoch), int(.75*args.max_epoch)])
+    optimizer = torch.optim.AdamW(list(model.net.parameters()), hyper_params['lr'], weight_decay=0.00005)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [int(.5*hyper_params['max_epoch']), int(.75*hyper_params['max_epoch'])])
     
     writer = SummaryWriter()
     
-    best_cer, best_wer, best_cer_epoch = 1.0, 1.0, -1
-    if model.validation_epochs:
-        best_cer, best_wer, best_cer_epoch = [ model.validation_epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_cer_epoch') ]
+    best_cer, best_wer, best_epoch = 1.0, 1.0, -1
+    if model.epochs:
+        best_cer, best_wer, best_epoch = [ model.epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_epoch') ]
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
-
         b = next(iter(val_loader))
-   
         msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings_redux = [ model.alphabet.reduce(s) for s in b['transcription'][:cut] ]
         logger.info('epoch {}'.format( epoch ))
         for (img, img_name, gt_str_raw, gt_str_redux, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], gt_strings_redux, msg_strings ):
             logger.info("{}:\n\tPred: [{}]\n\tRedux: {}\n\t  Raw: {}".format(img_name, decoded_str, gt_str_redux, gt_str_raw ))
             writer.add_image(img_name, img )
-
         model.net.train()
 
-    def validate( data_loader, confusion_matrix=False ):
+    def validate( confusion_matrix=False ):
         """ Test/validation step
         """
-
         model.net.eval()
         
-        batches = iter( data_loader )
+        batches = iter( val_loader )
         cer = 0.0
         wer = 0.0
 
@@ -237,10 +245,9 @@ if __name__ == "__main__":
         batches = iter( train_loader )
         for batch_index in tqdm ( range(len( batches ))):
             batch = next( batches )
-            img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
+            img_nwhc, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             labels, target_lengths = model.alphabet.encode_batch( transcriptions, padded=False ) 
-            if args.device == 'cuda':
-                img_nwhc, labels = img.cuda(), labels.cuda()
+            img_nwhc, labels = img_nwhc.to( args.device ), labels.to( args.device )
 
 
             if args.dry_run > 0 and args.device=='cpu':
@@ -272,16 +279,15 @@ if __name__ == "__main__":
 
             # this should in the top-level train loop
             #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
-            if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
+            #if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
+            #    cut = 4 if args.batch_size >= 4 else args.batch_size
+            #    sample_prediction_log( epoch, cut )
 
-                cut = 4 if args.batch_size >= 4 else args.batch_size
-                sample_prediction_log( epoch, cut )
 
-
-        mean_loss = torch.stack(epoch_losses).mean().item()       
+        return None if dry_run else torch.stack(epoch_losses).mean().item()       
         # visualization
-        writer.add_scalar("Loss/train", mean_loss, epoch)
-        model.train_epochs.append({ "loss": mean_loss, "duration": time.time()-t })
+        #writer.add_scalar("Loss/train", mean_loss, epoch)
+        #model.epochs.append({ "loss": mean_loss, "duration": time.time()-t })
         
     
     ########### TRAIN ################
@@ -289,39 +295,46 @@ if __name__ == "__main__":
     
         model.net.train()
 
-        epoch_start = len( model.train_epochs )
+        epoch_start = len( model.epochs )
         if epoch_start > 0: 
             logger.info(f"Resuming training for epoch {epoch_start}")
 
-        for epoch in range(epoch_start, args.max_epoch ):
-            train_epoch( epoch, args.dry_run )
+        for epoch in range(epoch_start, hyper_params['max_epoch'] ):
+
+            epoch_start_time = time.time()
+            mean_training_loss = train_epoch( epoch, args.dry_run )
+            cer, wer = validate()
+
             if args.dry_run:
                 continue
 
-            if epoch % args.save_freq == 0 or epoch == args.max_epoch-1:
-                model.save( args.resume_fname )
-
-            cer, wer = validate(val_loader)
+            model.save( args.resume_file )
 
             if cer <= best_cer:
-                best_cer, best_cer_epoch = cer, epoch
-                model.save( args.resume_fname + '.best' )
+                logger.info("Validation CER ({}) < best CER ({}): updating best model.".format( cer, best_cer ))
+                best_cer, best_epoch = cer, epoch
+                model.save( 'best.model' )
             if wer <= best_wer:
                 best_wer = wer
 
-            model.validation_epochs.append({'cer': cer, 'best_cer': best_cer, 'best_cer_epoch': best_cer_epoch,
-                                            'wer': wer, 'best_wer': best_wer,})
+            model.epochs.append({'loss': mean_training_loss, 'cer': cer, 'best_cer': best_cer, 'best_epoch': best_epoch,
+                                 'wer': wer, 'best_wer': best_wer,
+                                 'lr': scheduler.get_last_lr()[0], 'duration': time.time()-epoch_start_time,
+                                 })
             writer.add_scalar("CER/validate", cer, epoch)
             writer.add_scalar("WER/validate", wer, epoch)
                 
-            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.4f}, WER={:1.3f}. Estimated time until completion: {}'.format( 
+            logger.info('Epoch {}, mean loss={:3.3f}; CER={:1.4f}, WER={:1.3f}. Best epoch: {} (cer={}, wer={}) - Time left: {}'.format( 
                     epoch, 
-                    model.train_epochs[-1]['loss'],
+                    model.epochs[-1]['loss'],
                     cer, wer, 
-                    duration_estimate(epoch+1, args.max_epoch, model.train_epochs[-1]['duration']) ) )
-            logger.info('Best epoch={} with CER={}.'.format( best_cer_epoch, best_cer))
-
-            scheduler.step()
+                    best_epoch, best_cer, best_wer,
+                    duration_estimate(epoch+1, hyper_params['max_epoch'], model.epochs[-1]['duration']) ) )
+            if epoch-best_epoch > hyper_params['patience']:
+                logger.info("No improvement since epoch {}: early exit.".format(best_epoch))
+                break
+            if hyper_params['scheduler']:
+                scheduler.step()
 
 
     ############# VALIDATE / TEST ############

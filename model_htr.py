@@ -21,7 +21,7 @@ from libs.alphabet import Alphabet
 import character_classes as cc
 
 
-logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +39,8 @@ class HTR_Model():
                   model_spec=default_model_spec, 
                   decoder=None, 
                   add_output_layer=True,
-                  train=False):
+                  train=False,
+                  device='cpu'):
         """Initialize a new network wrapper.
 
         Args:
@@ -71,21 +72,22 @@ class HTR_Model():
             self.model_spec = model_spec
             self.net = TorchVGSLModel( self.model_spec ).nn
         
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = device 
+        if device=='cuda' and not torch.cuda.is_available():
+            logger.warning("Parameter '-device cuda' passed but CUDA not available. Using the CPU.")
+            self.device = 'cpu'
         #self.criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / batch_size
         self.net.to( self.device )
 
         # decoder
         self.decoder = self.decode_greedy if decoder is None else decoder
-
-
         # a list of dictionaries = for each epoch: { CER, loss, duration }
-        self.train_epochs = []
-        self.validation_epochs = []
+        self.epochs = []
+        self.hyper_parameters = {}
 
         self.net.train( mode=train )
         
-        self.constructor_params = {
+        self.constructor_parameters = {
                 # serialize the alphabet 
                 'alphabet': self.alphabet.serialize(),
                 'net': net,
@@ -239,6 +241,7 @@ class HTR_Model():
        
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
         assert isinstance( widths_n, Tensor) and len(widths_n) == img_nchw.shape[0]
+        img_nchw, widths_n = img_nchw.to( self.device ), widths_n.to( self.device )
 
         #self.net.to('cpu')
         # raw outputs
@@ -265,9 +268,9 @@ class HTR_Model():
     def save(self, file_name: str):
         state_dict = self.net.state_dict()
         state_dict['train_mode'] = self.net.training
-        state_dict['constructor_params'] = self.constructor_params
-        state_dict['train_epochs'] = self.train_epochs
-        state_dict['validation_epochs'] = self.validation_epochs
+        state_dict['constructor_parameters'] = self.constructor_parameters
+        state_dict['hyper_parameters'] = self.hyper_parameters
+        state_dict['epochs'] = self.epochs
         torch.save( state_dict, file_name ) 
 
 
@@ -280,23 +283,27 @@ class HTR_Model():
         """
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
-            constructor_params = state_dict['constructor_params']
-            del state_dict['constructor_params']
-            train_epochs = state_dict["train_epochs"]
-            del state_dict["train_epochs"]
-            validation_epochs = state_dict["validation_epochs"]
-            del state_dict["validation_epochs"]
+            constructor_parameters = state_dict['constructor_parameters']
+            del state_dict['constructor_parameters']
+            hyper_parameters = state_dict['hyper_parameters']
+            del state_dict['hyper_parameters']
+            epochs = state_dict["epochs"]
+            del state_dict["epochs"]
             train_mode = state_dict["train_mode"]
             del state_dict["train_mode"]
             
         
-            model = HTR_Model( **constructor_params )
+            model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
 
             if not reset_epochs:
-                model.train_epochs = train_epochs
-                model.validation_epochs = validation_epochs 
+                model.epochs = epochs
+                model.hyper_parameters = hyper_parameters
 
+            if model.device != kwargs['device']:
+                logger.debug("resume(): Overriding device with '{}'".format( kwargs['device']))
+                model.device = kwargs['device']
+                model.net.to( kwargs['device'] )
             # switch net to train/eval mode
             model.net.train( mode=train_mode )
 
@@ -304,18 +311,23 @@ class HTR_Model():
         return HTR_Model( **kwargs )
 
     @staticmethod
-    def load( file_name: str):
+    def load( file_name: str, device='cpu'):
         """ Load an existing model, for evaluation
         """
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
-            constructor_params = state_dict['constructor_params']
-            for k in ('constructor_params', 'train_epochs', 'validation_epochs', 'train_mode' ):
+            constructor_parameters = state_dict['constructor_parameters']
+            hyper_parameters = state_dict['hyper_parameters']
+            for k in ('constructor_parameters', 'hyper_parameters', 'epochs', 'train_mode' ):
                 if k in state_dict:
                     del state_dict[ k ]
 
-            model = HTR_Model( **constructor_params )
+            model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
+            if device != model.device:
+                model.net.to( device )
+            model.hyper_parameters = hyper_parameters
+
             # evaluation mode
             model.net.train( mode=False )
             return model
