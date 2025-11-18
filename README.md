@@ -27,14 +27,14 @@ pip install -r requirements.txt
 
 ### Data
 
-A toy training set with pre-compiled charter images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link—no `wget` with UniCloud!—and extract it:
+A toy dataset with charter images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link—no `wget` with UniCloud!—and extract it:
 
 ```bash
 mkdir -p ./data/page_ds
 tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 ```
 
-Although this dataset is too small for the model to learn anything, it allows for exercising and debugging the HTR modules provided here.
+Although this dataset is too small for the model to learn much, it allows for exercising and debugging the HTR modules provided here.
 
 
 ## How to use
