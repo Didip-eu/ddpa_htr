@@ -27,14 +27,11 @@ pip install -r requirements.txt
 
 ### Data
 
-A training set with pre-compiled line images (RGB) and transcriptions can be downloaded from [this location](https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ) and extracted in the data folder of your choice.
-
-Alternatively, run the following commands:
+A training set with pre-compiled line images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link--sorry no `wget` with UniCloud!--and extract it:
 
 ```bash
-mkdir -p ./dataset/page_ds && cd $_
-gdown https://drive.google.com/uc?id=1zhLi1FWCyCdMF3v6HiXxYgbMOTIw2StZ
-unzip MonasteriumTeklia_htr_precompiled.zip
+mkdir -p ./data/page_ds
+tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 ```
 
 
