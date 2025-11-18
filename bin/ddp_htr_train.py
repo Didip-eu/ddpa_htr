@@ -72,6 +72,7 @@ p = {
     "resume_file": 'last.mlmodel',
     "mode": ('train', 'test'),
     "confusion_matrix": 0,
+    "sample_log_window": [4, "How many samples should be decoded for end-of-epoch logging;"],
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
 }
 
@@ -274,14 +275,8 @@ if __name__ == "__main__":
             epoch_losses.append( loss.detach()) 
 
             loss.backward()
-
             optimizer.step()
-
-            # this should in the top-level train loop
-            #if (iter_idx % args.validation_freq) == (args.validation_freq-1) or iter_idx 
-            #if batch_index == len(train_loader)-1: #epoch % args.validation_freq == 0:
-            #    cut = 4 if args.batch_size >= 4 else args.batch_size
-            #    sample_prediction_log( epoch, cut )
+            sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
 
 
         return None if dry_run else torch.stack(epoch_losses).mean().item()       
