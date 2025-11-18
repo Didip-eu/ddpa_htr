@@ -27,7 +27,7 @@ pip install -r requirements.txt
 
 ### Data
 
-A training set with pre-compiled line images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link---no `wget` with UniCloud!---and extract it:
+A training set with pre-compiled line images (RGB) and transcriptions can be found on [UniCloud](https://cloud.uni-graz.at/s/9bdR9KNBZNz2R2R). Download from the link—no `wget` with UniCloud!—and extract it:
 
 ```bash
 mkdir -p ./data/page_ds
