@@ -42,7 +42,7 @@ unzip MonasteriumTeklia_htr_precompiled.zip
 ## How to use
 
 
-### 1. Compile the dataset: pages, regions, and lines
+### 1. Data preparation: pages, regions, and lines
 
 The `libs/charter_htr_datasets.py` module defines two classes
 
