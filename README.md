@@ -34,7 +34,7 @@ mkdir -p ./data/page_ds
 tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 ```
 
-The dataset is too small to allow for actual training, but allows for exercising and debugging the HTR modules provided here.
+Although this dataset is too small for the model to learn anything, it allows for exercising and debugging the HTR modules provided here.
 
 
 ## How to use
