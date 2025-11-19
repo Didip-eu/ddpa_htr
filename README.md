@@ -7,6 +7,7 @@ Prototype of a Kraken/VGSL-based, HTR app. The current draft contains:
 - a high-level script `ddp_htr_inference.py` that runs inference on FSDB images, each provided with an existing JSON segmentation file, whose default path is ``<input_image_stem>.lines.pred.json``.
 <!-- - a shell-script wrapper, that manages the dependencies for the HTR task, if ever needed: it relies on a Makefile to generate the segmentation meta-data for the charter, if they are not already present (with `ddpa_lines`) and calls then `ddp_htr_inference.py`.
 -->
+- ability to read and export datasets out of a variety of image and metadata formats (PageXML, JSON)
 
 TODO: 
 
@@ -97,6 +98,8 @@ We can compile lines out of an explicit list of charter image files through the 
       80 dataset/page_ds/NA-CG-L_14330730_216_r-r1.json
     5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
    ```
+
+  For building datasets out of JSON metadata, look up for the relevant flag (eg. `-lbl_suffix json`)  in the module's documentation.
    
 2. Serialize the lines:
    
@@ -272,6 +275,11 @@ PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /t
 
 ### 4. Additional scripts and modules
 
+Auxiliary scripts, that may come handy for curating or transforming data:
+
++ `bin/xml_to_json.py`
++ `bin/json_to_xml.py`
++ `bin/json_to_json.py`
 
 The following scripts are one-offs or deprecated. They are not meant for public consumption:
 
