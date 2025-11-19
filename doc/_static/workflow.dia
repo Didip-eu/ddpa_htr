@@ -89,6 +89,7 @@
     </dia:attribute>
   </dia:diagramdata>
   <dia:layer name="Background" visible="true" connectable="false"/>
+  <dia:layer name="Background" visible="true" connectable="false"/>
   <dia:layer name="Background" visible="true" connectable="true" active="true">
     <dia:object type="Standard - Image" version="0" id="O0">
       <dia:attribute name="obj_pos">
@@ -1946,7 +1947,10 @@
         <dia:boolean val="true"/>
       </dia:attribute>
       <dia:attribute name="line_style">
-        <dia:enum val="4"/>
+        <dia:enum val="1"/>
+      </dia:attribute>
+      <dia:attribute name="dashlength">
+        <dia:real val="0.50000000000000011"/>
       </dia:attribute>
     </dia:object>
     <dia:object type="Standard - Text" version="1" id="O67">
@@ -1954,12 +1958,13 @@
         <dia:point val="56,16"/>
       </dia:attribute>
       <dia:attribute name="obj_bb">
-        <dia:rectangle val="53.1437,15.0925;58.8562,16.25"/>
+        <dia:rectangle val="53.1437,15.0636;58.8852,17.3662"/>
       </dia:attribute>
       <dia:attribute name="text">
         <dia:composite type="text">
           <dia:attribute name="string">
-            <dia:string>#Augmentation#</dia:string>
+            <dia:string>#Augmentation
+(optional)#</dia:string>
           </dia:attribute>
           <dia:attribute name="font">
             <dia:font family="sans" style="0" name="Helvetica"/>
@@ -2017,21 +2022,12 @@
         <dia:point val="47,11"/>
       </dia:attribute>
       <dia:attribute name="obj_bb">
-        <dia:rectangle val="46.95,10.95;56.3618,14.05"/>
+        <dia:rectangle val="46.95,10.95;56.05,14.05"/>
       </dia:attribute>
       <dia:attribute name="poly_points">
         <dia:point val="47,11"/>
         <dia:point val="56,11"/>
         <dia:point val="56,14"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow">
-        <dia:enum val="22"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_length">
-        <dia:real val="0.5"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_width">
-        <dia:real val="0.5"/>
       </dia:attribute>
       <dia:connections>
         <dia:connection handle="2" to="O66" connection="1"/>
@@ -2042,7 +2038,7 @@
         <dia:point val="49,16"/>
       </dia:attribute>
       <dia:attribute name="obj_bb">
-        <dia:rectangle val="48.95,15.6382;52.05,16.3618"/>
+        <dia:rectangle val="48.95,15.95;52.05,16.05"/>
       </dia:attribute>
       <dia:attribute name="conn_endpoints">
         <dia:point val="49,16"/>
@@ -2051,36 +2047,18 @@
       <dia:attribute name="numcp">
         <dia:int val="1"/>
       </dia:attribute>
-      <dia:attribute name="end_arrow">
-        <dia:enum val="22"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_length">
-        <dia:real val="0.5"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_width">
-        <dia:real val="0.5"/>
-      </dia:attribute>
     </dia:object>
     <dia:object type="Standard - PolyLine" version="0" id="O71">
       <dia:attribute name="obj_pos">
         <dia:point val="51,21"/>
       </dia:attribute>
       <dia:attribute name="obj_bb">
-        <dia:rectangle val="50.95,17.95;56.3618,21.05"/>
+        <dia:rectangle val="50.95,17.95;56.05,21.05"/>
       </dia:attribute>
       <dia:attribute name="poly_points">
         <dia:point val="51,21"/>
         <dia:point val="56,21"/>
         <dia:point val="56,18"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow">
-        <dia:enum val="22"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_length">
-        <dia:real val="0.5"/>
-      </dia:attribute>
-      <dia:attribute name="end_arrow_width">
-        <dia:real val="0.5"/>
       </dia:attribute>
       <dia:connections>
         <dia:connection handle="2" to="O66" connection="6"/>
