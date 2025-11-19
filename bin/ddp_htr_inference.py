@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 import fargv
 import re
-import glob
 from typing import Callable, Union
 import json
 import logging
@@ -40,7 +39,6 @@ p = {
     "model_path": "./best.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "img_paths": set([]),
-    #"charter_dirs": set(["./"]),
     "charter_dirs": set([]),
     "segmentation_suffix": ".lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
