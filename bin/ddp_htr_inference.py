@@ -30,7 +30,7 @@ from libs.htr_model import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
 
-logging.basicConfig( level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
 logger = logging.getLogger(__name__)
 
 
@@ -171,6 +171,7 @@ if __name__ == "__main__":
         img_path, segmentation_file_path, output_file_path = img_triplet
         logger.debug( "File path={}".format( img_triplet[0]))
         if not args.overwrite_existing and output_file_path.exists():
+            logger.debug("Found {}: exiting.".format( output_file_path ))
             continue
 
         if not segmentation_file_path.exists():
