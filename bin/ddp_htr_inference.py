@@ -197,7 +197,7 @@ if __name__ == "__main__":
                 line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
                 dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
             except Exception as e:
-                logger.warning("Inference failed on line {} in file {}".format( line, img_path))
+                logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
                 continue
 
         # 3. Output
@@ -215,6 +215,7 @@ if __name__ == "__main__":
                 header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(dataset.page_dict['lines']):
+                logger.debug( line_dict )
                 output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
                 if 'gt' in args.output_data and 'gt' in line_dict:
                     output_row.append( line_dict['gt'] )
