@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 p = {
     "appname": "htr",
-    "model_path": "./best.mlmodel", # gdown https://drive.google.com/uc?id=1GOKgGWvhO7ugWw0tevzXhQa2cVx09iLu 
+    "model_path": "./best.mlmodel", 
+    "device": [('cpu','gpu','cuda'), "Computing device."],
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "img_paths": set([]),
     "charter_dirs": set([]),
@@ -48,7 +49,6 @@ p = {
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     "overwrite_existing": [1, "Write over existing output file (default)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
-    "device": [('cpu','gpu','cuda'), "Computing device."],
 }
 
 
