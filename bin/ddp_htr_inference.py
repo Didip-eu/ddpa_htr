@@ -40,10 +40,10 @@ p = {
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "img_paths": set([]),
     "charter_dirs": set([]),
-    "segmentation_suffix": ".lines.pred.json", # under each image dir, suffix of the subfolder that contains the segmentation data 
+    "segmentation_suffix": ".lines.pred.json", 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "img_suffix": ".img.jpg",
-    "htr_suffix": ".htr.pred", # under each image dir, suffix of the subfolder that contains the transcriptions
+    "htr_suffix": ".htr.pred", 
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     'overwrite_existing': [1, "Write over existing output file (default)."],
