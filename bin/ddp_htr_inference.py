@@ -43,7 +43,7 @@ p = {
     "segmentation_suffix": ".lines.pred.json", 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "img_suffix": ".img.jpg",
-    "htr_suffix": ".htr.pred", 
+    "htr_suffix": "", 
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     'overwrite_existing': [1, "Write over existing output file (default)."],
@@ -152,7 +152,8 @@ def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple
         img_stem = re.sub(r'{}$'.format( args.img_suffix), '', img_path.name )
         segfile_path = Path( re.sub(r'{}$'.format( args.img_suffix), segmentation_suffix, str(img_path) ))
         output_dir = img_path.parent if not args.output_dir else Path(args.output_dir)
-        path_triplets.append( ( img_path, segfile_path, output_dir.joinpath( f'{img_stem}.{args.appname}.pred.{args.output_format}')))
+        out_file_path = f'{img_stem}.{args.appname}.pred{args.htr_suffix}.{args.output_format}'
+        path_triplets.append( ( img_path, segfile_path, output_dir.joinpath( out_file_path )))
     #return path_triplets
     return sorted( path_triplets, key=lambda x: str(x))
 
