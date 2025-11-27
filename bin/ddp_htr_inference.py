@@ -46,8 +46,9 @@ p = {
     "htr_suffix": "", 
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
-    'overwrite_existing': [1, "Write over existing output file (default)."],
+    "overwrite_existing": [1, "Write over existing output file (default)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
+    "device": [('cpu','gpu','cuda'), "Computing device."],
 }
 
 
@@ -163,7 +164,7 @@ if __name__ == "__main__":
     args, _ = fargv.fargv( p )
     logger.debug(args)
 
-    model = HTR_Model.load( args.model_path )
+    model = HTR_Model.load( args.model_path, device='cuda' if args.device!='cpu' else 'cpu' )
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 

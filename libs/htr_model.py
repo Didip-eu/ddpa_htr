@@ -333,6 +333,7 @@ class HTR_Model():
             model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
             if device != model.device:
+                model.device=device
                 model.net.to( device )
             #model.hyper_parameters = hyper_parameters
 
