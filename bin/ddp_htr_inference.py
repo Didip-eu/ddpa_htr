@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
         # Idea: the live page dictionary is updated with all the info that may be of interest:
         # depending on the output format chosen, some of it gets deleted later.
-        for line, sample in enumerate(DataLoader(dataset, batch_size=1, num_workers=2)):
+        for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             try:
                 # strings, np.ndarray
                 predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
