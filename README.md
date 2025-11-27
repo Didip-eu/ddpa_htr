@@ -252,12 +252,13 @@ where optional flags are one or more of the following:
 
 ```
 -model_path=<class 'str'>  Default './best.mlmodel'.
+-device=<class 'tuple'> Computing device. Default ('cpu','gpu','cuda').
 -img_paths=<class 'set'>  Default set().
 -charter_dirs=<class 'set'>  Default set().
 -segmentation_suffix=<class 'str'>  Default '.lines.pred.json'.
 -output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default ''.
 -img_suffix=<class 'str'>  Default '.img.jpg'.
--htr_suffix=<class 'str'>  Default '.htr.pred'.
+-htr_suffix=<class 'str'>  If set, extra suffix to be added before the file extension (eg. a version number). Default ''.
 -output_format=<class 'tuple'> Output formats: 'stdout' and 'tsv' = 3-column output '<index>	<line id>	<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file. Default ('stdout', 'json', 'tsv', 'xml').
 -output_data=<class 'set'> By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below). Default {'pred'}.
 -overwrite_existing=<class 'int'> Write over existing output file (default). Default 1.
@@ -269,7 +270,7 @@ where optional flags are one or more of the following:
 #### Example:
 
 ```bash
-PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
+PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -device gpu -img_paths */*/*/*.img.jpg -segmentation_file_suffix '.lines.pred.json'
 ```
 
 
