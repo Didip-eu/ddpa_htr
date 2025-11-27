@@ -435,8 +435,8 @@ def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_
     lastChangeElt = ET.SubElement( metadataElt, 'LastChange')
     lastChangeElt.text=createdElt.text
     commentElt = ET.SubElement( metadataElt, 'Comments')
-    if 'comments' in seg_dict:
-        commentElt.text = seg_dict['comments']
+    if 'comment' in seg_dict:
+        commentElt.text = seg_dict['comment']
 
     img_name = Path(seg_dict['image_filename']).name
     img_width, img_height = seg_dict['image_width'], seg_dict['image_height']    
