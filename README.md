@@ -277,9 +277,9 @@ PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /t
 
 Auxiliary scripts, that may come handy for curating or transforming data:
 
-+ `bin/xml_to_json.py`
-+ `bin/json_to_xml.py`
-+ `bin/json_to_json.py`
++ `bin/xml_to_json.py`: PageXML → JSON segmentation dictionary (see [doc/segmentation_dict_example.json](JSON metadata example) for format)
++ `bin/json_to_xml.py`: JSON segmentation dictionary → PageXML
++ `bin/json_to_json.py`: merging or transformations of JSON metadata.
 
 The following scripts are one-offs or deprecated. They are not meant for public consumption:
 
