@@ -39,10 +39,20 @@ tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 Although this dataset is too small for the model to learn much, it allows for exercising and debugging the HTR modules provided here.
 
 
-## How to use
+## How to use: typical workflow
 
 
-### 1. Data preparation: pages, regions, and lines
+### 1. Data formats
+
+The HTR workflow relies on two data formats:
+
++ PageXML, with [reference schema here](doc/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. Zenodo dataset publication)
++ a JSON internal format ([example here](doc/segmentation_file_example.json)) with a similar structure, but also added features (eg. 'x-height' attribute at line level): used for storing intermediary states or for easy feeding to the UI.
+
+Most tools in the pipeline (training and inference) can handle both input and output formats. Explicit conversion between formats can also be done with standalone utilities (cf. end of this document).
+
+
+### 2. Data preparation: pages, regions, and lines
 
 The `libs/charter_htr_datasets.py` module defines two classes
 
@@ -56,7 +66,7 @@ Although it is possible to combine these classes in a single script in order to 
 
 ![](doc/_static/workflow.svg "Workflow diagram")
 
-#### 1.1. Obtaining lines out of pages and regions: the `PageDataset` class
+#### 2.1. Obtaining lines out of pages and regions: the `PageDataset` class
 
 For the sake of clarity, we illustrate the workflow by skipping the downloading stage and assume that the relative location `dataset/page_ds` already contains charter images and their PageXML metadata:
 
@@ -142,7 +152,7 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 2025-11-16 12:14:32,406 - dump_lines: Compiled 74 lines
 ```
 
-#### 1.2 Compiling lines out of augmented regions
+#### 2.2 Compiling lines out of augmented regions
 
 
 The script `bin/generate_htr_line_ds.py` is an example of how to compile lines out of Tormentor-augmented regions.
@@ -165,7 +175,7 @@ for rp in range(args.repeat):
 
 
 
-#### 1.3. Packing up line samples for training: the `HTRLineDataset` class
+#### 2.3. Packing up line samples for training: the `HTRLineDataset` class
 
 Initialize a `HTRLineDataset` object out of the desired samples (typically, a train or validation subset resulting from splitting the original data). Samples can be passed
 
@@ -194,11 +204,11 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 <!--![](doc/_static/8257576.png)-->
 
 
-### 2. Train from compiled line samples 
+### 3. Train from compiled line samples 
 
 The training script assumes that there already exists a directory (eg. `./dataset/htr_line_ds`) that contains all line images and transcriptions, as obtained through the step described above. Therefore, it only needs to split the set of lines and to initialize  `HTRLineDataset` objects accordingly. There are two main ways to accomplish this:
 
-#### 2.1 A list of training/validation line images
+#### 3.1 A list of training/validation line images
 
 ```bash
 PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
@@ -209,7 +219,7 @@ The script takes care of splitting all relevant images and metadata files into t
 + the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
 
 
-#### 2.2 A directory of line images
+#### 3.2 A directory of line images
 
 ```bash
 PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
@@ -227,7 +237,7 @@ By default, the script takes care of splitting all relevant images and metadata 
 <!--For a charter dataset to play with, look at the [Data section](#Data) above.-->
 
 
-#### 2.3 Usual options
+#### 3.3 Usual options
 
 To learn about the usual parameters of a training sessions (epochs, patience, etc.) run:
 
@@ -242,7 +252,7 @@ python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1 -
 ```
 
 
-### 3. Inference
+### 4. Inference
 
 ```bash
 python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
@@ -273,7 +283,7 @@ PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /t
 ```
 
 
-### 4. Additional scripts and modules
+### 5. Additional scripts and modules
 
 Auxiliary scripts, that may come handy for curating or transforming data:
 
