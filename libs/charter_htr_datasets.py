@@ -15,6 +15,7 @@ import re
 import os
 from pathlib import Path
 from typing import Callable, Union, Optional
+import sys
 
 # 3rd-party
 from tqdm import tqdm
@@ -30,15 +31,15 @@ import torchvision
 from torchvision.datasets import VisionDataset
 from torchvision.tv_tensors import BoundingBoxes, Mask
 import torchvision.transforms as transforms
-
-# local
-from . import download_utils as du
-from . import seglib
-from . import transforms as tsf
-#from . import alphabet, character_classes.py
-
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
+
+
+# local
+sys.path.append(str(Path(__file__).parents[0]))
+import download_utils as du
+import seglib
+import transforms as tsf
 
 
 

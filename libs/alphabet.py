@@ -8,6 +8,7 @@ import itertools
 import warnings
 from collections import Counter
 import unicodedata
+import sys
 
 # 3rd party
 import torch
@@ -15,7 +16,8 @@ from torch import Tensor
 import numpy as np
 
 # local
-from . import list_utils as lu
+sys.path.append(str(Path(__file__).parents[0]))
+import list_utils as lu
 
 class Alphabet:
     """Creating and handling alphabets.

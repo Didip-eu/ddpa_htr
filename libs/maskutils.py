@@ -4,7 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import gzip
 from PIL import Image
-from typing import Union,List,Tuple
+from typing import Union
 
 
 # 2D-channel functions, to be used in combination with either the BB image or the polygon/background image,

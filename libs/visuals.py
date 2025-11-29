@@ -5,16 +5,15 @@ Various visuals for HTR (draft)
 import matplotlib.pyplot as plt
 import numpy as np
 import pickle
-from typing import List
 
 
-def predictions_over_scores( strings: List[str], scores: List[List[float]]):
+def predictions_over_scores( strings: list[str], scores: list[list[float]]):
     """
     Given a batch of predictions, and the corresponding scores, display both as a heatmap.
 
     Args:
-        strings (List[str]): list of predicted strings.
-        scores (List[float]): lists of scores 
+        strings (list[str]): list of predicted strings.
+        scores (list[float]): lists of scores 
     """
 
     fig, ax = plt.subplots()

@@ -3,9 +3,9 @@
 Kraken/VGSL-based, HTR app. The current state provides:
 
 - the ability to read and export datasets out of a variety of image and metadata formats (PageXML, JSON)
-- a model builder/wrapper `model_htr.py`, that provides the interfaces needed for training and inference.
 - a training script `ddp_htr_train.py`, that can use any pre-processed set of line image+transcription samples, preferably stored on-disk (see below).
 - a high-level script `ddp_htr_inference.py` that runs inference on FSDB images, each provided with an existing JSON segmentation file, whose default path is ``<input_image_stem>.lines.pred.json``.
+- supporting modules: model builder/wrapper `libs/htr_model.py`; dataset classes `libs/charter_htr_datasets.py`; segmentation-related routines `libs/seglib.py`.
 
 <!-- - a shell-script wrapper, that manages the dependencies for the HTR task, if ever needed: it relies on a Makefile to generate the segmentation meta-data for the charter, if they are not already present (with `ddpa_lines`) and calls then `ddp_htr_inference.py`.
 -->
