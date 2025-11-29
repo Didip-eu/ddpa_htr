@@ -46,8 +46,8 @@ Although this dataset is too small for the model to learn much, it allows for ex
 
 The HTR workflow relies on two data formats:
 
-+ PageXML, with [reference schema here](doc/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. Zenodo dataset publication)
-+ a JSON internal format ([example here](doc/segmentation_dict_example.json)) with a similar structure, but also added features (eg. 'x-height' attribute at line level): used for storing intermediary states or for easy feeding to the UI.
++ PageXML, with [reference schema here](doc/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. publishing a dataset on Zenodo) or applications (Transkribus).
++ a JSON internal format ([example here](doc/segmentation_dict_example.json)) with a similar structure, but also added features (eg. 'x-height' and 'centerline' line attributes): used for storing intermediary states or for easy feeding to the UI.
 
 Most tools in the pipeline (training and inference) can handle both input and output formats. Explicit conversion between formats can also be done with standalone utilities (cf. end of this document).
 
