@@ -149,10 +149,10 @@ class PageDataset(VisionDataset):
             with open( resource_file ) as resrc_if:
                 self.dataset_resource = json.load( resrc_if )
         # A dataset resource dictionary needed, unless we build from existing files
-        if self.dataset_resource is None and not (from_page_folder or from_tsv_file or from_work_folder):
+        if self.dataset_resource is None and not (from_page_folder or from_page_files or from_region_files):
             raise FileNotFoundError("In order to create a dataset instance, you need either:" +
-                                    "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
-                                    "\n\t + one of the following options: -from_page_folder, -from_work_folder, -from_tsv_file")
+                                    "\n\t + a valid JSON resource file (-resource_file option)"
+                                    "\n\t + one of the following options: -from_page_folder, -from_page_files, -from_region_files")
 
         self._transforms = v2.Compose([
                             v2.ToImage(),
