@@ -1,0 +1,9 @@
+{
+  "file": "/home/nicolas/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
+  "tarball_filename": "koenigsfelden_1308-1662.tar.gz",
+  "md5": "9326bc99f9035fb697e1b3f552748640",
+  "desc": "Koenigsfelden ground truth data",
+  "origin": "local",
+  "tarball_root_name": "koenigsfelden_1308-1662",
+  "comment": "Transcriptions have been cleaned up (removal of obvious junk or non-printable characters, as well a redundant punctuation marks---star-shaped unicode symbols); unicode-abbreviation marks have been expanded."
+}

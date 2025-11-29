@@ -1,0 +1,9 @@
+{
+  "file": "/home/nicolas/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662_abbrev.tar.gz",
+  "tarball_filename": "koenigsfelden_1308-1662_abbrev.tar.gz",
+  "md5": "9326bc99f9035fb697e1b3f552748640",
+  "desc": "Koenigsfelden ground truth data",
+  "origin": "local",
+  "tarball_root_name": "koenigsfelden_1308-1662_abbrev",
+  "comment": "Similar to the KoenigsfeldenDataset, with a notable difference: Unicode abbreviations have been kept."
+}

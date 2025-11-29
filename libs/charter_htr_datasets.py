@@ -89,23 +89,11 @@ class PageDataset(VisionDataset):
       themselves are not used for training, this is not very useful; the augmentation is used only once, in order
       to generate the lines.
 
-
-    Attributes:
-        dataset_resource (dict): meta-data (URL, archive name, type of repository).
     """
-
-    dataset_resource = {
-            'file': '',
-            'tarball_filename': '-',
-            'md5': '-',
-            'desc': 'Constructed from files.',
-            'origin': 'local',
-            'tarball_root_name': '-',
-            'comment': '',
-    }
 
     def __init__( self,
                 root: str='./data',
+                resource_file: str = '',
                 page_work_folder: str = '',
                 line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_folder: str = '',
@@ -127,6 +115,8 @@ class PageDataset(VisionDataset):
             root (str): Where the archive is to be downloaded and the subfolder containing
                 original files (pageXML documents and page images) is to be created. 
                 Default: subfolder `data' in this project's directory.
+            resource_file (str): a JSON file storing URL and other info needed for downloading and 
+                extracting tarballs.
             page_work_folder (str): Where page images and XML annotations are to be extracted.
             from_page_folder (str): if set, the samples have to be extracted from the
                 raw page data contained in the given directory. GT metadata are either
@@ -152,7 +142,12 @@ class PageDataset(VisionDataset):
             img_suffix (str): image suffix. Default: '.jpg'
 
         """
-
+        self.dataset_resource = None
+        if resource_file:
+            if not Path( resource_file ).exists():
+                raise FileNotFoundError("Resource file {} does not exist. Exit.")
+            with open( resource_file ) as resrc_if:
+                self.dataset_resource = json.load( resrc_if )
         # A dataset resource dictionary needed, unless we build from existing files
         if self.dataset_resource is None and not (from_page_folder or from_tsv_file or from_work_folder):
             raise FileNotFoundError("In order to create a dataset instance, you need either:" +
@@ -565,92 +560,6 @@ class PageDataset(VisionDataset):
             with zipfile.ZipFile(output_file_path, 'r' ) as archive:
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
                 archive.extractall( root_path )
-
-
-## Specific page-wide datasets
-class MonasteriumDataset(PageDataset):
-    """A subset of Monasterium charter images and their meta-data (PageXML).
-
-        + its core is a set of charters segmented and transcribed by various contributors, mostly by correcting Transkribus-generated data.
-        + it has vocation to grow through in-house, DiDip-produced transcriptions.
-    """
-
-    dataset_resource = {
-            #'url': r'https://cloud.uni-graz.at/apps/files/?dir=/DiDip%20\(2\)/CV/datasets&fileid=147916877',
-            'url': r'https://drive.google.com/uc?id=1hEyAMfDEtG0Gu7NMT7Yltk_BAxKy_Q4_',
-            'tarball_filename': 'MonasteriumTekliaGTDataset.tar.gz',
-            'md5': '7d3974eb45b2279f340cc9b18a53b47a',
-            #'md5': '337929f65c52526b61d6c4073d08ab79',
-            'full-md5': 'e720bac1040523380921a576f4cc89dc',
-            'desc': 'Monasterium ground truth data (Teklia)',
-            'origin': 'google',
-            'tarball_root_name': 'MonasteriumTekliaGTDataset',
-            'comment': 'A clean, terse dataset, with no use of Unicode abbreviation marks.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-
-        super().__init__( *args, **kwargs)
-#
-
-class KoenigsfeldenDataset(PageDataset):
-    """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
-        The data have been compiled from raw Transkribus exports.
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
-            'tarball_filename': 'koenigsfelden_1308-1662.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Koenigsfelden ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'koenigsfelden_1308-1662',
-            'comment': 'Transcriptions have been cleaned up (removal of obvious junk or non-printable characters, as well a redundant punctuation marks---star-shaped unicode symbols); unicode-abbreviation marks have been expanded.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
-
-
-
-class KoenigsfeldenDatasetAbbrev(PageDataset):
-    """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
-        The data have been compiled from raw Transkribus exports.
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
-            'tarball_filename': 'koenigsfelden_1308-1662_abbrev.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Koenigsfelden ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'koenigsfelden_1308-1662_abbrev',
-            'comment': 'Similar to the KoenigsfeldenDataset, with a notable difference: Unicode abbreviations have been kept.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
-
-class NurembergLetterbooks(PageDataset):
-    """
-    Nuremberg letterbooks (15th century).
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/nuremberg_letterbooks/nuremberg_letterbooks.tar.gz",
-            'tarball_filename': 'nuremberg_letterbooks.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Nuremberg letterbooks ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'nuremberg_letterbooks',
-            'comment': 'Numerous struck-through lines (masked)'
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
 
 
 

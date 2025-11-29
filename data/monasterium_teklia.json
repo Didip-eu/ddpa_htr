@@ -1,0 +1,10 @@
+{
+  "url": "https://drive.google.com/uc?id=1hEyAMfDEtG0Gu7NMT7Yltk_BAxKy_Q4_",
+  "tarball_filename": "MonasteriumTekliaGTDataset.tar.gz",
+  "md5": "7d3974eb45b2279f340cc9b18a53b47a",
+  "full-md5": "e720bac1040523380921a576f4cc89dc",
+  "desc": "Monasterium ground truth data (Teklia)",
+  "origin": "google",
+  "tarball_root_name": "MonasteriumTekliaGTDataset",
+  "comment": "A clean, terse dataset, with no use of Unicode abbreviation marks."
+}
