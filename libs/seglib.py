@@ -1,13 +1,16 @@
+"""
+seglib.py
 
+Handling of segmentation outputs:
+   + images and masks from serialized segmentations (JSON and XML)
+   + format conversion (XML <-> JSON)
+"""
 #stdlib
 from pathlib import Path
 import json
-from typing import Callable, Optional, Union, Mapping, Any
-import itertools
+from typing import Union, Any
 import re
-import copy
 import sys
-import math
 from datetime import datetime
 
 # 3rd-party
@@ -16,15 +19,8 @@ import skimage as ski
 import xml.etree.ElementTree as ET
 import torch
 from torch import Tensor
-from torchvision.tv_tensors import Mask
 import numpy as np
-import numpy.ma as ma
 
-
-__LABEL_SIZE__=8
-
-"""Functions for segmentation output management: a subset for HTR purpose.
-"""
 
 
 def line_binary_mask_from_json_file( segmentation_json: str, polygon_key='coords' ) -> Tensor:
@@ -40,6 +36,7 @@ def line_binary_mask_from_json_file( segmentation_json: str, polygon_key='coords
     """
     with open( segmentation_json, 'r' ) as json_file:
         return line_binary_mask_from_segmentation_dict( json.load( json_file ), polygon_key=polygon_key)
+
 
 def line_binary_mask_from_xml_file( page_xml: str ) -> Tensor:
     """From a PageXML file describing polygons, return a boolean mask where any pixel belonging
@@ -71,6 +68,7 @@ def line_binary_mask_from_segmentation_dict( segmentation_dict: dict, polygon_ke
     mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
     return torch.tensor( np.sum( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ], axis=0))
 
+
 def line_binary_mask_stack_from_json_file( segmentation_json: str, polygon_key='coords' ) -> Tensor:
     """From a JSON file describing polygons, return a stack of boolean masks where any pixel belonging
     to a polygon is 1 and the other pixels 0.
@@ -84,6 +82,7 @@ def line_binary_mask_stack_from_json_file( segmentation_json: str, polygon_key='
     """
     with open( segmentation_json, 'r' ) as json_file:
         return line_binary_mask_stack_from_segmentation_dict( json.load( json_file ), polygon_key=polygon_key)
+
 
 def line_binary_mask_stack_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> Tensor:
     """From a segmentation dictionary describing polygons, return a stack of boolean masks where any pixel belonging
@@ -101,6 +100,7 @@ def line_binary_mask_stack_from_segmentation_dict( segmentation_dict: dict, poly
     mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
     return torch.tensor( np.stack( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ]))
 
+
 def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> list[list[int]]:
     """From a segmentation dictionary describing polygons, return a list of polygon boundaries, i.e. lists of points.
 
@@ -115,6 +115,7 @@ def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='
     elif 'regions' in segmentation_dict:
         return [ line[polygon_key] for reg in segmentation_dict['regions'] for line in reg['lines']] 
     return []
+
 
 def line_dicts_from_segmentation_dict( segmentation_dict: dict) -> list[dict]:
     """From a segmentation dictionary, return a list of all line dictionaries.
@@ -178,6 +179,7 @@ def line_images_from_img_json_files( img: str, segmentation_json: str, as_dictio
             segmentation_dict['lines'] = line_triplets
             return segmentation_dict
         return line_pairs
+
 
 def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict, polygon_key='coords' ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From a segmentation dictionary describing polygons, return 
@@ -243,6 +245,7 @@ def line_masks_from_img_json_files( img: str, segmentation_json: str, key='coord
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
         return line_masks_from_img_segmentation_dict( img_wh, json.load( json_file ), key=key)
 
+
 def line_masks_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict, polygon_key='coords' ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From a segmentation dictionary describing polygons, return 
     the bounding box coordinates and the boolean masks.
@@ -270,7 +273,6 @@ def line_masks_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dic
         masks.append( page_polyg_mask )
 
     return (np.stack( bbs ), np.stack( masks ))
-
 
 
 def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_key='coords', with_text=False):
