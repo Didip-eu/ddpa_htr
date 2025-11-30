@@ -15,6 +15,7 @@ import re
 import os
 from pathlib import Path
 from typing import Callable, Union, Optional
+import sys
 
 # 3rd-party
 from tqdm import tqdm
@@ -30,15 +31,15 @@ import torchvision
 from torchvision.datasets import VisionDataset
 from torchvision.tv_tensors import BoundingBoxes, Mask
 import torchvision.transforms as transforms
-
-# local
-from . import download_utils as du
-from . import seglib
-from . import transforms as tsf
-#from . import alphabet, character_classes.py
-
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
+
+
+# local
+sys.path.append(str(Path(__file__).parents[0]))
+import download_utils as du
+import seglib
+import transforms as tsf
 
 
 
@@ -88,23 +89,11 @@ class PageDataset(VisionDataset):
       themselves are not used for training, this is not very useful; the augmentation is used only once, in order
       to generate the lines.
 
-
-    Attributes:
-        dataset_resource (dict): meta-data (URL, archive name, type of repository).
     """
-
-    dataset_resource = {
-            'file': '',
-            'tarball_filename': '-',
-            'md5': '-',
-            'desc': 'Constructed from files.',
-            'origin': 'local',
-            'tarball_root_name': '-',
-            'comment': '',
-    }
 
     def __init__( self,
                 root: str='./data',
+                resource_file: str = '',
                 page_work_folder: str = '',
                 line_work_folder: str = './dataset/htr_line_dataset', 
                 from_page_folder: str = '',
@@ -126,6 +115,8 @@ class PageDataset(VisionDataset):
             root (str): Where the archive is to be downloaded and the subfolder containing
                 original files (pageXML documents and page images) is to be created. 
                 Default: subfolder `data' in this project's directory.
+            resource_file (str): a JSON file storing URL and other info needed for downloading and 
+                extracting tarballs.
             page_work_folder (str): Where page images and XML annotations are to be extracted.
             from_page_folder (str): if set, the samples have to be extracted from the
                 raw page data contained in the given directory. GT metadata are either
@@ -151,12 +142,17 @@ class PageDataset(VisionDataset):
             img_suffix (str): image suffix. Default: '.jpg'
 
         """
-
+        self.dataset_resource = None
+        if resource_file:
+            if not Path( resource_file ).exists():
+                raise FileNotFoundError("Resource file {} does not exist. Exit.")
+            with open( resource_file ) as resrc_if:
+                self.dataset_resource = json.load( resrc_if )
         # A dataset resource dictionary needed, unless we build from existing files
-        if self.dataset_resource is None and not (from_page_folder or from_tsv_file or from_work_folder):
+        if self.dataset_resource is None and not (from_page_folder or from_page_files or from_region_files):
             raise FileNotFoundError("In order to create a dataset instance, you need either:" +
-                                    "\n\t + a valid resource dictionary (cf. 'dataset_resource' class attribute)" +
-                                    "\n\t + one of the following options: -from_page_folder, -from_work_folder, -from_tsv_file")
+                                    "\n\t + a valid JSON resource file (-resource_file option)"
+                                    "\n\t + one of the following options: -from_page_folder, -from_page_files, -from_region_files")
 
         self._transforms = v2.Compose([
                             v2.ToImage(),
@@ -169,7 +165,7 @@ class PageDataset(VisionDataset):
         self._data = []
 
         self.root_path = Path(root) 
-        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] )
+        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] ) if  self.dataset_resource else '-'
         self.page_work_folder_path = self.archive_root_folder_path
 
         from_page_files = list(from_page_files)
@@ -388,7 +384,7 @@ class PageDataset(VisionDataset):
         return (img_chw.cpu(), label)
 
 
-    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1 ):
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
         """
         Save line samples in the line work folder; each line yields:
         - line crop (as PNG, by default)
@@ -402,16 +398,21 @@ class PageDataset(VisionDataset):
             resume (bool): resume a dump task---work folder is checked for existing, completed pages.
             iteration (int): integer suffix to be added to sample filename (useful when generating 
                 randomly augmented samples, with multiple calls to the functions on the same region).
+            dry_run (bool): Try and extract the line, but do write anything on disk (default: False).
         """
         line_work_folder_path = Path( line_work_folder )
-        line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        dummy_line_count = 0
+        if not dry_run:
+            line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        else:
+            logger.info("Line extraction (dummy run): line_work_folder_path={line_work_folder_path}")
 
         # when this routine is called only once per region
         if iteration==-1:
             if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
                 logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
                 return
-            if not resume:
+            if not (resume or dry_run):
                 self._purge( line_work_folder_path )
         start = 0
         sentinel_path = line_work_folder_path.joinpath('.sentinel')
@@ -431,6 +432,10 @@ class PageDataset(VisionDataset):
                 mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).cpu().numpy()
                 line_text = annotation['texts'][line_idx]
                 outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
+                if dry_run:
+                    logger.info(f"tensor: {line_tensor.shape}, mask: {mask_array.shape}, text: {line_text[:10]}..., outfile_prefix: {outfile_prefix}")
+                    dummy_line_count += 1
+                    continue
                 if iteration >= 0:
                     outfile_prefix = f"{outfile_prefix}-i{iteration}"
                 if not line_as_tensor:
@@ -443,14 +448,16 @@ class PageDataset(VisionDataset):
                     np.save( zf, mask_array )
                 with open( f'{outfile_prefix}.gt.txt', 'w') as of:
                     of.write( line_text )
+            if dry_run:
+                continue
             # indicates that this page dump is complete (for resuming task)
             with open( sentinel_path, 'w') as sf:
                 sf.write(f'{page_idx}')
         
-        if sentinel_path.exists():
+        if not dry_run and sentinel_path.exists():
             sentinel_path.unlink()
 
-        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png')))))
+        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png'))) if not dry_run else dummy_line_count))
 
 
     def __len__(self) -> int:
@@ -518,7 +525,7 @@ class PageDataset(VisionDataset):
     def __repr__(self) -> str:
         return f"""
                 Root path:\t{self.root_path}
-                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename'])}
+                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename']) if self.dataset_resource else '-'}
                 Archive root folder:\t{self.archive_root_folder_path}
                 Page_work folder:\t{self.page_work_folder_path}
                 Data points:\t{len(self._data)}
@@ -564,92 +571,6 @@ class PageDataset(VisionDataset):
             with zipfile.ZipFile(output_file_path, 'r' ) as archive:
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
                 archive.extractall( root_path )
-
-
-## Specific page-wide datasets
-class MonasteriumDataset(PageDataset):
-    """A subset of Monasterium charter images and their meta-data (PageXML).
-
-        + its core is a set of charters segmented and transcribed by various contributors, mostly by correcting Transkribus-generated data.
-        + it has vocation to grow through in-house, DiDip-produced transcriptions.
-    """
-
-    dataset_resource = {
-            #'url': r'https://cloud.uni-graz.at/apps/files/?dir=/DiDip%20\(2\)/CV/datasets&fileid=147916877',
-            'url': r'https://drive.google.com/uc?id=1hEyAMfDEtG0Gu7NMT7Yltk_BAxKy_Q4_',
-            'tarball_filename': 'MonasteriumTekliaGTDataset.tar.gz',
-            'md5': '7d3974eb45b2279f340cc9b18a53b47a',
-            #'md5': '337929f65c52526b61d6c4073d08ab79',
-            'full-md5': 'e720bac1040523380921a576f4cc89dc',
-            'desc': 'Monasterium ground truth data (Teklia)',
-            'origin': 'google',
-            'tarball_root_name': 'MonasteriumTekliaGTDataset',
-            'comment': 'A clean, terse dataset, with no use of Unicode abbreviation marks.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-
-        super().__init__( *args, **kwargs)
-#
-
-class KoenigsfeldenDataset(PageDataset):
-    """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
-        The data have been compiled from raw Transkribus exports.
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
-            'tarball_filename': 'koenigsfelden_1308-1662.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Koenigsfelden ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'koenigsfelden_1308-1662',
-            'comment': 'Transcriptions have been cleaned up (removal of obvious junk or non-printable characters, as well a redundant punctuation marks---star-shaped unicode symbols); unicode-abbreviation marks have been expanded.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
-
-
-
-class KoenigsfeldenDatasetAbbrev(PageDataset):
-    """A subset of charters from the Koenigsfelden abbey, covering a wide range of handwriting style.
-        The data have been compiled from raw Transkribus exports.
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/koenigsfelden_abbey_1308-1662/koenigsfelden_1308-1662.tar.gz",
-            'tarball_filename': 'koenigsfelden_1308-1662_abbrev.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Koenigsfelden ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'koenigsfelden_1308-1662_abbrev',
-            'comment': 'Similar to the KoenigsfeldenDataset, with a notable difference: Unicode abbreviations have been kept.',
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
-
-class NurembergLetterbooks(PageDataset):
-    """
-    Nuremberg letterbooks (15th century).
-    """
-
-    dataset_resource = {
-            'file': f"{os.getenv('HOME')}/tmp/data/nuremberg_letterbooks/nuremberg_letterbooks.tar.gz",
-            'tarball_filename': 'nuremberg_letterbooks.tar.gz',
-            'md5': '9326bc99f9035fb697e1b3f552748640',
-            'desc': 'Nuremberg letterbooks ground truth data',
-            'origin': 'local',
-            'tarball_root_name': 'nuremberg_letterbooks',
-            'comment': 'Numerous struck-through lines (masked)'
-    }
-
-    def __init__(self, *args, **kwargs ):
-        super().__init__( *args, **kwargs)
-
 
 
 

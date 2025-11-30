@@ -11,6 +11,7 @@ import sys
 import json
 import fargv
 from pathlib import Path
+from datetime import datetime
 
 src_root = Path(__file__).parents[1]
 sys.path.append( str( src_root ))
@@ -38,8 +39,9 @@ if __name__ == '__main__':
 
         with open( json_path, 'r') as json_if:
             segdict = json.load( json_if )
+            segdict['metadata'].update( {'created': str(datetime.now()), 'creator': __file__ })
             if args.comment:
-                segdict['comment']=args.comment
+                segdict['metadata']['comments']=args.comment
 
             if args.output_format == 'stdout':
                 seglib.xml_from_segmentation_dict( segdict, '', polygon_key=args.polygon_key, with_text=args.with_transcription )

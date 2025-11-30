@@ -78,9 +78,9 @@ all_charsets = space_charset \
             + greek_charset 
 
 # check for duplicates:
-from libs import list_utils as lu
 import itertools
 from collections import Counter
+import list_utils as lu
 
 all_chars = lu.flatten( all_charsets )
 if len(all_chars) != len(set(all_chars)):

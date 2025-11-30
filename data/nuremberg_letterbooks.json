@@ -1,0 +1,9 @@
+{
+  "file": "/home/nicolas/tmp/data/nuremberg_letterbooks/nuremberg_letterbooks.tar.gz",
+  "tarball_filename": "nuremberg_letterbooks.tar.gz",
+  "md5": "9326bc99f9035fb697e1b3f552748640",
+  "desc": "Nuremberg letterbooks ground truth data",
+  "origin": "local",
+  "tarball_root_name": "nuremberg_letterbooks",
+  "comment": "Numerous struck-through lines (masked)"
+}

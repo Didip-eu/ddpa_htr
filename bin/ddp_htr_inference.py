@@ -30,7 +30,10 @@ from libs.htr_model import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
 
-logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
+
+logging_format="%(asctime)s - %(levelname)s: %(funcName)s - %(message)s"
+logging_levels = {0: logging.ERROR, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG }
+logging.basicConfig( level=logging.INFO, format=logging_format, force=True )
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +52,8 @@ p = {
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     "overwrite_existing": [1, "Write over existing output file (default)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
+    "verbosity": [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"],
+
 }
 
 

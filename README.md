@@ -3,9 +3,9 @@
 Kraken/VGSL-based, HTR app. The current state provides:
 
 - the ability to read and export datasets out of a variety of image and metadata formats (PageXML, JSON)
-- a model builder/wrapper `model_htr.py`, that provides the interfaces needed for training and inference.
 - a training script `ddp_htr_train.py`, that can use any pre-processed set of line image+transcription samples, preferably stored on-disk (see below).
 - a high-level script `ddp_htr_inference.py` that runs inference on FSDB images, each provided with an existing JSON segmentation file, whose default path is ``<input_image_stem>.lines.pred.json``.
+- supporting modules: model builder/wrapper `libs/htr_model.py`; dataset classes `libs/charter_htr_datasets.py`; segmentation-related routines `libs/seglib.py`.
 
 <!-- - a shell-script wrapper, that manages the dependencies for the HTR task, if ever needed: it relies on a Makefile to generate the segmentation meta-data for the charter, if they are not already present (with `ddpa_lines`) and calls then `ddp_htr_inference.py`.
 -->
@@ -39,10 +39,20 @@ tar -C ./data/page_ds -zxvf MonasteriumToyPageDataset.tar.gz
 Although this dataset is too small for the model to learn much, it allows for exercising and debugging the HTR modules provided here.
 
 
-## How to use
+## How to use: typical workflow
 
 
-### 1. Data preparation: pages, regions, and lines
+### 1. Data formats
+
+The HTR workflow relies on two data formats:
+
++ PageXML, with [reference schema here](doc/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. publishing a dataset on Zenodo) or applications (Transkribus).
++ a JSON internal format ([example here](doc/segmentation_dict_example.json)) with a similar structure, but also added features (eg. 'x-height' and 'centerline' line attributes): used for storing intermediary states or for easy feeding to the UI.
+
+Most tools in the pipeline (training and inference) can handle both input and output formats. Explicit conversion between formats can also be done with standalone utilities (cf. end of this document).
+
+
+### 2. Data preparation: pages, regions, and lines
 
 The `libs/charter_htr_datasets.py` module defines two classes
 
@@ -56,7 +66,7 @@ Although it is possible to combine these classes in a single script in order to 
 
 ![](doc/_static/workflow.svg "Workflow diagram")
 
-#### 1.1. Obtaining lines out of pages and regions: the `PageDataset` class
+#### 2.1. Obtaining lines out of pages and regions: the `PageDataset` class
 
 For the sake of clarity, we illustrate the workflow by skipping the downloading stage and assume that the relative location `dataset/page_ds` already contains charter images and their PageXML metadata:
 
@@ -73,6 +83,7 @@ We can compile lines out of an explicit list of charter image files through the 
 1. Extract text regions:
    
    ```python
+   from libs.charter_htr_datasets import PageDataset
    ds=PageDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
    2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
    100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
@@ -128,6 +139,7 @@ We can compile lines out of an explicit list of charter image files through the 
 Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
  
 ```python
+from libs.charter_htr_datasets import PageDataset
 PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_ds', overwrite_existing=True)
 2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
 100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
@@ -142,13 +154,16 @@ PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('da
 2025-11-16 12:14:32,406 - dump_lines: Compiled 74 lines
 ```
 
-#### 1.2 Compiling lines out of augmented regions
+#### 2.2 Compiling lines out of augmented regions
 
 
 The script `bin/generate_htr_line_ds.py` is an example of how to compile lines out of Tormentor-augmented regions.
 The compilation follows the general pattern shown above, with an extra transformation step that precedes the line compilation:
 
 ```python
+from libs.charter_htr_datasets import PageDataset
+import tormentor
+
 # list of images
 imgs = list([ Path( ip ) for ip in args.img_paths ])
 # construct a page datasets (1 sample = 1 region)
@@ -165,7 +180,7 @@ for rp in range(args.repeat):
 
 
 
-#### 1.3. Packing up line samples for training: the `HTRLineDataset` class
+#### 2.3. Packing up line samples for training: the `HTRLineDataset` class
 
 Initialize a `HTRLineDataset` object out of the desired samples (typically, a train or validation subset resulting from splitting the original data). Samples can be passed
 
@@ -178,6 +193,7 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 + as a TSV file storing a list of samples. Eg.
 
   ```python
+  from libs.charter_htr_datasets import HTRLineDataset
   # create and store as TSV
   HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds.tsv' )
   # instantiate from TSV list
@@ -187,6 +203,7 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 + as a full directory:
 
   ```python
+  from libs.charter_htr_datasets import HTRLineDataset
   ds=HTRLineDataset( from_work_folder='dataset/htr_line_ds/train')
   ```
 
@@ -194,11 +211,11 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 <!--![](doc/_static/8257576.png)-->
 
 
-### 2. Train from compiled line samples 
+### 3. Train from compiled line samples 
 
 The training script assumes that there already exists a directory (eg. `./dataset/htr_line_ds`) that contains all line images and transcriptions, as obtained through the step described above. Therefore, it only needs to split the set of lines and to initialize  `HTRLineDataset` objects accordingly. There are two main ways to accomplish this:
 
-#### 2.1 A list of training/validation line images
+#### 3.1 A list of training/validation line images
 
 ```bash
 PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
@@ -209,7 +226,7 @@ The script takes care of splitting all relevant images and metadata files into t
 + the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
 
 
-#### 2.2 A directory of line images
+#### 3.2 A directory of line images
 
 ```bash
 PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
@@ -227,7 +244,7 @@ By default, the script takes care of splitting all relevant images and metadata 
 <!--For a charter dataset to play with, look at the [Data section](#Data) above.-->
 
 
-#### 2.3 Usual options
+#### 3.3 Usual options
 
 To learn about the usual parameters of a training sessions (epochs, patience, etc.) run:
 
@@ -242,7 +259,7 @@ python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1 -
 ```
 
 
-### 3. Inference
+### 4. Inference
 
 ```bash
 python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
@@ -274,13 +291,13 @@ PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /t
 ```
 
 
-### 4. Additional scripts and modules
+### 5. Additional scripts and modules
 
 Auxiliary scripts, that may come handy for curating or transforming data:
 
-+ `bin/xml_to_json.py`
-+ `bin/json_to_xml.py`
-+ `bin/json_to_json.py`
++ `bin/xml_to_json.py`: PageXML → JSON segmentation dictionary (see [JSON metadata example](doc/segmentation_dict_example.json) for format)
++ `bin/json_to_xml.py`: JSON segmentation dictionary → PageXML
++ `bin/json_to_json.py`: merging or transformations of JSON metadata.
 
 The following scripts are one-offs or deprecated. They are not meant for public consumption:
 

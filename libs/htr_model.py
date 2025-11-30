@@ -7,6 +7,8 @@ import re
 import warnings
 import itertools
 import collections
+import sys
+
 
 import torch
 from torch import Tensor
@@ -16,8 +18,10 @@ from scipy.special import logsumexp
 
 
 # local
+sys.path.append(str(Path(__file__).parents[0]))
+
 from kraken.vgsl import TorchVGSLModel
-from libs.alphabet import Alphabet
+from alphabet import Alphabet
 import character_classes as cc
 
 
