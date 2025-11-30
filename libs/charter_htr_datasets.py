@@ -165,7 +165,7 @@ class PageDataset(VisionDataset):
         self._data = []
 
         self.root_path = Path(root) 
-        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] )
+        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] ) if  self.dataset_resource else '-'
         self.page_work_folder_path = self.archive_root_folder_path
 
         from_page_files = list(from_page_files)
@@ -384,7 +384,7 @@ class PageDataset(VisionDataset):
         return (img_chw.cpu(), label)
 
 
-    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1 ):
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
         """
         Save line samples in the line work folder; each line yields:
         - line crop (as PNG, by default)
@@ -398,16 +398,21 @@ class PageDataset(VisionDataset):
             resume (bool): resume a dump task---work folder is checked for existing, completed pages.
             iteration (int): integer suffix to be added to sample filename (useful when generating 
                 randomly augmented samples, with multiple calls to the functions on the same region).
+            dry_run (bool): Try and extract the line, but do write anything on disk (default: False).
         """
         line_work_folder_path = Path( line_work_folder )
-        line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        dummy_line_count = 0
+        if not dry_run:
+            line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        else:
+            logger.info("Line extraction (dummy run): line_work_folder_path={line_work_folder_path}")
 
         # when this routine is called only once per region
         if iteration==-1:
             if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
                 logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
                 return
-            if not resume:
+            if not (resume or dry_run):
                 self._purge( line_work_folder_path )
         start = 0
         sentinel_path = line_work_folder_path.joinpath('.sentinel')
@@ -427,6 +432,10 @@ class PageDataset(VisionDataset):
                 mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).cpu().numpy()
                 line_text = annotation['texts'][line_idx]
                 outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
+                if dry_run:
+                    logger.info(f"tensor: {line_tensor.shape}, mask: {mask_array.shape}, text: {line_text[:10]}..., outfile_prefix: {outfile_prefix}")
+                    dummy_line_count += 1
+                    continue
                 if iteration >= 0:
                     outfile_prefix = f"{outfile_prefix}-i{iteration}"
                 if not line_as_tensor:
@@ -439,14 +448,16 @@ class PageDataset(VisionDataset):
                     np.save( zf, mask_array )
                 with open( f'{outfile_prefix}.gt.txt', 'w') as of:
                     of.write( line_text )
+            if dry_run:
+                continue
             # indicates that this page dump is complete (for resuming task)
             with open( sentinel_path, 'w') as sf:
                 sf.write(f'{page_idx}')
         
-        if sentinel_path.exists():
+        if not dry_run and sentinel_path.exists():
             sentinel_path.unlink()
 
-        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png')))))
+        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png'))) if not dry_run else dummy_line_count))
 
 
     def __len__(self) -> int:
@@ -514,7 +525,7 @@ class PageDataset(VisionDataset):
     def __repr__(self) -> str:
         return f"""
                 Root path:\t{self.root_path}
-                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename'])}
+                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename']) if self.dataset_resource else '-'}
                 Archive root folder:\t{self.archive_root_folder_path}
                 Page_work folder:\t{self.page_work_folder_path}
                 Data points:\t{len(self._data)}

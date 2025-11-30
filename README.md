@@ -83,6 +83,7 @@ We can compile lines out of an explicit list of charter image files through the 
 1. Extract text regions:
    
    ```python
+   from libs.charter_htr_datasets import PageDataset
    ds=PageDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
    2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
    100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
@@ -138,6 +139,7 @@ We can compile lines out of an explicit list of charter image files through the 
 Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
  
 ```python
+from libs.charter_htr_datasets import PageDataset
 PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_ds', overwrite_existing=True)
 2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
 100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
@@ -159,6 +161,9 @@ The script `bin/generate_htr_line_ds.py` is an example of how to compile lines o
 The compilation follows the general pattern shown above, with an extra transformation step that precedes the line compilation:
 
 ```python
+from libs.charter_htr_datasets import PageDataset
+import tormentor
+
 # list of images
 imgs = list([ Path( ip ) for ip in args.img_paths ])
 # construct a page datasets (1 sample = 1 region)
@@ -188,6 +193,7 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 + as a TSV file storing a list of samples. Eg.
 
   ```python
+  from libs.charter_htr_datasets import HTRLineDataset
   # create and store as TSV
   HTRLineDataset( from_line_files=Path('./dataset/htr_line_ds').glob('*.png'), to_tsv_file='train_ds.tsv' )
   # instantiate from TSV list
@@ -197,6 +203,7 @@ Initialize a `HTRLineDataset` object out of the desired samples (typically, a tr
 + as a full directory:
 
   ```python
+  from libs.charter_htr_datasets import HTRLineDataset
   ds=HTRLineDataset( from_work_folder='dataset/htr_line_ds/train')
   ```
 
