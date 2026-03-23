@@ -223,7 +223,7 @@ class PageDataset(VisionDataset):
         if from_region_files:
             self._data = [ (ip, Path( re.sub(r'\.png$', '.json', str(ip)))) for ip in image_paths ]
         else:
-            self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix, limit=limit )
+            self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix, limit=limit, overwrite_existing=not resume_task )
 
         self.config = {
                 'resume_task': resume_task,
@@ -235,7 +235,7 @@ class PageDataset(VisionDataset):
         logger.info(self)
 
 
-    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix, limit=0):
+    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix, limit=0, overwrite_existing=1):
         """
         Build and save data samples (img, label), with a 1-to-many relationship between original image 
         and samples:
@@ -244,9 +244,10 @@ class PageDataset(VisionDataset):
 
         Args:
             image_paths (list[Path]): a list of page image files.
-            img_suffix (str): suffix of page image file
-            lbl_suffix (str): suffix of page annotation file
-            limit (int): stop the compilation after <limit> charters
+            img_suffix (str): suffix of page image file.
+            lbl_suffix (str): suffix of page annotation file.
+            limit (int): stop the compilation after <limit> charters.
+            overwrite_existing (bool): write over existing files.
 
         Return:
             list[tuple(Path,Path)]: a list of pairs (<region_img_file_path.png>, <annotation_file_path.json>)
@@ -269,6 +270,12 @@ class PageDataset(VisionDataset):
             lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
             if not lbl_path.exists():
                 continue
+
+            # check completion flag
+            complete_touchfile_path = Path(re.sub(r'{}$'.format( img_suffix ), '.complete', str(ip) ))
+            if not overwrite_existing and complete_touchfile_path.exists():
+                continue
+            complete_touchfile_path.unlink(missing_ok=True)
 
             page_dict = {}
             if (lbl_path.name)[-4:]=='.xml':
@@ -297,16 +304,17 @@ class PageDataset(VisionDataset):
                 del line['regions']
                 outer_reg['lines'].append( line )
             for r in regions.values():
-                if not r['lines']:
+                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
+                if not r['lines']: 
                     continue
                 new_img = img.crop( r['bbox_ltrb'] )
                 new_img.save( r['image_filename'])
-                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
                 with open( new_lbl_path, 'w') as jsonf:
                     del r['bbox_ltrb']
                     jsonf.write( json.dumps(r, indent=4) )
 
                 data.append( (Path(r['image_filename']), new_lbl_path) )
+            open(complete_touchfile_path, 'w')
         return data
 
     def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
