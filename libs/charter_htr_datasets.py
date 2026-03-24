@@ -648,7 +648,7 @@ class HTRLineDataset(VisionDataset):
             padding_style (str): When extracting line bounding boxes, padding to be 
                 used around the polygon: 'median'=median value of the polygon; 'noise'=random;
                 'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
-                Default is None.
+                Default is 'median'.
         """
 
         data = []
@@ -867,23 +867,17 @@ class HTRLineDataset(VisionDataset):
 
         sample = self._data[index].copy()
         sample['transcription']=self.target_transform( sample['transcription'] )
+        padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
 
         with Image.open( img_path ) as img:
-            
             img_array_hwc = np.array( img ) # img path --> img ndarray
-
+            # apply mask
             if self.config['padding_style'] is not None:
                 assert 'binary_mask' in sample and sample['binary_mask'].exists()
                 with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
                     binary_mask_hw = np.load( mask_in )
-                    padding_func = lambda x, m, channel_dim=2: x
-                    if self.config['padding_style']=='noise':
-                        padding_func = tsf.bbox_noise_pad
-                    elif self.config['padding_style']=='zero':
-                        padding_func = tsf.bbox_zero_pad
-                    elif self.config['padding_style']=='median':
-                        padding_func = tsf.bbox_median_pad
-                    img_array_hwc = padding_func( img_array_hwc, binary_mask_hw, channel_dim=2 )
+                    if self.config['padding_style']:
+                        img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
                     if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
                         img_array_hwc=img_array_hwc[:,:,None]
             del sample['binary_mask']
@@ -974,6 +968,56 @@ class HTRLineDataset(VisionDataset):
             row_format.format("GT length", *gt_length_stats),
         ])
 
+
+class TrOCrLineDataset( HTRLineDataset ):
+
+    def __init__( self, *args, *kwargs ):
+        super().__init__( *args, *kwargs )
+
+    
+    def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
+        """Callback function for the iterator. Assumption: the raw sample always contains
+        the bounding box image + binary polygon mask. Any combined image (ex. noise-background)
+        is constructed from those, _before_ any transform that is passed to the DS constructor.
+
+        Args:
+            index (int): item index.
+
+        Returns:
+            dict[str,Union[Tensor,int,str]]: a sample dictionary
+        """
+        img_path = self._data[index]['img']
+        
+        assert isinstance(img_path, Path) or isinstance(img_path, str)
+
+        sample = self._data[index].copy()
+        sample['transcription']=self.target_transform( sample['transcription'] )
+        padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
+
+        with Image.open( img_path ) as img:
+            img_array_hwc = np.array( img ) # img path --> img ndarray
+            # apply mask
+            if self.config['padding_style'] is not None:
+                assert 'binary_mask' in sample and sample['binary_mask'].exists()
+                with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
+                    binary_mask_hw = np.load( mask_in )
+                    if self.config['padding_style']:
+                        img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
+                    if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
+                        img_array_hwc=img_array_hwc[:,:,None]
+            del sample['binary_mask']
+
+            # img ndarray --> tensor
+            sample['img']=img_array_hwc 
+            logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
+
+
+            sample = self.transform( sample )
+
+            sample['id'] = Path(img_path).name
+
+            logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
+            return sample
 
 
 def dummy():
