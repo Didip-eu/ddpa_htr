@@ -33,6 +33,7 @@ from torchvision.tv_tensors import BoundingBoxes, Mask
 import torchvision.transforms as transforms
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
+from transformers import TrOCRProcessor, AutoTokenizer, AutoModelForImageTextToText
 
 
 # local
@@ -621,7 +622,7 @@ class HTRLineDataset(VisionDataset):
                 expansion_masks = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
-                padding_style: str = 'median',
+                padding_style: str = None,
                 ) -> None:
         """Initialize a dataset instance.
 
@@ -648,10 +649,10 @@ class HTRLineDataset(VisionDataset):
             padding_style (str): When extracting line bounding boxes, padding to be 
                 used around the polygon: 'median'=median value of the polygon; 'noise'=random;
                 'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
-                Default is 'median'.
+                Default is None (no padding).
         """
 
-        data = []
+        self._data = []
         from_line_files = [ Path(f) for f in from_line_files ] 
 
         self.img_suffix = img_suffix
@@ -664,8 +665,8 @@ class HTRLineDataset(VisionDataset):
                 self.work_folder_path = tsv_path.parent
                 # paths are assumed to be absolute
                 self._data = self.load_from_tsv( tsv_path, expansion_masks )
-                logger.debug("data={}".format( data[:6]))
-                #logger.debug("height: {} type={}".format( data[0]['height'], type(data[0]['height'])))
+                logger.debug("data={}".format( self._data[:6]))
+                #logger.debug("height: {} type={}".format( self._data[0]['height'], type(self._data[0]['height'])))
             else:
                 raise FileNotFoundError(f'File {tsv_path} does not exist!')
         else:
@@ -690,8 +691,8 @@ class HTRLineDataset(VisionDataset):
             trf = v2.Compose( [ trf, transform ] ) 
         super().__init__(root=self.work_folder_path, transform=trf, target_transform=target_transform ) # if target_transform else self.filter_transcription)
 
-        if padding_style and padding_style not in ['noise', 'zero', 'median', 'none']:
-            raise ValueError(f"Incorrect padding style: '{line_padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
+        if padding_style and padding_style not in ['noise', 'zero', 'median']:
+            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
 
         # bbox or polygons and/or masks
         self.config = {
@@ -876,8 +877,7 @@ class HTRLineDataset(VisionDataset):
                 assert 'binary_mask' in sample and sample['binary_mask'].exists()
                 with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
                     binary_mask_hw = np.load( mask_in )
-                    if self.config['padding_style']:
-                        img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
+                    img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
                     if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
                         img_array_hwc=img_array_hwc[:,:,None]
             del sample['binary_mask']
@@ -969,10 +969,11 @@ class HTRLineDataset(VisionDataset):
         ])
 
 
-class TrOCrLineDataset( HTRLineDataset ):
+class TrOCRLineDataset( HTRLineDataset ):
 
-    def __init__( self, *args, *kwargs ):
-        super().__init__( *args, *kwargs )
+    def __init__( self, *args, **kwargs ):
+        super().__init__( *args, **kwargs )
+        self.processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
 
     
     def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
@@ -992,27 +993,34 @@ class TrOCrLineDataset( HTRLineDataset ):
 
         sample = self._data[index].copy()
         sample['transcription']=self.target_transform( sample['transcription'] )
-        padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
 
+        padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
         with Image.open( img_path ) as img:
             img_array_hwc = np.array( img ) # img path --> img ndarray
+
+            print(img_array_hwc.dtype)
             # apply mask
             if self.config['padding_style'] is not None:
                 assert 'binary_mask' in sample and sample['binary_mask'].exists()
                 with gzip.GzipFile(sample['binary_mask'], 'r') as mask_in:
                     binary_mask_hw = np.load( mask_in )
-                    if self.config['padding_style']:
-                        img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
+                    img_array_hwc = padding_func[self.config['padding_style']]( img_array_hwc, binary_mask_hw, channel_dim=2 ) 
                     if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
                         img_array_hwc=img_array_hwc[:,:,None]
             del sample['binary_mask']
 
+
             # img ndarray --> tensor
-            sample['img']=img_array_hwc 
+            # 1. back to PIL
+            # 2. TrOCR encoding
+            print(img_array_hwc.dtype)
+            sample['img']=self.processor( Image.fromarray( img_array_hwc ), return_tensors='pt').pixel_values
             logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
-
-
-            sample = self.transform( sample )
+            print(sample['transcription'])
+            sample['transcription']=self.processor.tokenizer( sample['transcription'], padding="max_length", max_length=400).input_ids
+            #sample['transcription']=AutoTokenizer.from_pretrained("dh-unibe/trocr-kurrent")( sample['transcription'], padding="max_length", max_length=128 ).input_ids
+            #print(sample['transcription'])
+            print( self.processor.batch_decode( sample['transcription'] ))
 
             sample['id'] = Path(img_path).name
 
