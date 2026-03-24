@@ -141,7 +141,7 @@ class PageDataset(VisionDataset):
             lbl_suffix (str): '.xml' for PageXML (default) or valid, unique suffix of JSON file.
                 Ex. '.htr.gt.json'
             img_suffix (str): image suffix. Default: '.jpg'
-
+            device (str): computing device ('cpu', 'gpu', 'cuda:0', ...)
         """
         self.dataset_resource = None
         if resource_file:
@@ -623,6 +623,7 @@ class HTRLineDataset(VisionDataset):
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
                 padding_style: str = None,
+                device: str = 'cpu',
                 ) -> None:
         """Initialize a dataset instance.
 
@@ -650,6 +651,7 @@ class HTRLineDataset(VisionDataset):
                 used around the polygon: 'median'=median value of the polygon; 'noise'=random;
                 'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
                 Default is None (no padding).
+            device (str): computing device -- 'cpu' (default), 'gpu', 'cuda:0', ...
         """
 
         self._data = []
@@ -658,6 +660,7 @@ class HTRLineDataset(VisionDataset):
         self.img_suffix = img_suffix
         self.gt_suffix = gt_suffix
         self.channel_suffix = channel_suffix
+        self.device = device
 
         if from_tsv_file:
             tsv_path = Path( from_tsv_file )
@@ -1014,12 +1017,11 @@ class TrOCRLineDataset( HTRLineDataset ):
             # 1. back to PIL
             # 2. TrOCR encoding
             print(img_array_hwc.dtype)
-            sample['img']=self.processor( Image.fromarray( img_array_hwc ), return_tensors='pt').pixel_values
+            sample['img']=self.processor( Image.fromarray( img_array_hwc ), return_tensors='pt').pixel_values.to(self.device)
             logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
             print(sample['transcription'])
             sample['transcription']=self.processor.tokenizer( sample['transcription'], padding="max_length", max_length=400).input_ids
-            #sample['transcription']=AutoTokenizer.from_pretrained("dh-unibe/trocr-kurrent")( sample['transcription'], padding="max_length", max_length=128 ).input_ids
-            #print(sample['transcription'])
+            
             print( self.processor.batch_decode( sample['transcription'] ))
 
             sample['id'] = Path(img_path).name
