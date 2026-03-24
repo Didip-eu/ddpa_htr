@@ -2,7 +2,8 @@ coremltools
 fargv
 gdown
 matplotlib
-numpy
+# numpy >= 2.0 breaks transformers
+numpy >=1.17,<2.0
 Pillow
 protobuf
 pytest
@@ -14,3 +15,5 @@ tensorboard
 tqdm
 pandas
 tormentor
+# for TrOCR
+transformers
