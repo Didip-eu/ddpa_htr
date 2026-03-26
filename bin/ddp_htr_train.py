@@ -117,7 +117,7 @@ if __name__ == "__main__":
    
     #-------------- Dataset ---------------
 
-    # to be deprecated
+    # to be deprecated (use Pylelemmatize)
     filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
 
     resize_func = Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ])
