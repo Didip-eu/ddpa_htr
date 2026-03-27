@@ -112,7 +112,7 @@ if __name__ == "__main__":
 
     #ctc_loss = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / args.batch_size
     # (our model already computes the softmax )
-
+    # default: blank=0
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / hyper_params['batch_size']
    
     #-------------- Dataset ---------------

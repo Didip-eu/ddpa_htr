@@ -23,6 +23,8 @@ sys.path.append(str(Path(__file__).parents[0]))
 from kraken.vgsl import TorchVGSLModel
 from alphabet import Alphabet
 import character_classes as cc
+import pylelemmatize as ll
+from pylelemmatize import LemmatizerBMP
 
 
 logging.basicConfig( level=logging.DEBUG, format="%(asctime)s - %(funcName)s: %(message)s", force=True )
@@ -38,7 +40,7 @@ class HTR_Model():
     default_model_spec = '[0,0,0,3 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,13,32 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 Mp2,2 Cr3,9,64 Do0.1,2 S1(1x0)1,3 Lbx200 Do0.1,2 Lbx200 Do0.1,2 Lbx200 Do]'
 
     def __init__( self, 
-                  alphabet:'Alphabet'=None,
+                  alphabet:Union['Alphabet',str]=None,
                   net=None, 
                   model_spec=default_model_spec, 
                   decoder=None, 
@@ -48,7 +50,8 @@ class HTR_Model():
         """Initialize a new network wrapper.
 
         Args:
-            alphabet (alphabet.Alphabet): the alphabet object, with encoding/decoding functionalities
+            alphabet (Union[alphabet.Alphabet,str]): the alphabet object, with encoding/decoding functionalities, 
+                or its serialization.
             net (str): path of an existing, serialized network/Torch module
             model_spec (str): a VGSL specification for constructing a model.
             decoder (Callable[[np.ndarray], List[Tuple[int,float]]]: an alphabet-agnostic decoding function, 
@@ -58,10 +61,10 @@ class HTR_Model():
         """
 
         if alphabet is None:
-            self.alphabet = Alphabet( cc.space_charset + cc.latin_charset + cc.punctuation_charset, case_folding=True )
+            self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase) )
         else:
-            # during save/resume cycles, alphabet may be serialized into a list
-            self.alphabet = Alphabet( alphabet ) if type(alphabet) is not Alphabet else alphabet
+            # during save/resume cycles, alphabet may be serialized as a dict
+            self.alphabet = Alphabet.load( alphabet) if type(alphabet) is dict else alphabet
         
         if net:
             self.net = self.load( net )
@@ -174,66 +177,13 @@ class HTR_Model():
         #symbols = self.alphabet 
         return list(zip(labels, scores))
 
-    @staticmethod
-    def decode_beam_search(outputs_cw: np.ndarray, beam_size=3):
-        """ Beam-search decoding
-        """
-
-        c, w = outputs_cw.shape
-        probs = np.log(outputs_cw)
-        beam = [(tuple(), (0.0, float('-inf')))]  # type: List[Tuple[Tuple, Tuple[float, float]]]
-
-        # loop over each time step
-        for t in range(w):
-            next_beam = collections.defaultdict(lambda: 2*(float('-inf'),))  # type: dict
-            # p_b -> prob for prefix ending in blank
-            # p_nb -> prob for prefix not ending in blank
-            for prefix, (p_b, p_nb) in beam:
-                # only update ending-in-blank-prefix probability for blank
-                n_p_b, n_p_nb = next_beam[prefix]
-                n_p_b = logsumexp((n_p_b, p_b + probs[0, t], p_nb + probs[0, t]))
-                next_beam[prefix] = (n_p_b, n_p_nb)
-                # loop over non-blank classes
-                for s in range(1, c):
-                    # only update the not-ending-in-blank-prefix probability for prefix+s
-                    l_end = prefix[-1][0] if prefix else None
-                    n_prefix = prefix + ((s, t, t),)
-                    n_p_b, n_p_nb = next_beam[n_prefix]
-                    if s == l_end:
-                        # substitute the previous non-blank-ending-prefix
-                        # probability for repeated labels
-                        n_p_nb = logsumexp((n_p_nb, p_b + probs[s, t]))
-                    else:
-                        n_p_nb = logsumexp((n_p_nb, p_b + probs[s, t], p_nb + probs[s, t]))
-
-                    next_beam[n_prefix] = (n_p_b, n_p_nb)
-
-                    # If s is repeated at the end we also update the unchanged
-                    # prefix. This is the merging case.
-                    if s == l_end:
-                        n_p_b, n_p_nb = next_beam[prefix]
-                        n_p_nb = logsumexp((n_p_nb, p_nb + probs[s, t]))
-                        # rewrite both new and old prefix positions
-                        next_beam[prefix[:-1] + ((prefix[-1][0], prefix[-1][1], t),)] = (n_p_b, n_p_nb)
-                        next_beam[n_prefix[:-1] + ((n_prefix[-1][0], n_prefix[-1][1], t),)] = next_beam.pop(n_prefix)
-
-            # Sort and trim the beam before moving on to the
-            # next time-step.
-            beam = sorted(next_beam.items(),
-                          key=lambda x: logsumexp(x[1]),
-                          reverse=True)
-            beam = beam[:beam_size]
-        return [(c, max(outputs_cw[c, start:end+1])) for (c, start, end) in beam[0][0]]
-
 
     def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
         """ Make predictions on a batch of images.
 
         Args:
             img_nchw (Tensor): a batch of images.
-
             widths_n (Tensor): a 1D tensor of lengths.
-
             split_output (bool): if True, only keep first half of the output channels (for pseudo-parallel nets).
         
         Returns:
@@ -255,7 +205,7 @@ class HTR_Model():
         decoded_labels_and_scores = self.decode_batch( outputs_ncw, output_widths )
 
         # fast ctc-decoding
-        mesgs = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
+        mesgs = [ self.decode_ctc( self.alphabet, np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
         # max score for each non-null char
         grouped_label_lists = [ itertools.groupby( lst, key=lambda x: x[0] ) for lst in decoded_labels_and_scores ]
         filtered_label_lists = [ itertools.filterfalse(lambda x: x[0]==self.alphabet.null_value, lst ) for lst in grouped_label_lists ]
@@ -310,7 +260,7 @@ class HTR_Model():
                 model.epochs = epochs
                 model.hyper_parameters = hyper_parameters
 
-            if model.device != kwargs['device']:
+            if 'device' in kwargs and model.device != kwargs['device']:
                 logger.debug("resume(): Overriding device with '{}'".format( kwargs['device']))
                 model.device = kwargs['device']
                 model.net.to( kwargs['device'] )
