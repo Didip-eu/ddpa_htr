@@ -89,13 +89,9 @@ class InferenceDataset( VisionDataset ):
         # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
         line_extraction_func = seglib.line_images_from_img_json_files if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
 
-        line_padding_func = lambda x, m, channel_dim=2: x # by default, identity function
-        if padding_style == 'noise':
-            line_padding_func = tsf.bbox_noise_pad
-        elif padding_style == 'median':
-            line_padding_func = tsf.bbox_median_pad
-        elif padding_style == 'zero':
-            line_padding_func = tsf.bbox_zero_pad
+        if padding_style and padding_style not in ['noise', 'zero', 'median']:
+            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
+        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
 
         self.data = []
         try:
@@ -105,7 +101,7 @@ class InferenceDataset( VisionDataset ):
             self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
             for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
                 mask_hw = mask_hwc[:,:,0]
-                self.data.append( { 'img': line_padding_func( img_hwc, mask_hw, channel_dim=2 ), 
+                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
                                     'height':img_hwc.shape[0],
                                     'width': img_hwc.shape[1],
                                     'id': str(line_dict['id']),
@@ -186,7 +182,8 @@ if __name__ == "__main__":
             continue
     
         dataset = InferenceDataset( img_path, segmentation_file_path,
-                                    transform = Compose([ tsf.ResizeToHeight(128,2048), tsf.PadToWidth(2048),]),)
+                                    transform = Compose([ tsf.ResizeToHeight(128,2048), tsf.PadToWidth(2048),]),
+                                    padding_style=args.line_padding_style,)
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
             continue
