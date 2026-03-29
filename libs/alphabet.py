@@ -22,9 +22,10 @@ from pylelemmatize import LemmatizerBMP
 
 
 class Alphabet:
-    """Creating and handling alphabets: a thin wrapper around a PyLelemmatizer's mapper object, that provides the 
-    core functionalities, with a few added hooks for HTR training in torch
+    """Creating and handling alphabets: a thin wrapper around a PyLelemmatizer's mapper object, that provides the
+    core functionalities, with a few added hooks for HTR training in torch.
 
+    + filtering out irrelevant characters and extra spaces
     + CTC-compliant labeling
     + encoding/decoding routines
     + save/restore
@@ -34,6 +35,18 @@ class Alphabet:
         >>> mapper=LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp+' ', ll.charsets.ascii_lowercase+' ' )
         >>> alphabet.Alphabet( mapper )
 
+    Design choices:
+  
+    + the mapper's job is to ensure a consistent transformation of the input string for training and evaluation
+      purpose: if some characters should be ignored altogether (eg. '' in Koenigsfelden, they should be filtered 
+      out during the data curation stage, or at the latest before being fed to the mapper (in both cases, this
+      is the humanist's call, not the technician's!): the present class provides this filtering option (`reduce`
+      method).
+    + a mapping is for those characters that are deemed relevant in the GT string; a relevant char maps to
+      a specific character or, by default, to the unknown character
+    + mapping may be interpretable by a human (eg. 'ꝑ'→ 'p') or not (eg. 'Ꝯ'→ 'c', 'ꝝ'→ 'a'): this is not
+      a problem, since the generated string is for training use
+
     """
     # torch.nn.CTCLoss already has default blank=0
     null_symbol = '\u03f5'
@@ -42,7 +55,7 @@ class Alphabet:
     start_of_seq_symbol = '\u21A6' # '↦' i.e. '|->'
     end_of_seq_symbol = '\u21E5' # '⇥' i.e. '->|'
 
-    def __init__(self, mapper: LemmatizerBMP): 
+    def __init__(self, mapper: LemmatizerBMP, ignore_characters=''): 
         self._mapper = mapper 
         self.unknown_symbol = self._mapper.unknown_chr
 
@@ -51,10 +64,11 @@ class Alphabet:
         for lbl, utf in enumerate( self._mapper.dst_alphabet_str, start=1):
             self._utf2lbl[utf]=lbl
             self._lbl2utf[lbl]=utf
+        self._ignored_characters = ignore_characters
 
-    def serialize( self ) -> dict:
-        return { 'mapping_dict': self._mapper.mapping_dict, 'unknown_chr': self._mapper.unknown_chr}
 
+    def __repr__( self ):
+        return f"Alphabet( {repr(self._mapper)}, ignore_characters='{self._ignored_characters}')"
 
     @staticmethod
     def load( alpha_repr: dict ):
@@ -62,7 +76,7 @@ class Alphabet:
 
             {'mapping_dict': ..., 'unknown_chr': ... }
         """
-        return Alphabet( LemmatizerBMP( **alpha_repr ))
+        return eval( repr(self) )
 
 
     def __len__(self):
@@ -81,10 +95,14 @@ class Alphabet:
 
 
     def reduce(self, sample_s: str) -> str:
-        """Rewrite a string by mapping all chars of a charset to their representative.
+        """Rewrite a string in 3 steps:
+        
+        1. suppress unwanted characters
+        2. normalize spaces
+        3. map all chars of a charset to their representative.
 
-            >>> Alphabet( LemmatizerBMP({'c':'a', 'b':'b', 'a':'c'})).reduce('abc')
-            'cba'
+            >>> Alphabet( LemmatizerBMP({'c':'a', 'b':'b', 'a':'c'})).reduce('a   b  c')
+            'c b a'
 
         Args:
             sample_s (str): message string.
@@ -93,17 +111,19 @@ class Alphabet:
             str: the message, where all members of a given charset have been replaced by their 
                 representative.
         """
-        return self._mapper( sample_s )
+        sample_s = ''.join([ c for c in sample_s if c not in self._ignored_characters ] )
+        return self._mapper( re.sub(r'\s+', ' ', sample_s ))
 
 
     def encode(self, sample_s: str) -> Tensor:
-        """Encode a message string with integers.
+        """Encode a message string with integers. Input string is assumed 
+        toh have been reduced first.
 
         Args:
             sample_s (str): message string.
 
         Returns:
-            Tensor: a list of integers; 
+            Tensor: a tensor of integers; 
         """
         return torch.tensor( [ self._utf2lbl[char] for char in sample_s ] )
 

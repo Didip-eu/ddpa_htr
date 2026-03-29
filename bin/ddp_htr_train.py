@@ -115,13 +115,8 @@ if __name__ == "__main__":
     # default: blank=0
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / hyper_params['batch_size']
    
-    #-------------- Dataset ---------------
-
-    # to be deprecated (use Pylelemmatize)
-    filter_transcription = lambda s: ''.join( itertools.filterfalse( lambda c: c in lu.flatten( args.ignored_chars ), s))
-
     resize_func = Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ])
-
+    #-------------- Dataset ---------------
     imgs_train, lbls_train, imgs_val, lbl_val = [], [], [], []
     
     # Option 1: a directory of images files
@@ -154,14 +149,14 @@ if __name__ == "__main__":
                 from_line_files=imgs_train, 
                 padding_style=args.padding_style,
                 transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-                target_transform=filter_transcription,
+                target_transform=model.alphabet.reduce
                 to_tsv_file='train.tsv' if args.to_tsv else '',)
 
         ds_val = HTRLineDataset( 
                 from_line_files=imgs_val,
                 padding_style=args.padding_style,
                 transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-                target_transform=filter_transcription,
+                target_transform=model.alphabet.reduce,
                 to_tsv_file='val.tsv' if args.to_tsv else '',)
     
     logger.debug( str(ds_val) )
@@ -217,7 +212,7 @@ if __name__ == "__main__":
             
             if confusion_matrix:
                 if conf_matrix is None:
-                    matrix_alph = model.alphabet._utf_2_code_reduced()
+                    matrix_alph = model.alphabet._utf2lbl
                     print(matrix_alph)
                     conf_matrix = metrics.batch_char_confusion_matrix( transcriptions, predictions, matrix_alph )[0]
                 else:
@@ -339,7 +334,7 @@ if __name__ == "__main__":
             from_line_tsv_file=args.dataset_path_test,
             line_padding_style='median',
             transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-            target_transform=filter_transcription,)
+            target_transform=model.alphabet.reduce,)
         test_loader = DataLoader( ds_test, batch_size=args.batch_size)
         cer, wer = validate(test_loader, args.confusion_matrix)
         logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))

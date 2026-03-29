@@ -640,7 +640,8 @@ class HTRLineDataset(VisionDataset):
             to_tsv_file (str): serialize the dataset list as a TSV in the work folder.
             transform (Callable): Function to apply to the PIL image at loading time.
             target_transform (Callable): Function to apply to the transcription ground
-                truth at loading time.
+                truth at loading time, before any character mapping occurs eg. filtering
+                out characters, space normalization.
             expansion_masks (bool): if True (default), add transcription expansion offsets
                 to the sample if it is present in the XML source line annotations.
             channel_func (Callable): function that takes image and binary polygon mask as inputs,
