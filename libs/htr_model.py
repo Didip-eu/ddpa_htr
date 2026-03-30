@@ -96,7 +96,7 @@ class HTR_Model():
         
         self.constructor_parameters = {
                 # serialize the alphabet 
-                'alphabet': self.alphabet.serialize(),
+                'alphabet': repr(self.alphabet),
                 'net': net,
                 'model_spec': model_spec,
                 'decoder': decoder,

@@ -38,7 +38,7 @@ from libs.train_utils import split_set, duration_estimate
 from libs.htr_model import HTR_Model
 from kraken import vgsl
 from libs.charter_htr_datasets import HTRLineDataset
-import character_classes as cc
+#import character_classes as cc
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
 logger = logging.getLogger(__name__)
@@ -59,7 +59,8 @@ p = {
     "from_tsv": ['', "To build the train and validation subsets, look for TSV files (train.tsv and val.tsv) in the image folder."],
     "to_tsv": [False, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
     "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
-    "ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    #"ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    "ignored_chars": [ [], "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "lr": 1e-3,
     "dry_run": [0, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."],
@@ -149,7 +150,7 @@ if __name__ == "__main__":
                 from_line_files=imgs_train, 
                 padding_style=args.padding_style,
                 transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-                target_transform=model.alphabet.reduce
+                target_transform=model.alphabet.reduce,
                 to_tsv_file='train.tsv' if args.to_tsv else '',)
 
         ds_val = HTRLineDataset( 
@@ -250,8 +251,9 @@ if __name__ == "__main__":
                 plt.close()
                 fig, ax = plt.subplots(len(batch), 1)
                 for i, label in zip(range(len(batch)), labels):
-                    logger.debug("{},{}".format( type(img[i]), transcriptions[i]))
-                    ax[i].imshow( img[i].permute(1,2,0))
+                    logger.debug("{},{}".format( type(img_nwhc[i]), transcriptions[i]))
+                    ax[i].imshow( img_nwhc[i].permute(1,2,0))
+                    logger.info( transcriptions[i] )
                 plt.show()
                 continue
 
