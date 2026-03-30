@@ -38,10 +38,9 @@ class Alphabet:
     Design choices:
   
     + the mapper's job is to ensure a consistent transformation of the input string for training and evaluation
-      purpose: if some characters should be ignored altogether (eg. '' in Koenigsfelden, they should be filtered 
-      out during the data curation stage, or at the latest before being fed to the mapper (in both cases, this
-      is the humanist's call, not the technician's!): the present class provides this filtering option (`reduce`
-      method).
+      purpose: if some characters should be ignored altogether (eg. '✳' or similar junk in Koenigsfelden, they should be filtered 
+      out during the data curation stage, or at the latest before loading time: first because it may yield empty target 
+      strings, second because the clean-up is very costly.
     + a mapping is for those characters that are deemed relevant in the GT string; a relevant char maps to
       a specific character or, by default, to the unknown character
     + mapping may be interpretable by a human (eg. 'ꝑ'→ 'p') or not (eg. 'Ꝯ'→ 'c', 'ꝝ'→ 'a'): this is not
@@ -55,8 +54,17 @@ class Alphabet:
     start_of_seq_symbol = '\u21A6' # '↦' i.e. '|->'
     end_of_seq_symbol = '\u21E5' # '⇥' i.e. '->|'
 
-    def __init__(self, mapper: LemmatizerBMP, ignore_characters=''): 
+    def __init__(self, mapper: LemmatizerBMP, override_map={} ):
+        """
+        Construct a new HTR alphabet.
+
+        Args:
+            mapper (LemmatizerBMP): a character mapping object.
+            override_map (dict): additional mappings for lemmatizer initialization (to add space mapping, f.i.).
+        """
         self._mapper = mapper 
+        if len(override_map):
+            self._mapper = LemmatizerBMP.from_alphabet_mapping( self._mapper.src_alphabet_str, self._mapper.dst_alphabet_str, override_map = override_map )
         self.unknown_symbol = self._mapper.unknown_chr
 
         self._utf2lbl={ self.null_symbol: self.null_value }
@@ -64,11 +72,10 @@ class Alphabet:
         for lbl, utf in enumerate( self._mapper.dst_alphabet_str, start=1):
             self._utf2lbl[utf]=lbl
             self._lbl2utf[lbl]=utf
-        self._ignored_characters = ignore_characters
 
 
     def __repr__( self ):
-        return f"Alphabet( {repr(self._mapper)}, ignore_characters='{self._ignored_characters}')"
+        return f"Alphabet( {repr(self._mapper)} )"
 
     @staticmethod
     def load( alpha_repr: dict ):
@@ -76,7 +83,7 @@ class Alphabet:
 
             {'mapping_dict': ..., 'unknown_chr': ... }
         """
-        return eval( repr(self) )
+        return eval( alpha_repr )
 
 
     def __len__(self):
@@ -95,7 +102,8 @@ class Alphabet:
 
 
     def reduce(self, sample_s: str) -> str:
-        """Rewrite a string in 3 steps:
+        """Transform a string, for training and validation purpose.
+        Rewrite a string in 3 steps:
         
         1. suppress unwanted characters
         2. normalize spaces
@@ -111,7 +119,6 @@ class Alphabet:
             str: the message, where all members of a given charset have been replaced by their 
                 representative.
         """
-        sample_s = ''.join([ c for c in sample_s if c not in self._ignored_characters ] )
         return self._mapper( re.sub(r'\s+', ' ', sample_s ))
 
 

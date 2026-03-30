@@ -531,7 +531,7 @@ class PageDataset(VisionDataset):
             cnt += 1
         return cnt
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return f"""
                 Root path:\t{self.root_path}
                 Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename']) if self.dataset_resource else '-'}
@@ -619,6 +619,7 @@ class HTRLineDataset(VisionDataset):
                 to_tsv_file: str='',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
+                ignored_characters: str = '',
                 expansion_masks = False,
                 channel_func: Callable[[np.ndarray, np.ndarray],np.ndarray]= None,
                 channel_suffix: str='',
@@ -653,6 +654,7 @@ class HTRLineDataset(VisionDataset):
                 'zero'=0s. The polygon boolean mask is automatically saved on/retrieved from the disk;
                 Default is None (no padding).
             device (str): computing device -- 'cpu' (default), 'gpu', 'cuda:0', ...
+            ignore_characters (str): characters to be deleted from the target transcriptions.
         """
 
         self._data = []
@@ -662,6 +664,7 @@ class HTRLineDataset(VisionDataset):
         self.gt_suffix = gt_suffix
         self.channel_suffix = channel_suffix
         self.device = device
+        self.ignored_characters = ignored_characters
 
         if from_tsv_file:
             tsv_path = Path( from_tsv_file )
@@ -740,7 +743,7 @@ class HTRLineDataset(VisionDataset):
             sample=dict()
             logger.debug(img_file_path)            
             gt_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.gt_suffix, str(img_file_path)))
-            sample['img']=img_file_path
+            sample['img_path']=str(img_file_path)
             with Image.open( img_file_path, 'r') as img:
                 sample['width'], sample['height'] = img.size
             
@@ -752,6 +755,12 @@ class HTRLineDataset(VisionDataset):
                     sample['expansion_masks']=eval(expansion_masks_match.group(2))
                 else:
                     sample['transcription']=transcription
+                # discarding empty targets
+                if re.match(r'^\s*$', ''.join( [ c for c in sample['transcription'] if c not in self.ignored_characters ])):
+                    logger.warning(f"Discarding sample {(img_file_path).name}: removal of chars {list(self.ignored_characters)} yields an empty transcription!")
+                    continue
+                # for debugging
+                sample['transcription_raw']=sample['transcription']
             # binary mask
             binary_mask_path = Path(  re.sub(r'{}$'.format( self.img_suffix ), '.bool.npy.gz', str(img_file_path)))
             assert binary_mask_path.exists()
@@ -800,11 +809,16 @@ class HTRLineDataset(VisionDataset):
             channel_file = sample_df.loc[ row ][4] if len(sample_df.columns)>4 else None
             binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
 
+            if re.match(r'^\s*$', ''.join([ c for c in gt_field if c not in self.ignored_characters ])):
+                logger.warning(f"Discarding sample {Path(img_path).name}: junk removal yields an empty transcription!")
+                continue
+
             expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
             if expansion_masks_match is not None:
                 gt_field = expansion_masks_match.group(1)
-
-            spl = { 'img': work_folder_path.joinpath( img_file ), 'transcription': gt_field,
+            
+            spl = { 'img_path': str(work_folder_path.joinpath( img_file )), 
+                    'transcription': gt_field, 'transcription_raw': gt_field,
                     'height': int(height), 'width': int(width) }
             if channel_file is not None:
                 spl['img_channel']=work_folder_path.joinpath( channel_file )
@@ -834,7 +848,7 @@ class HTRLineDataset(VisionDataset):
         if file_path == '':
             for sample in samples:
                 # note: TSV only contains the image file name (load_from_tsv() takes care of applying the correct path prefix)
-                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
+                img_path, gt, height, width = Path(sample['img_path']).name, sample['transcription'], sample['height'], sample['width']
                 logger.debug("{}\t{}\t{}\t{}".format( img_path, 
                       gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'), int(height), int(width)))
             return
@@ -842,7 +856,7 @@ class HTRLineDataset(VisionDataset):
             # header: ImgPath  GT  Height  Width [Channel]
             of.write('ImgPath\tGT\tHeight\tWidth{}\n'.format( '\tChannel' if 'img_channel' in samples[0] else ''))
             for sample in samples:
-                img_path, gt, height, width = sample['img'].name, sample['transcription'], sample['height'], sample['width']
+                img_path, gt, height, width = Path(sample['img_path']).name, sample['transcription'], sample['height'], sample['width']
                 #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
                 if 'expansion_masks' in sample and sample['expansion_masks'] is not None:
                     gt = gt + '<{}>'.format( sample['expansion_masks'] )
@@ -853,7 +867,6 @@ class HTRLineDataset(VisionDataset):
                     of.write('\t{}'.format( sample['img_channel'].name ))
                 of.write('\n')
                                             
-
 
     def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
         """Callback function for the iterator. Assumption: the raw sample always contains
@@ -866,7 +879,7 @@ class HTRLineDataset(VisionDataset):
         Returns:
             dict[str,Union[Tensor,int,str]]: a sample dictionary
         """
-        img_path = self._data[index]['img']
+        img_path = self._data[index]['img_path']
         
         assert isinstance(img_path, Path) or isinstance(img_path, str)
 
@@ -888,6 +901,7 @@ class HTRLineDataset(VisionDataset):
 
             # img ndarray --> tensor
             sample['img']=img_array_hwc 
+            #del sample['img_path']
             logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
             sample = self.transform( sample )
 
@@ -926,7 +940,7 @@ class HTRLineDataset(VisionDataset):
         return len( self._data )
 
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
 
         summary = '\n'.join([
                     f"Work folder:\t{self.work_folder_path}",
@@ -939,7 +953,6 @@ class HTRLineDataset(VisionDataset):
         return ("\n________________________________\n"
                 f"\n{summary}"
                 "\n________________________________\n")
-
 
 
     @staticmethod
@@ -973,6 +986,7 @@ class HTRLineDataset(VisionDataset):
         ])
 
 
+
 class TrOCRLineDataset( HTRLineDataset ):
 
     def __init__( self, *args, **kwargs ):
@@ -991,7 +1005,7 @@ class TrOCRLineDataset( HTRLineDataset ):
         Returns:
             dict[str,Union[Tensor,int,str]]: a sample dictionary
         """
-        img_path = self._data[index]['img']
+        img_path = self._data[index]['img_path']
         
         assert isinstance(img_path, Path) or isinstance(img_path, str)
 

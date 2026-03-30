@@ -26,7 +26,6 @@ import fargv
 """
 Todo:
 + clearer training/validation loop 
-+ integrate PyLemmatizer to feeding logic
 """
 
 
@@ -40,7 +39,9 @@ from kraken import vgsl
 from libs.charter_htr_datasets import HTRLineDataset
 #import character_classes as cc
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO, format="%(asctime)s - %(funcName)s: %(message)s", force=True)
+logging_format="%(asctime)s - %(levelname)s: %(funcName)s - %(message)s"
+logging_levels = {0: logging.ERROR, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG }
+logging.basicConfig( level=logging.INFO, format=logging_format, force=True )
 logger = logging.getLogger(__name__)
 
 
@@ -59,8 +60,7 @@ p = {
     "from_tsv": ['', "To build the train and validation subsets, look for TSV files (train.tsv and val.tsv) in the image folder."],
     "to_tsv": [False, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
     "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
-    #"ignored_chars": [ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
-    "ignored_chars": [ [], "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    "ignored_chars": ['✳,;', "Characters that should be removed before loading time."],#[ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "lr": 1e-3,
     "dry_run": [0, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."],
@@ -68,23 +68,27 @@ p = {
     "scheduler_patience": 10,
     "scheduler_cooldown": 5,
     "scheduler_factor": 0.8,
-    "device": [("cpu","cuda"), "Computing device"],
+    "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
     "reset_epochs": [ False, "Ignore the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
     "resume_file": 'last.mlmodel',
     "mode": ('train', 'test'),
     "confusion_matrix": 0,
     "sample_log_window": [4, "How many samples should be decoded for end-of-epoch logging;"],
     "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
+    'verbosity': [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO-default), 3 (DEBUG)"],
 }
 
 
 if __name__ == "__main__":
 
     args, _ = fargv.fargv( p )
-    logger.debug("CLI arguments: {}".format( args ))
+
+
+    if args.verbosity != 2:
+        logging.basicConfig( level=logging_levels[args.verbosity], format=logging_format, force=True )
+
     if args.dry_run:
         import matplotlib.pyplot as plt
-
 
     hyper_params = { varname:v for varname,v in vars(args).items() if varname in (
         'batch_size',
@@ -100,7 +104,8 @@ if __name__ == "__main__":
           ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do')],
           height = args.img_height)
 
-    
+    if args.device=='cuda' or args.device=='gpu':
+        args.device='cuda:0'
     model = HTR_Model.resume( args.resume_file, 
                              #height=args.img_height, 
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
@@ -149,6 +154,7 @@ if __name__ == "__main__":
         ds_train = HTRLineDataset( 
                 from_line_files=imgs_train, 
                 padding_style=args.padding_style,
+                ignored_characters=args.ignored_chars,
                 transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
                 target_transform=model.alphabet.reduce,
                 to_tsv_file='train.tsv' if args.to_tsv else '',)
@@ -156,6 +162,7 @@ if __name__ == "__main__":
         ds_val = HTRLineDataset( 
                 from_line_files=imgs_val,
                 padding_style=args.padding_style,
+                ignored_characters=args.ignored_chars,
                 transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
                 target_transform=model.alphabet.reduce,
                 to_tsv_file='val.tsv' if args.to_tsv else '',)
@@ -205,6 +212,7 @@ if __name__ == "__main__":
             img, lengths, transcriptions = ( batch[k] for k in ('img', 'width', 'transcription') )
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
+            transcriptions = [ t for t in transcriptions if len(t) ] # filter out empty targets
             predictions, _ = model.inference_task( img, lengths, split_output=args.auxhead )
 
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
@@ -248,12 +256,14 @@ if __name__ == "__main__":
 
 
             if args.dry_run > 0 and args.device=='cpu':
+                img_paths, transcriptions_raw = ( batch[k] for k in ('img_path', 'transcription_raw'))
                 plt.close()
                 fig, ax = plt.subplots(len(batch), 1)
                 for i, label in zip(range(len(batch)), labels):
-                    logger.debug("{},{}".format( type(img_nwhc[i]), transcriptions[i]))
+                    logger.info("{},{}".format( type(img_nwhc[i]), transcriptions[i]))
                     ax[i].imshow( img_nwhc[i].permute(1,2,0))
-                    logger.info( transcriptions[i] )
+                    logger.info( f"RAW: {transcriptions_raw[i]}" )
+                    logger.info( f"TRF: {transcriptions[i]}" )
                 plt.show()
                 continue
 
@@ -273,7 +283,8 @@ if __name__ == "__main__":
 
             loss.backward()
             optimizer.step()
-            sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
+            if args.verbosity > 2:
+                sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
 
 
         return None if dry_run else torch.stack(epoch_losses).mean().item()       

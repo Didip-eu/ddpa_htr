@@ -57,14 +57,15 @@ class HTR_Model():
             decoder (Callable[[np.ndarray], List[Tuple[int,float]]]: an alphabet-agnostic decoding function, 
                 that decodes logits into labels.
             add_output_layer (bool): if True (default), add the output layer string to the VGSL spec.
+            device (str): computing device (default: 'cpu')
             train (bool)): if True, set mode to train; default is False.
         """
 
         if alphabet is None:
-            self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase) )
+            self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase), override_map={k:k for k in ' .'})
         else:
-            # during save/resume cycles, alphabet may be serialized as a dict
-            self.alphabet = Alphabet.load( alphabet) if type(alphabet) is dict else alphabet
+            # during save/resume cycles, alphabet is serialized as a str
+            self.alphabet = eval( alphabet) if type(alphabet) is str else alphabet
         
         if net:
             self.net = self.load( net )
@@ -80,8 +81,8 @@ class HTR_Model():
             self.net = TorchVGSLModel( self.model_spec ).nn
         
         self.device = device 
-        if device=='cuda' and not torch.cuda.is_available():
-            logger.warning("Parameter '-device cuda' passed but CUDA not available. Using the CPU.")
+        if device!='cpu' and not torch.cuda.is_available():
+            logger.warning("Argument device='{device}' passed but CUDA not available. Using the CPU.")
             self.device = 'cpu'
         #self.criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(reduction='sum', zero_infinity=True)(F.log_softmax(y, dim=2), t, ly, lt) / batch_size
         self.net.to( self.device )
@@ -95,7 +96,6 @@ class HTR_Model():
         self.net.train( mode=train )
         
         self.constructor_parameters = {
-                # serialize the alphabet 
                 'alphabet': repr(self.alphabet),
                 'net': net,
                 'model_spec': model_spec,
@@ -205,7 +205,7 @@ class HTR_Model():
         decoded_labels_and_scores = self.decode_batch( outputs_ncw, output_widths )
 
         # fast ctc-decoding
-        mesgs = [ self.decode_ctc( self.alphabet, np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
+        mesgs = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
         # max score for each non-null char
         grouped_label_lists = [ itertools.groupby( lst, key=lambda x: x[0] ) for lst in decoded_labels_and_scores ]
         filtered_label_lists = [ itertools.filterfalse(lambda x: x[0]==self.alphabet.null_value, lst ) for lst in grouped_label_lists ]
@@ -236,6 +236,7 @@ class HTR_Model():
             file_name (str): a serialized Torch module dictionary.
         """
         if Path(file_name).exists():
+            logger.info(f"Resume from model file {file_name}...")
             state_dict = torch.load(file_name, map_location="cpu")
             constructor_parameters = state_dict['constructor_parameters'] if 'constructor_parameters' in state_dict else state_dict['constructor_params']
             if 'constructor_parameters' in state_dict:
@@ -283,6 +284,8 @@ class HTR_Model():
             for k in ('constructor_parameters', 'hyper_parameters', 'epochs', 'train_mode', 'constructor_params', 'validation_epochs', 'train_epochs'):
                 if k in state_dict:
                     del state_dict[ k ]
+
+            print(constructor_parameters)
 
             model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
