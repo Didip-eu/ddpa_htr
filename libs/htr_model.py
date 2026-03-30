@@ -46,6 +46,7 @@ class HTR_Model():
                   decoder=None, 
                   add_output_layer=True,
                   train=False,
+                  image_specs={},
                   device='cpu'):
         """Initialize a new network wrapper.
 
@@ -57,10 +58,12 @@ class HTR_Model():
             decoder (Callable[[np.ndarray], List[Tuple[int,float]]]: an alphabet-agnostic decoding function, 
                 that decodes logits into labels.
             add_output_layer (bool): if True (default), add the output layer string to the VGSL spec.
+            image_specs (dict): image features for this model, i.e. a dictionary of the form `{'padding_style': ... }`
             device (str): computing device (default: 'cpu')
             train (bool)): if True, set mode to train; default is False.
         """
 
+        self.image_specs = image_specs
         if alphabet is None:
             self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase), override_map={k:k for k in ' .'})
         else:
@@ -69,7 +72,6 @@ class HTR_Model():
         
         if net:
             self.net = self.load( net )
-        
         else:
             # insert output layer if not already defined
             if re.search(r'O\S+ ?\]$', model_spec) is None and add_output_layer:
@@ -101,6 +103,7 @@ class HTR_Model():
                 'model_spec': model_spec,
                 'decoder': decoder,
                 'add_output_layer': add_output_layer,
+                'image_specs': image_specs,
                 'train': train
         }
 
@@ -178,7 +181,7 @@ class HTR_Model():
         return list(zip(labels, scores))
 
 
-    def inference_task( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
+    def inference( self, img_nchw: Tensor, widths_n: Tensor=None, masks: Tensor=None, split_output=False)->Tuple[List[str], np.ndarray]:
         """ Make predictions on a batch of images.
 
         Args:
@@ -192,7 +195,6 @@ class HTR_Model():
                 + for diagnosis: a (N,W) array where each row is a sequence of logits; each logit is the max. score
                   for each, null-separated output subsequence.
         """
-       
         assert isinstance( img_nchw, Tensor ) and len(img_nchw.shape) == 4
         assert isinstance( widths_n, Tensor) and len(widths_n) == img_nchw.shape[0]
         img_nchw, widths_n = img_nchw.to( self.device ), widths_n.to( self.device )
@@ -204,7 +206,7 @@ class HTR_Model():
         # decoding: lists of pairs (<integer label>, <score>): [[(l1,s1),(l2,s2), ...],[(l1,s1), ... ], ...]
         decoded_labels_and_scores = self.decode_batch( outputs_ncw, output_widths )
 
-        # fast ctc-decoding
+        # fast ctc-decoding, using the model's alphabet
         mesgs = [ self.alphabet.decode_ctc( np.array([ label for (label,score) in msg ])) for msg in decoded_labels_and_scores ]
         # max score for each non-null char
         grouped_label_lists = [ itertools.groupby( lst, key=lambda x: x[0] ) for lst in decoded_labels_and_scores ]

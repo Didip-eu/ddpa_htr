@@ -23,12 +23,6 @@ from tqdm import tqdm
 import fargv
 
 
-"""
-Todo:
-+ clearer training/validation loop 
-"""
-
-
 root = Path(__file__).parents[1] 
 sys.path.append( str(root) )
 
@@ -57,8 +51,8 @@ p = {
     "dataset_path": ['', "Directory with line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
     "img_file_suffix": '.png',
     "gt_file_suffix": '.gt.txt',
-    "from_tsv": ['', "To build the train and validation subsets, look for TSV files (train.tsv and val.tsv) in the image folder."],
-    "to_tsv": [False, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
+    "from_tsv": [0, "Build the train and validation subsets from TSV files (train.tsv and val.tsv) in the dataset path; in test mode: build the dataset from the given path."],
+    "to_tsv": [0, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
     "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
     "ignored_chars": ['✳,;', "Characters that should be removed before loading time."],#[ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
@@ -111,6 +105,8 @@ if __name__ == "__main__":
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              reset_epochs=args.reset_epochs,
                              add_output_layer=True,
+                             # those are overriden by specs in existing model file
+                             image_specs={'padding_style': args.padding_style, 'img_height': args.img_height, 'img_width': args.img_width },
                              device=args.device)
    
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
@@ -121,7 +117,7 @@ if __name__ == "__main__":
     # default: blank=0
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / hyper_params['batch_size']
    
-    resize_func = Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ])
+    resize_func = Compose([ tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), tsf.PadToWidth( model.image_specs['img_width'] ) ])
     #-------------- Dataset ---------------
     imgs_train, lbls_train, imgs_val, lbl_val = [], [], [], []
     
@@ -132,7 +128,13 @@ if __name__ == "__main__":
         if args.from_tsv:
             train_tsv_path, val_tsv_path = [ Path( args.dataset_path ).joinpath( tsv_filename ) for tsv_filename in ('train.tsv', 'val.tsv') ] 
             assert train_tsv_path.exists() and val_tsv_path.exists()
-            ds_train, ds_val = [ HTRLineDataset( from_tsv_file=tsv_path, padding_style=args.padding_style, transform=resize_func, target_transform=filter_transcription,) for tsv_path in ( train_tsv_path, val_tsv_path ) ]
+            ds_train, ds_val = [ HTRLineDataset( 
+                    from_tsv_file=tsv_path, 
+                    padding_style=model.image_specs['padding_style'], 
+                    ignored_characters=args.ignore_chars,
+                    transform=resize_func, 
+                    target_transform=model.alphabet.reduce,
+                ) for tsv_path in ( train_tsv_path, val_tsv_path ) ]
             logger.debug("Constructed subsets in {} from TSV files {} and {}".format( args.dataset_path, train_tsv_path, val_tsv_path))
         # ... or include all images
         else:
@@ -153,17 +155,17 @@ if __name__ == "__main__":
 
         ds_train = HTRLineDataset( 
                 from_line_files=imgs_train, 
-                padding_style=args.padding_style,
+                padding_style=model.image_specs['padding_style'],
                 ignored_characters=args.ignored_chars,
-                transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+                transform=resize_func,
                 target_transform=model.alphabet.reduce,
                 to_tsv_file='train.tsv' if args.to_tsv else '',)
 
         ds_val = HTRLineDataset( 
                 from_line_files=imgs_val,
-                padding_style=args.padding_style,
+                padding_style=model.image_specs['padding_style'],
                 ignored_characters=args.ignored_chars,
-                transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
+                transform=resize_func,
                 target_transform=model.alphabet.reduce,
                 to_tsv_file='val.tsv' if args.to_tsv else '',)
     
@@ -188,7 +190,7 @@ if __name__ == "__main__":
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
         b = next(iter(val_loader))
-        msg_strings, _ = model.inference_task( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
+        msg_strings, _ = model.inference( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
         gt_strings_redux = [ model.alphabet.reduce(s) for s in b['transcription'][:cut] ]
         logger.info('epoch {}'.format( epoch ))
         for (img, img_name, gt_str_raw, gt_str_redux, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], gt_strings_redux, msg_strings ):
@@ -196,12 +198,12 @@ if __name__ == "__main__":
             writer.add_image(img_name, img )
         model.net.train()
 
-    def validate( confusion_matrix=False ):
+    def validate(loader, confusion_matrix=False ):
         """ Test/validation step
         """
         model.net.eval()
         
-        batches = iter( val_loader )
+        batches = iter( loader )
         cer = 0.0
         wer = 0.0
 
@@ -213,7 +215,7 @@ if __name__ == "__main__":
             # reduce charset
             transcriptions = [ model.alphabet.reduce(t) for t in transcriptions ]
             transcriptions = [ t for t in transcriptions if len(t) ] # filter out empty targets
-            predictions, _ = model.inference_task( img, lengths, split_output=args.auxhead )
+            predictions, _ = model.inference( img, lengths, split_output=args.auxhead )
 
             batch_cer, batch_wer, _ = metrics.cer_wer_ler( predictions, transcriptions )
             cer += batch_cer
@@ -306,7 +308,7 @@ if __name__ == "__main__":
 
             epoch_start_time = time.time()
             mean_training_loss = train_epoch( epoch, args.dry_run )
-            cer, wer = validate()
+            cer, wer = validate( val_loader )
 
             if args.dry_run:
                 continue
@@ -339,18 +341,33 @@ if __name__ == "__main__":
             if hyper_params['scheduler']:
                 scheduler.step()
 
-
     ############# VALIDATE / TEST ############
     elif args.mode == 'test':
-        
-        ds_test = ChartersDataset(
-            from_line_tsv_file=args.dataset_path_test,
-            line_padding_style='median',
-            transform=Compose([ tsf.ResizeToHeight( args.img_height, args.img_width ), tsf.PadToWidth( args.img_width ) ]),
-            target_transform=model.alphabet.reduce,)
-        test_loader = DataLoader( ds_test, batch_size=args.batch_size)
-        cer, wer = validate(test_loader, args.confusion_matrix)
-        logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
+
+        ds_test = None
+        if args.from_tsv:
+            test_tsv_path = Path( args.dataset_path ).joinpath( 'test.tsv' )
+            assert test_tsv_path.exists()
+            ds_test = HTRLineDataset( 
+                    from_tsv_file=test_tsv_path, 
+                    padding_style=model.image_specs['padding_style'],
+                    ignored_characters=args.ignore_chars,
+                    transform=resize_func, 
+                    target_transform=model.alphabet.reduce,
+                ) 
+        else:
+            ds_test = HTRLineDataset(
+                    from_line_files=imgs_test,
+                    padding_style=model.image_specs['padding_style'],
+                    ignored_characters=args.ignored_chars,
+                    transform=resize_func,
+                    target_transform=model.alphabet.reduce,
+                    to_tsv_file='test.tsv' if args.to_tsv else '',)
+
+        if ds_test is not None:
+            test_loader = DataLoader( ds_test, batch_size=args.batch_size)
+            cer, wer = validate(test_loader, args.confusion_matrix)
+            logger.info('CER={:1.4f}, WER={:1.3f}'.format( cer, wer ))
 
 
     writer.flush()

@@ -52,8 +52,8 @@ p = {
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     "overwrite_existing": [1, "Write over existing output file (default)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
+    "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
     "verbosity": [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"],
-
 }
 
 
@@ -165,7 +165,9 @@ if __name__ == "__main__":
     args, _ = fargv.fargv( p )
     logger.debug(args)
 
-    model = HTR_Model.load( args.model_path, device='cuda' if args.device!='cpu' else 'cpu' )
+    if args.device=='cuda' or args.device=='gpu':
+        args.device='cuda:0'
+    model = HTR_Model.load( args.model_path, device=args.device if args.device!='cpu' else 'cpu' )
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 
@@ -182,8 +184,10 @@ if __name__ == "__main__":
             continue
     
         dataset = InferenceDataset( img_path, segmentation_file_path,
-                                    transform = Compose([ tsf.ResizeToHeight(128,2048), tsf.PadToWidth(2048),]),
-                                    padding_style=args.line_padding_style,)
+                                    transform = Compose([ i
+                                        tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
+                                        tsf.PadToWidth( model.image_specs['img_width'] ) ]),
+                                    padding_style=model.image_specs['padding_style'],)
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
             continue
@@ -195,7 +199,7 @@ if __name__ == "__main__":
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             try:
                 # strings, np.ndarray
-                predicted_string, line_scores = model.inference_task( sample['img'], sample['width'] )
+                predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
                 # since batch is 1, flattening batch values
                 line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                 line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
