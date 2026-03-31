@@ -183,9 +183,6 @@ if __name__ == "__main__":
     
     writer = SummaryWriter()
     
-    best_cer, best_wer, best_epoch = 1.0, 1.0, -1
-    if model.epochs:
-        best_cer, best_wer, best_epoch = [ model.epochs[-1][k] for k in ('best_cer', 'best_wer', 'best_epoch') ]
     
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
@@ -288,7 +285,6 @@ if __name__ == "__main__":
             if args.verbosity > 2:
                 sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
 
-
         return None if dry_run else torch.stack(epoch_losses).mean().item()       
         # visualization
         #writer.add_scalar("Loss/train", mean_loss, epoch)
@@ -298,6 +294,11 @@ if __name__ == "__main__":
     ########### TRAIN ################
     if args.mode == 'train':
     
+        best_cer, best_wer, best_epoch = 1.0, 1.0, -1
+        if model.epochs:
+            best_epoch, best_cer = min([ (i, ep['cer']) for i, ep in enumerate(model.epochs) ], key=lambda t: t[1])
+            best_wer = min([ ep['wer'] for ep in model.epochs ] )
+
         model.net.train()
 
         epoch_start = len( model.epochs )
@@ -313,19 +314,18 @@ if __name__ == "__main__":
             if args.dry_run:
                 continue
 
+            model.epochs.append({'loss': mean_training_loss, 'cer': cer, 'wer': wer, 
+                                 'lr': scheduler.get_last_lr()[0], 'duration': time.time()-epoch_start_time,
+                                 })
             model.save( args.resume_file )
 
             if cer <= best_cer:
                 logger.info("Validation CER ({}) < best CER ({}): updating best model.".format( cer, best_cer ))
                 best_cer, best_epoch = cer, epoch
-                model.save( 'best.model' )
+                model.save( 'best.mlmodel' )
             if wer <= best_wer:
                 best_wer = wer
 
-            model.epochs.append({'loss': mean_training_loss, 'cer': cer, 'best_cer': best_cer, 'best_epoch': best_epoch,
-                                 'wer': wer, 'best_wer': best_wer,
-                                 'lr': scheduler.get_last_lr()[0], 'duration': time.time()-epoch_start_time,
-                                 })
             writer.add_scalar("CER/validate", cer, epoch)
             writer.add_scalar("WER/validate", wer, epoch)
                 
