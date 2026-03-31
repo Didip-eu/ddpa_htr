@@ -13,6 +13,7 @@ from typing import Callable, Union
 import json
 import logging
 from datetime import datetime
+from functools import partial
 
 # 3rd party
 from PIL import Image
@@ -52,6 +53,7 @@ p = {
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
     "overwrite_existing": [1, "Write over existing output file (default)."],
     "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
+    "line_height_factor": [1, "Factor to be applied to the original line strip height."],
     "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
     "verbosity": [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"],
 }
@@ -62,7 +64,8 @@ class InferenceDataset( VisionDataset ):
     def __init__(self, img_path: Union[str,Path],
                  segmentation_data: Union[str,Path], 
                  transform: Callable=None,
-                 padding_style=None) -> None:
+                 padding_style=None,
+                 line_height_factor=1.0) -> None:
         """ A minimal dataset class for inference on a single charter (no transcription in the sample).
         Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
 
@@ -76,6 +79,7 @@ class InferenceDataset( VisionDataset ):
                 + 'noise' = random noise,
                 + 'zero'= 0-padding, 
                 + None (default) = no padding, i.e. raw bounding box
+            line_height_factor (float): apply a factor to the polygon strip height (only for JSON inputs).
         """
 
         trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
@@ -87,7 +91,7 @@ class InferenceDataset( VisionDataset ):
         segmentation_data = Path( segmentation_data ) 
 
         # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
-        line_extraction_func = seglib.line_images_from_img_json_files if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
+        line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor) if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
 
         if padding_style and padding_style not in ['noise', 'zero', 'median']:
             raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
@@ -174,6 +178,8 @@ if __name__ == "__main__":
     for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
         img_path, segmentation_file_path, output_file_path = img_triplet
+        if segmentation_file_path.suffix != '.json' and args.line_height_factor != 1.0:
+            logger.info("-args.line_height_factor={} not applicable to XML segmentation data: ignored.")
         logger.debug( "File path={}".format( img_triplet[0]))
         if not args.overwrite_existing and output_file_path.exists():
             logger.debug("Found {}: exiting.".format( output_file_path ))
@@ -187,7 +193,8 @@ if __name__ == "__main__":
                                     transform = Compose([ i
                                         tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
                                         tsf.PadToWidth( model.image_specs['img_width'] ) ]),
-                                    padding_style=model.image_specs['padding_style'],)
+                                    padding_style=model.image_specs['padding_style'],
+                                    line_height_factor=args.line_height_factor,)
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
             continue

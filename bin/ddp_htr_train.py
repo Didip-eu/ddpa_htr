@@ -105,9 +105,11 @@ if __name__ == "__main__":
                              model_spec=model_spec_rnn_and_shortcut if args.auxhead else model_spec_rnn_top,
                              reset_epochs=args.reset_epochs,
                              add_output_layer=True,
-                             # those are overriden by specs in existing model file
+                             # those should be overriden by specs in existing model file
                              image_specs={'padding_style': args.padding_style, 'img_height': args.img_height, 'img_width': args.img_width },
                              device=args.device)
+    hyper_params.update( model.hyper_parameters ) # no effect on pristine model
+    model.hyper_parameters = hyper_params
    
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
@@ -117,9 +119,10 @@ if __name__ == "__main__":
     # default: blank=0
     criterion = lambda y, t, ly, lt: torch.nn.CTCLoss(zero_infinity=True, reduction='sum')(y, t, ly, lt) / hyper_params['batch_size']
    
-    resize_func = Compose([ tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), tsf.PadToWidth( model.image_specs['img_width'] ) ])
     #-------------- Dataset ---------------
+    resize_func = Compose([ tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), tsf.PadToWidth( model.image_specs['img_width'] ) ])
     imgs_train, lbls_train, imgs_val, lbl_val = [], [], [], []
+    ds_train, ds_val = None, None
     
     # Option 1: a directory of images files
     if args.dataset_path:
@@ -131,7 +134,7 @@ if __name__ == "__main__":
             ds_train, ds_val = [ HTRLineDataset( 
                     from_tsv_file=tsv_path, 
                     padding_style=model.image_specs['padding_style'], 
-                    ignored_characters=args.ignore_chars,
+                    ignored_characters=args.ignored_chars,
                     transform=resize_func, 
                     target_transform=model.alphabet.reduce,
                 ) for tsv_path in ( train_tsv_path, val_tsv_path ) ]
@@ -183,15 +186,13 @@ if __name__ == "__main__":
     
     writer = SummaryWriter()
     
-    
     def sample_prediction_log( epoch:int, cut:int ):
         model.net.eval()
         b = next(iter(val_loader))
         msg_strings, _ = model.inference( b['img'][:cut], b['width'][:cut], split_output=args.auxhead )
-        gt_strings_redux = [ model.alphabet.reduce(s) for s in b['transcription'][:cut] ]
         logger.info('epoch {}'.format( epoch ))
-        for (img, img_name, gt_str_raw, gt_str_redux, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], gt_strings_redux, msg_strings ):
-            logger.info("{}:\n\tPred: [{}]\n\tRedux: {}\n\t  Raw: {}".format(img_name, decoded_str, gt_str_redux, gt_str_raw ))
+        for (img, img_name, gt_str_tsf, gt_str_raw, decoded_str ) in zip(  b['img'][:cut], b['id'][:cut], b['transcription'][:cut], b['transcription_raw'][:cut], msg_strings ):
+            logger.info("{}:\n\tRaw: [{}]\n\tTsf: [{}]\n\tPrd: [{}]".format(img_name, gt_str_raw, gt_str_tsf, decoded_str ))
             writer.add_image(img_name, img )
         model.net.train()
 
@@ -282,8 +283,7 @@ if __name__ == "__main__":
 
             loss.backward()
             optimizer.step()
-            if args.verbosity > 2:
-                sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
+        sample_prediction_log( epoch, min(args.sample_log_window, hyper_params['batch_size']))
 
         return None if dry_run else torch.stack(epoch_losses).mean().item()       
         # visualization
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     
         best_cer, best_wer, best_epoch = 1.0, 1.0, -1
         if model.epochs:
-            best_epoch, best_cer = min([ (i, ep['cer']) for i, ep in enumerate(model.epochs) ], key=lambda t: t[1])
+            best_epoch, best_cer = min([ (ep['epoch'], ep['cer']) for ep in model.epochs ], key=lambda t: t[1])
             best_wer = min([ ep['wer'] for ep in model.epochs ] )
 
         model.net.train()
@@ -313,9 +313,10 @@ if __name__ == "__main__":
 
             if args.dry_run:
                 continue
-
-            model.epochs.append({'loss': mean_training_loss, 'cer': cer, 'wer': wer, 
-                                 'lr': scheduler.get_last_lr()[0], 'duration': time.time()-epoch_start_time,
+            
+            epoch_duration = time.time()-epoch_start_time
+            model.epochs.append({'epoch': epoch, 'loss': mean_training_loss, 'cer': cer, 'wer': wer, 
+                                 'lr': scheduler.get_last_lr()[0], 'elapsed_time': epoch_duration + ( model.epochs[-1]['elapsed_time'] if len(model.epochs) else 0),
                                  })
             model.save( args.resume_file )
 
@@ -334,7 +335,7 @@ if __name__ == "__main__":
                     model.epochs[-1]['loss'],
                     cer, wer, 
                     best_epoch, best_cer, best_wer,
-                    duration_estimate(epoch+1, hyper_params['max_epoch'], model.epochs[-1]['duration']) ) )
+                    duration_estimate(epoch+1, hyper_params['max_epoch'], epoch_duration) ) )
             if epoch-best_epoch > hyper_params['patience']:
                 logger.info("No improvement since epoch {}: early exit.".format(best_epoch))
                 break
