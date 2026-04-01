@@ -13,7 +13,6 @@ from typing import Callable, Union
 import json
 import logging
 from datetime import datetime
-from functools import partial
 
 # 3rd party
 from PIL import Image
@@ -30,6 +29,7 @@ sys.path.append( root )
 from libs.htr_model import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
+from libs.charter_htr_datasets import CharterInferenceDataset
 
 
 logging_format="%(asctime)s - %(levelname)s: %(funcName)s - %(message)s"
@@ -57,82 +57,6 @@ p = {
     "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
     "verbosity": [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"],
 }
-
-
-class InferenceDataset( VisionDataset ):
-
-    def __init__(self, img_path: Union[str,Path],
-                 segmentation_data: Union[str,Path], 
-                 transform: Callable=None,
-                 padding_style=None,
-                 line_height_factor=1.0) -> None:
-        """ A minimal dataset class for inference on a single charter (no transcription in the sample).
-        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
-
-        Args:
-            img_path (Union[Path,str]): charter image path
-            segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
-            transform (Callable): Image transform.
-            padding_style (str): How to pad the bounding box around the polygons, when 
-                building the initial, raw dataset (before applying any transform):
-                + 'median'= polygon's median value,
-                + 'noise' = random noise,
-                + 'zero'= 0-padding, 
-                + None (default) = no padding, i.e. raw bounding box
-            line_height_factor (float): apply a factor to the polygon strip height (only for JSON inputs).
-        """
-
-        trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
-        if transform is not None: 
-            trf = v2.Compose( [trf, transform] )
-        super().__init__(root, transform=trf )
-
-        img_path = Path( img_path ) if type(img_path) is str else img_path
-        segmentation_data = Path( segmentation_data ) 
-
-        # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
-        line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor) if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
-
-        if padding_style and padding_style not in ['noise', 'zero', 'median']:
-            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
-        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
-
-        self.data = []
-        try:
-            # This creates a page dict with a convenient top-level 'lines' array, raised from 
-            # its containing region(s): allow for easy update of all line objects - this top-level 
-            # reference to the line array is later deleted, before serializing the ouput.
-            self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
-            for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
-                mask_hw = mask_hwc[:,:,0]
-                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
-                                    'height':img_hwc.shape[0],
-                                    'width': img_hwc.shape[1],
-                                    'id': str(line_dict['id']),
-                                    'img_filename': str(img_path),
-                                   } )
-            # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
-            self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
-            self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
-        except Exception as e:
-            logger.warning("Error when creating the line dataset: {}".format( e ))
-        self.ok = len(self.data) > 0
-
-    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
-        """ Update a given line dictionary with prediction data, whatever they are."""
-        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
-        if keep_gt:
-            this_line['gt']=this_line['text']
-        this_line.update( kv )
-
-    def __getitem__(self, index: int):
-        sample = self.data[index]
-        sample['img']=sample['img'].copy() # Torch warning otherwise
-        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
-        return self.transform( sample )
-
-    def __len__(self):
-        return len(self.data)
 
 
 def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple]:
@@ -189,8 +113,9 @@ if __name__ == "__main__":
             logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
             continue
     
-        dataset = InferenceDataset( img_path, segmentation_file_path,
-                                    transform = Compose([ i
+        dataset = CharterInferenceDataset( 
+                                    img_path, segmentation_file_path,
+                                    transform = Compose([ 
                                         tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
                                         tsf.PadToWidth( model.image_specs['img_width'] ) ]),
                                     padding_style=model.image_specs['padding_style'],
