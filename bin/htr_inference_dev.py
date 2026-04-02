@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
 """
-HTR inference on page, with segmentation provided.
-This is the production script:
+HTR inference: with various options, for development and testing purpose:
 
-- to be run on an FSDB tree
-- takes a charter images and their corresponding segmentation file (PageXML or JSON) as an input
-
++ flexible input: FSDB or not, page-scope inference (segmentation required) or line image inference.
++ TODO: choice of models
 """
 
 # stdlib
@@ -44,12 +42,13 @@ logger = logging.getLogger(__name__)
 
 
 p = {
-    "appname": "htr",
+    "appname": "htr_dev",
     "model_path": "./best.mlmodel", 
-    "device": [('cpu','gpu','cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3'), "Computing device."],
+    "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
     "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
     "img_paths": set([]),
     "charter_dirs": set([]),
+    "line_scope": [0, "Inference on line images."],
     "segmentation_suffix": ".lines.pred.json", 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "img_suffix": ".img.jpg",
@@ -102,6 +101,9 @@ if __name__ == "__main__":
     model = HTR_Model.load( args.model_path, device=args.device if args.device!='cpu' else 'cpu' )
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
+
+    inputs = pack_inputs_outputs( args ) else 
+
 
     for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 

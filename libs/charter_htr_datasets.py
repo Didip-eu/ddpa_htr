@@ -1056,8 +1056,90 @@ class TrOCRLineDataset( HTRLineDataset ):
             logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
             return sample
 
+class LineInferenceDataset( VisionDataset ):
 
-class CharterInferenceDataset( VisionDataset ):
+    def __init__(self, img_paths: Union[str,Path],
+                 img_suffix: '.png',
+                 msk_suffix: '.npy.gz',
+                 transform: Callable=None,
+                 padding_style=None,) -> None:
+        """ A minimal dataset class for inference on a set of line images and their (optional) masks.
+        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
+
+        Args:
+            img_paths (Union[Path,str]): line image paths
+            transform (Callable): Image transform.
+            padding_style (str): How to pad the bounding box around the polygons, when 
+                building the initial, raw dataset (before applying any transform):
+                + 'median'= polygon's median value,
+                + 'noise' = random noise,
+                + 'zero'= 0-padding, 
+                + None (default) = no padding, i.e. raw bounding box
+        """
+        self.img_suffix = img_suffix
+        self.msk_suffix = msk_suffix
+
+        trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+        if transform is not None: 
+            trf = v2.Compose( [trf, transform] )
+        super().__init__('', transform=trf )
+
+        img_path = Path( img_path ) if type(img_path) is str else img_path
+
+        if padding_style and padding_style not in ['noise', 'zero', 'median']:
+            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
+        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
+
+        self._data = []
+        try:
+            if args.line
+            # This creates a page dict with a convenient top-level 'lines' array, raised from 
+            # its containing region(s): allow for easy update of all line objects - this top-level 
+            # reference to the line array is later deleted, before serializing the ouput.
+            self.line_dicts = self.construct line_dicts( args.img_paths )
+            for img_hwc, mask_hwc, line_dict in self.line_dicts:
+                mask_hw = mask_hwc[:,:,0]
+                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
+                                    'height':img_hwc.shape[0],
+                                    'width': img_hwc.shape[1],
+                                    'id': str(line_dict['id']),
+                                    'img_filename': str(img_path),
+                                   } )
+            # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
+            self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
+            self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
+        except Exception as e:
+            logger.warning("Error when creating the line dataset: {}".format( e ))
+        self.ok = len(self.data) > 0
+
+    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
+        """ Update a given line dictionary with prediction data, whatever they are."""
+        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
+        if keep_gt:
+            this_line['gt']=this_line['text']
+        this_line.update( kv )
+
+    def __getitem__(self, index: int):
+        sample = self._data[index]
+        sample['img']=sample['img'].copy() # Torch warning otherwise
+        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
+        return self.transform( sample )
+
+    def __len__(self):
+        return len(self.data)
+
+    def construct_line_dicts( self, line_image_paths: list[Path, masks=True]  )->list:
+        """
+        Construct a list of lines dictionaries line image paths.
+        """
+        line_dicts = []
+        for line_img_path line_image_paths:
+            msk_path = Path(str(line_image_paths).replace( self.img_suffix, self.msk_suffix ))
+            if msk
+            
+
+
+class CharterInferenceDataset( LineInferenceDataset ):
 
     def __init__(self, img_path: Union[str,Path],
                  segmentation_data: Union[str,Path], 
@@ -1133,7 +1215,7 @@ class CharterInferenceDataset( VisionDataset ):
         return len(self.data)
 
 
-class TrOCRInferenceDataset( CharterInferenceDataset ):
+class TrOCRInferenceDataset( VisionDataset ):
     """
     A dataset for inference tasks, for use with TrOCR.
 
