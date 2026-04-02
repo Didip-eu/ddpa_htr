@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+HTR training script
+
+"""
 
 # stdlib
 
