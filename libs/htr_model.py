@@ -240,21 +240,14 @@ class HTR_Model():
         if Path(file_name).exists():
             logger.info(f"Resume from model file {file_name}...")
             state_dict = torch.load(file_name, map_location="cpu")
-            constructor_parameters = state_dict['constructor_parameters'] if 'constructor_parameters' in state_dict else state_dict['constructor_params']
-            if 'constructor_parameters' in state_dict:
-                del state_dict['constructor_parameters']
-            else:
-                del state_dict['constructor_params']
-            hyper_parameters = state_dict['hyper_parameters'] if 'hyper_parameters' in state_dict else state_dict['hyper_params']
-            if 'hyper_parameters' in state_dict:
-                del state_dict['hyper_parameters']
-            else:
-                del state_dict['hyper_params']
+            constructor_parameters = state_dict['constructor_parameters']
+            del state_dict['constructor_parameters']
+            hyper_parameters = state_dict['hyper_parameters'] 
+            del state_dict['hyper_parameters']
             epochs = state_dict["epochs"]
             del state_dict["epochs"]
             train_mode = state_dict["train_mode"]
             del state_dict["train_mode"]
-            
         
             model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
@@ -280,10 +273,10 @@ class HTR_Model():
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
             # for compatibility with older model serialization
-            constructor_parameters = state_dict['constructor_parameters'] if 'constructor_parameters' in state_dict else state_dict['constructor_params']
-            hyper_parameters = state_dict['hyper_parameters'] if 'hyper_parameters' in state_dict else None
+            constructor_parameters = state_dict['constructor_parameters'] 
+            hyper_parameters = state_dict['hyper_parameters']
             # last 3 keys for back-compatibility
-            for k in ('constructor_parameters', 'hyper_parameters', 'epochs', 'train_mode', 'constructor_params', 'validation_epochs', 'train_epochs'):
+            for k in ('constructor_parameters', 'hyper_parameters', 'epochs', 'train_mode'):
                 if k in state_dict:
                     del state_dict[ k ]
 

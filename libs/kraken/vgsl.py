@@ -170,13 +170,6 @@ class TorchVGSLModel(object):
         
         self.criterion: Any = None
         self.nn = layers.MultiParamSequential()
-        self.user_metadata: Dict[str, Any] = {'accuracy': [],
-                                              'metrics': [],
-                                              'seg_type': None,
-                                              'one_channel_mode': None,
-                                              'model_type': None,
-                                              'hyper_params': {},
-                                              'legacy_polygons': False}  # enable new polygons by default on new models
         self._aux_layers = nn.ModuleDict()
 
         self.idx = -1
@@ -299,54 +292,6 @@ class TorchVGSLModel(object):
         self.spec = '[' + ' '.join(self.named_spec) + ']'
         self.init_weights(slice(idx, -1))
 
-    def to(self, device: Union[str, torch.device]) -> None:
-        """
-
-        :param device: 
-        :type device: Union[str, torch.device]
-        :rtype: None
-
-        """
-        self.nn = self.nn.to(device)
-        if self.criterion:
-            self.criterion = self.criterion.to(device)
-
-    def eval(self) -> None:
-        """Sets the model to evaluation/inference mode, disabling dropout and
-        gradient calculation.
-
-
-        :rtype: None
-
-        """
-        self.nn.eval()
-        torch.set_grad_enabled(False)
-
-    def train(self) -> None:
-        """Sets the model to training mode (enables dropout layers and disables
-        softmax on CTC layers).
-
-
-        :rtype: None
-
-        """
-        self.nn.train()
-        # set last layer back to eval mode if not CTC output layer
-        # (log_softmax/softmax switch).
-        if not self.criterion:
-            self.nn[-1].eval()
-        torch.set_grad_enabled(True)
-
-    def set_num_threads(self, num: int) -> None:
-        """Sets number of OpenMP threads to use.
-
-        :param num: 
-        :type num: int
-        :rtype: None
-
-        """
-        torch.set_num_threads(num)
-
 
     @property
     def aux_layers(self, **kwargs):
@@ -356,6 +301,7 @@ class TorchVGSLModel(object):
 
         """
         return self._aux_layers
+
 
     @aux_layers.setter
     def aux_layers(self, val: Dict[str, torch.nn.Module]):

@@ -103,11 +103,10 @@ class Alphabet:
 
     def reduce(self, sample_s: str) -> str:
         """Transform a string, for training and validation purpose.
-        Rewrite a string in 3 steps:
+        Rewrite a string in 2 steps:
         
-        1. suppress unwanted characters
-        2. normalize spaces
-        3. map all chars of a charset to their representative.
+        1. normalize spaces
+        2. map all chars of a charset to their representative.
 
             >>> Alphabet( LemmatizerBMP({'c':'a', 'b':'b', 'a':'c'})).reduce('a   b  c')
             'c b a'

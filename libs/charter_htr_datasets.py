@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Callable, Union, Optional
 import sys
+from functools import partial
 
 # 3rd-party
 from tqdm import tqdm
@@ -589,7 +590,7 @@ class HTRLineDataset(VisionDataset):
 
     + a folder path: all files in it are then included in the dataset.
     + a list of files in a common location → for building any dataset on-the-fly.
-    + a TSV file: its parent folder is assumed to contain the sample files; the TSV lists those entries that
+    + a TSV file: assumes the parent folder ontains the sample files; the TSV lists those entries that
       are to be included in the dataset.
 
     The first two options allow serializing the dataset into a TSV, for later reuse.
@@ -644,7 +645,8 @@ class HTRLineDataset(VisionDataset):
                 truth at loading time, before any character mapping occurs eg. filtering
                 out characters, space normalization.
             expansion_masks (bool): if True (default), add transcription expansion offsets
-                to the sample if it is present in the XML source line annotations.
+                to the sample if it is present in the XML source line annotations (incompatible
+                with ignore characters!).
             channel_func (Callable): function that takes image and binary polygon mask as inputs,
                 and generates an additional channel in the sample. Default: None.
             channel_suffix (str): when loading items from a work folder, which suffix
@@ -658,22 +660,26 @@ class HTRLineDataset(VisionDataset):
         """
 
         self._data = []
+        self.device = device
         from_line_files = [ Path(f) for f in from_line_files ] 
 
-        self.img_suffix = img_suffix
-        self.gt_suffix = gt_suffix
-        self.channel_suffix = channel_suffix
-        self.device = device
-        self.ignored_characters = ignored_characters
+        self.config = {
+                'from_tsv_file': from_tsv_file,
+                'img_suffix': img_suffix,
+                'gt_suffix': gt_suffix,
+                'channel_func': channel_func,
+                'channel_suffix': channel_suffix,
+                'padding_style': padding_style,
+                'expansion_masks': expansion_masks,
+                'ignored_characters': ignored_characters,
+        }
 
         if from_tsv_file:
             tsv_path = Path( from_tsv_file )
             if tsv_path.exists():
                 self.work_folder_path = tsv_path.parent
-                # paths are assumed to be absolute
-                self._data = self.load_from_tsv( tsv_path, expansion_masks )
+                self._data = self.load_from_tsv( tsv_path, expansion_masks, ignored_characters=ignored_characters )
                 logger.debug("data={}".format( self._data[:6]))
-                #logger.debug("height: {} type={}".format( self._data[0]['height'], type(self._data[0]['height'])))
             else:
                 raise FileNotFoundError(f'File {tsv_path} does not exist!')
         else:
@@ -701,15 +707,6 @@ class HTRLineDataset(VisionDataset):
         if padding_style and padding_style not in ['noise', 'zero', 'median']:
             raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
 
-        # bbox or polygons and/or masks
-        self.config = {
-                'from_tsv_file': from_tsv_file,
-                'from_work_folder': from_work_folder,
-                'channel_func': channel_func,
-                'channel_suffix': channel_suffix,
-                'padding_style': padding_style,
-                'expansion_masks': expansion_masks,
-        }
 
 
     def load_line_items_from_dir(self, work_folder_path: Union[Path,str] ) -> list[dict]:
@@ -725,7 +722,7 @@ class HTRLineDataset(VisionDataset):
         """
         if type(work_folder_path) is str:
             work_folder_path = Path( work_folder_path )
-        file_paths = list( work_folder_path.glob('*{}'.format( self.img_suffix )))
+        file_paths = list( work_folder_path.glob('*{}'.format( self.config['img_suffix'] )))
         return self.load_line_items_from_files( file_paths )
 
                 
@@ -742,7 +739,7 @@ class HTRLineDataset(VisionDataset):
         for img_file_path in file_paths:
             sample=dict()
             logger.debug(img_file_path)            
-            gt_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.gt_suffix, str(img_file_path)))
+            gt_file_path = Path( re.sub(r'{}$'.format( self.config['img_suffix'] ), self.config['gt_suffix'], str(img_file_path)))
             sample['img_path']=str(img_file_path)
             with Image.open( img_file_path, 'r') as img:
                 sample['width'], sample['height'] = img.size
@@ -750,24 +747,25 @@ class HTRLineDataset(VisionDataset):
             with open(gt_file_path, 'r') as gt_if:
                 transcription=gt_if.read().rstrip()
                 expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', transcription)
-                if expansion_masks_match is not None:
+                if not len(self.config['ignored_characters']) and self.config['expansion_masks'] and expansion_masks_match is not None:
                     sample['transcription']=expansion_masks_match.group(1)
                     sample['expansion_masks']=eval(expansion_masks_match.group(2))
                 else:
-                    sample['transcription']=transcription
+                    transcription_clean = ''.join( [ c for c in transcription if c not in self.config['ignored_characters'] ])
+                    sample['transcription']=transcription_clean
                 # discarding empty targets
-                if re.match(r'^\s*$', ''.join( [ c for c in sample['transcription'] if c not in self.ignored_characters ])):
-                    logger.warning(f"Discarding sample {(img_file_path).name}: removal of chars {list(self.ignored_characters)} yields an empty transcription!")
+                if re.match(r'^\s*$', sample['transcription'] ):
+                    logger.warning(f"Discarding sample {(img_file_path).name}: removal of chars {list(self.config['ignored_characters'])} yields an empty transcription!")
                     continue
                 # for debugging
-                sample['transcription_raw']=sample['transcription']
+                sample['transcription_raw']=transcription
             # binary mask
-            binary_mask_path = Path(  re.sub(r'{}$'.format( self.img_suffix ), '.bool.npy.gz', str(img_file_path)))
+            binary_mask_path = Path(  re.sub(r'{}$'.format( self.config['img_suffix'] ), '.bool.npy.gz', str(img_file_path)))
             assert binary_mask_path.exists()
             sample['binary_mask']=binary_mask_path
 
             # optional mask
-            channel_file_path = Path( re.sub(r'{}$'.format( self.img_suffix ), self.channel_suffix, str(img_file_path)))
+            channel_file_path = Path( re.sub(r'{}$'.format( self.config['img_suffix'] ), self.config['channel_suffix'], str(img_file_path)))
             if channel_file_path.exists():
                 sample['img_channel']=channel_file_path
 
@@ -778,23 +776,27 @@ class HTRLineDataset(VisionDataset):
                 
 
     @staticmethod
-    def load_from_tsv(file_path: Path, expansion_masks=False) -> list[dict]:
+    def load_from_tsv(file_path: Path, expansion_masks=False, ignored_characters='') -> list[dict]:
         """Load samples (as dictionaries) from an existing TSV file. Each input line is a tuple::
 
            <img file path> <transcription text> <height> <width> [<polygon points>]
 
         Each line image is assumed to have a binary mask counterpart `*.bool.npy.gz` (computing
-        from an optional field <polygon points> is not implemented).
+        from an optional field <polygon points> is not implemented). The transcription text
+        is either raw (as read from GT file) or clean (when generated with ignored_characters 
+        option).
 
         Args:
             file_path (Path): A file path.
             expansion_masks (bool): Load expansion mask field.
+            ignored_characters (str): a string of characters to be discarded from the input.
 
         Returns:
             list[dict]: A list of dictionaries of the form::
 
             {'img': <img file path>,
-             'transcription': <transcription text>,
+             'transcription_raw': <on-disk transcription text>,
+             'transcription': <transcription text minus ignored characters>,
              'height': <original height>,
              'width': <original width>,
             ['img_channel': <2D extra channel> ]
@@ -809,20 +811,22 @@ class HTRLineDataset(VisionDataset):
             channel_file = sample_df.loc[ row ][4] if len(sample_df.columns)>4 else None
             binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
 
-            if re.match(r'^\s*$', ''.join([ c for c in gt_field if c not in self.ignored_characters ])):
+            expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
+            if not ignored_characters and expansion_masks and expansion_masks_match is not None:
+                logger.warning(f"TSV file has expansion masks")
+                gt_field_clean = expansion_masks_match.group(1)
+            else:
+                gt_field_clean = ''.join([ c for c in gt_field if c not in ignored_characters ])
+            if re.match(r'^\s*$', gt_field_clean):
                 logger.warning(f"Discarding sample {Path(img_path).name}: junk removal yields an empty transcription!")
                 continue
-
-            expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
-            if expansion_masks_match is not None:
-                gt_field = expansion_masks_match.group(1)
             
             spl = { 'img_path': str(work_folder_path.joinpath( img_file )), 
-                    'transcription': gt_field, 'transcription_raw': gt_field,
+                    'transcription': gt_field_clean, 'transcription_raw': gt_field,
                     'height': int(height), 'width': int(width) }
             if channel_file is not None:
                 spl['img_channel']=work_folder_path.joinpath( channel_file )
-            if expansion_masks and expansion_masks_match is not None:
+            if not ignored_characters and expansion_masks and expansion_masks_match is not None:
                 spl['expansion_masks']=eval( expansion_masks_match.group(2))
             if binary_mask_file.exists():
                 spl['binary_mask']=binary_mask_file
@@ -833,7 +837,7 @@ class HTRLineDataset(VisionDataset):
 
 
     @staticmethod
-    def dump_data_to_tsv(samples: list[dict], file_path: str='', all_path_style=False) -> None:
+    def dump_data_to_tsv(samples: list[dict], file_path: str='', all_path_style=False, raw=True) -> None:
         """Create a TSV file with all tuples (`<line image absolute path>`, `<transcription>`, `<height>`, `<width>` `[<polygon points]`).
         Height and widths are the original heights and widths.
 
@@ -841,6 +845,8 @@ class HTRLineDataset(VisionDataset):
             samples (list[dict]): dataset samples.
             file_path (str): A TSV (absolute) file path (Default value = '')
             all_path_style (bool): list GT file name instead of GT content. (Default value = False)
+            raw (bool): transcriptions reflect the original GT file, with no character deletion
+                (default); if False, ignored_characters option is applied.
 
         Returns:
             None
@@ -850,18 +856,18 @@ class HTRLineDataset(VisionDataset):
                 # note: TSV only contains the image file name (load_from_tsv() takes care of applying the correct path prefix)
                 img_path, gt, height, width = Path(sample['img_path']).name, sample['transcription'], sample['height'], sample['width']
                 logger.debug("{}\t{}\t{}\t{}".format( img_path, 
-                      gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'), int(height), int(width)))
+                      gt if not all_path_style else Path(img_path).with_suffix(self.config['gt_suffix']), int(height), int(width)))
             return
         with open( file_path, 'w' ) as of:
             # header: ImgPath  GT  Height  Width [Channel]
             of.write('ImgPath\tGT\tHeight\tWidth{}\n'.format( '\tChannel' if 'img_channel' in samples[0] else ''))
             for sample in samples:
-                img_path, gt, height, width = Path(sample['img_path']).name, sample['transcription'], sample['height'], sample['width']
+                img_path, gt, height, width = Path(sample['img_path']).name, sample['transcription_raw'] if raw else sample['transcription'], sample['height'], sample['width']
                 #logger.debug('{}\t{}'.format( img_path, gt, height, width ))
                 if 'expansion_masks' in sample and sample['expansion_masks'] is not None:
                     gt = gt + '<{}>'.format( sample['expansion_masks'] )
                 of.write( '{}\t{}\t{}\t{}'.format( img_path,
-                                             gt if not all_path_style else Path(img_path).with_suffix('.gt.txt'),
+                                             gt if not all_path_style else Path(img_path).with_suffix(self.config['gt_suffix']),
                                              int(height), int(width) ))
                 if 'img_channel' in sample and sample['img_channel'] is not None:
                     of.write('\t{}'.format( sample['img_channel'].name ))
@@ -988,6 +994,13 @@ class HTRLineDataset(VisionDataset):
 
 
 class TrOCRLineDataset( HTRLineDataset ):
+    """
+    A DS for training/validation purpose (in progress).
+
+    TODO:
+    
+    + processor and tokenizer parameters as args
+    """
 
     def __init__( self, *args, **kwargs ):
         super().__init__( *args, **kwargs )
@@ -1027,7 +1040,6 @@ class TrOCRLineDataset( HTRLineDataset ):
                         img_array_hwc=img_array_hwc[:,:,None]
             del sample['binary_mask']
 
-
             # img ndarray --> tensor
             # 1. back to PIL
             # 2. TrOCR encoding
@@ -1043,6 +1055,185 @@ class TrOCRLineDataset( HTRLineDataset ):
 
             logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
             return sample
+
+class LineInferenceDataset( VisionDataset ):
+
+    def __init__(self, img_paths: Union[str,Path],
+                 img_suffix: '.png',
+                 msk_suffix: '.npy.gz',
+                 transform: Callable=None,
+                 padding_style=None,) -> None:
+        """ A minimal dataset class for inference on a set of line images and their (optional) masks.
+        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
+
+        Args:
+            img_paths (Union[Path,str]): line image paths
+            transform (Callable): Image transform.
+            padding_style (str): How to pad the bounding box around the polygons, when 
+                building the initial, raw dataset (before applying any transform):
+                + 'median'= polygon's median value,
+                + 'noise' = random noise,
+                + 'zero'= 0-padding, 
+                + None (default) = no padding, i.e. raw bounding box
+        """
+        self.img_suffix = img_suffix
+        self.msk_suffix = msk_suffix
+
+        trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+        if transform is not None: 
+            trf = v2.Compose( [trf, transform] )
+        super().__init__('', transform=trf )
+
+        img_path = Path( img_path ) if type(img_path) is str else img_path
+
+        if padding_style and padding_style not in ['noise', 'zero', 'median']:
+            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
+        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
+
+        self._data = []
+        try:
+            if args.line
+            # This creates a page dict with a convenient top-level 'lines' array, raised from 
+            # its containing region(s): allow for easy update of all line objects - this top-level 
+            # reference to the line array is later deleted, before serializing the ouput.
+            self.line_dicts = self.construct line_dicts( args.img_paths )
+            for img_hwc, mask_hwc, line_dict in self.line_dicts:
+                mask_hw = mask_hwc[:,:,0]
+                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
+                                    'height':img_hwc.shape[0],
+                                    'width': img_hwc.shape[1],
+                                    'id': str(line_dict['id']),
+                                    'img_filename': str(img_path),
+                                   } )
+            # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
+            self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
+            self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
+        except Exception as e:
+            logger.warning("Error when creating the line dataset: {}".format( e ))
+        self.ok = len(self.data) > 0
+
+    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
+        """ Update a given line dictionary with prediction data, whatever they are."""
+        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
+        if keep_gt:
+            this_line['gt']=this_line['text']
+        this_line.update( kv )
+
+    def __getitem__(self, index: int):
+        sample = self._data[index]
+        sample['img']=sample['img'].copy() # Torch warning otherwise
+        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
+        return self.transform( sample )
+
+    def __len__(self):
+        return len(self.data)
+
+    def construct_line_dicts( self, line_image_paths: list[Path, masks=True]  )->list:
+        """
+        Construct a list of lines dictionaries line image paths.
+        """
+        line_dicts = []
+        for line_img_path line_image_paths:
+            msk_path = Path(str(line_image_paths).replace( self.img_suffix, self.msk_suffix ))
+            if msk
+            
+
+
+class CharterInferenceDataset( LineInferenceDataset ):
+
+    def __init__(self, img_path: Union[str,Path],
+                 segmentation_data: Union[str,Path], 
+                 transform: Callable=None,
+                 padding_style=None,
+                 line_height_factor=1.0) -> None:
+        """ A minimal dataset class for inference on a single charter (no transcription in the sample).
+        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
+
+        Args:
+            img_path (Union[Path,str]): charter image path
+            segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
+            transform (Callable): Image transform.
+            padding_style (str): How to pad the bounding box around the polygons, when 
+                building the initial, raw dataset (before applying any transform):
+                + 'median'= polygon's median value,
+                + 'noise' = random noise,
+                + 'zero'= 0-padding, 
+                + None (default) = no padding, i.e. raw bounding box
+            line_height_factor (float): apply a factor to the polygon strip height (only for JSON inputs).
+        """
+
+        trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
+        if transform is not None: 
+            trf = v2.Compose( [trf, transform] )
+        super().__init__('', transform=trf )
+
+        img_path = Path( img_path ) if type(img_path) is str else img_path
+        segmentation_data = Path( segmentation_data ) 
+
+        # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
+        line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor) if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
+
+        if padding_style and padding_style not in ['noise', 'zero', 'median']:
+            raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
+        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
+
+        self._data = []
+        try:
+            # This creates a page dict with a convenient top-level 'lines' array, raised from 
+            # its containing region(s): allow for easy update of all line objects - this top-level 
+            # reference to the line array is later deleted, before serializing the ouput.
+            self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
+            for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
+                mask_hw = mask_hwc[:,:,0]
+                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
+                                    'height':img_hwc.shape[0],
+                                    'width': img_hwc.shape[1],
+                                    'id': str(line_dict['id']),
+                                    'img_filename': str(img_path),
+                                   } )
+            # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
+            self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
+            self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
+        except Exception as e:
+            logger.warning("Error when creating the line dataset: {}".format( e ))
+        self.ok = len(self.data) > 0
+
+    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
+        """ Update a given line dictionary with prediction data, whatever they are."""
+        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
+        if keep_gt:
+            this_line['gt']=this_line['text']
+        this_line.update( kv )
+
+    def __getitem__(self, index: int):
+        sample = self._data[index]
+        sample['img']=sample['img'].copy() # Torch warning otherwise
+        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
+        return self.transform( sample )
+
+    def __len__(self):
+        return len(self.data)
+
+
+class TrOCRInferenceDataset( VisionDataset ):
+    """
+    A dataset for inference tasks, for use with TrOCR.
+
+    TODO: 
+        + processor passed as a parameter
+    """
+
+    def __init__( self, *args, **kwargs ):
+        super().__init__(*args, **kwargs)
+        self.processor=TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
+
+    def __getitem__(self, index: int):
+        sample = self.data[index]
+        sample['img']=self.processor( Image.fromarray( sample['img'] ), return_tensors='pt').pixel_values 
+
+        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
+        return sample 
+
 
 
 def dummy():
