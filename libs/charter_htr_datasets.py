@@ -617,6 +617,7 @@ class HTRLineDataset(VisionDataset):
                 from_line_files: list[Path]=[],
                 img_suffix: str='.png',
                 gt_suffix: str='.gt.txt',
+                msk_suffix: str='.bool.npy.gz',
                 to_tsv_file: str='',
                 transform: Optional[Callable] = None,
                 target_transform: Optional[Callable] = lambda x: x,
@@ -667,6 +668,7 @@ class HTRLineDataset(VisionDataset):
                 'from_tsv_file': from_tsv_file,
                 'img_suffix': img_suffix,
                 'gt_suffix': gt_suffix,
+                'msk_suffix': msk_suffix,
                 'channel_func': channel_func,
                 'channel_suffix': channel_suffix,
                 'padding_style': padding_style,
@@ -760,7 +762,7 @@ class HTRLineDataset(VisionDataset):
                 # for debugging
                 sample['transcription_raw']=transcription
             # binary mask
-            binary_mask_path = Path(  re.sub(r'{}$'.format( self.config['img_suffix'] ), '.bool.npy.gz', str(img_file_path)))
+            binary_mask_path = Path(  re.sub(r'{}$'.format( self.config['img_suffix'] ), self.config['msk_suffix'], str(img_file_path)))
             assert binary_mask_path.exists()
             sample['binary_mask']=binary_mask_path
 
@@ -809,7 +811,7 @@ class HTRLineDataset(VisionDataset):
         for row in range( sample_df.shape[0] ):
             img_file, gt_field, height, width = sample_df.loc[ row ][:4]
             channel_file = sample_df.loc[ row ][4] if len(sample_df.columns)>4 else None
-            binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix('.bool.npy.gz')
+            binary_mask_file = work_folder_path.joinpath( img_file ).with_suffix( self.config['msk_suffix'])
 
             expansion_masks_match = re.search(r'^(.+)<([^>]+)>$', gt_field)
             if not ignored_characters and expansion_masks and expansion_masks_match is not None:
@@ -1056,86 +1058,85 @@ class TrOCRLineDataset( HTRLineDataset ):
             logger.debug("After transform: sample['img'] has shape {} and type {}".format( sample['img'].shape, sample['img'].dtype))
             return sample
 
-class LineInferenceDataset( VisionDataset ):
 
+class LineInferenceDataset( VisionDataset ):
+    """ A minimal dataset class for inference on a set of line images and their (optional) masks.
+    Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
+
+    Key differences with CharterInferenceDataset:
+
+    + input is a set of line files, not a single charter entity
+    + arbitrary large: line images and (optional) masks stay on disk until loading time
+    + no handling of a page dictionary for storing prediction results
+    """
     def __init__(self, img_paths: Union[str,Path],
-                 img_suffix: '.png',
-                 msk_suffix: '.npy.gz',
-                 transform: Callable=None,
-                 padding_style=None,) -> None:
-        """ A minimal dataset class for inference on a set of line images and their (optional) masks.
-        Allow for keeping the segmentation meta-data along with the about-to-be generated HTR.
+                img_suffix: str='.png',
+                msk_suffix: str='.bool.npy.gz',
+                with_mask: bool = True,
+                transform: Callable=None,
+                padding_style=None,) -> None:
+        """Initialize a dataset instance
 
         Args:
             img_paths (Union[Path,str]): line image paths
+            img_suffix (str): image suffix.
+            msk_suffix (str): binary mask suffix.
+            with_mask (bool): use the masks, if available.
             transform (Callable): Image transform.
-            padding_style (str): How to pad the bounding box around the polygons, when 
-                building the initial, raw dataset (before applying any transform):
-                + 'median'= polygon's median value,
-                + 'noise' = random noise,
-                + 'zero'= 0-padding, 
-                + None (default) = no padding, i.e. raw bounding box
+            padding_style (str): How to pad the bounding box around the polygon.
         """
         self.img_suffix = img_suffix
         self.msk_suffix = msk_suffix
+        self.with_mask = with_mask
 
         trf = v2.Compose( [v2.ToImage(), v2.ToDtype(torch.float32, scale=True)])
         if transform is not None: 
             trf = v2.Compose( [trf, transform] )
         super().__init__('', transform=trf )
 
-        img_path = Path( img_path ) if type(img_path) is str else img_path
-
         if padding_style and padding_style not in ['noise', 'zero', 'median']:
             raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
-        line_padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad }
+        self.padding_style = padding_style 
 
         self._data = []
         try:
-            if args.line
-            # This creates a page dict with a convenient top-level 'lines' array, raised from 
-            # its containing region(s): allow for easy update of all line objects - this top-level 
-            # reference to the line array is later deleted, before serializing the ouput.
-            self.line_dicts = self.construct line_dicts( args.img_paths )
-            for img_hwc, mask_hwc, line_dict in self.line_dicts:
-                mask_hw = mask_hwc[:,:,0]
-                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
-                                    'height':img_hwc.shape[0],
-                                    'width': img_hwc.shape[1],
-                                    'id': str(line_dict['id']),
-                                    'img_filename': str(img_path),
-                                   } )
-            # at this point, we don't need the image data anymore: restoring original line dictionaries into the page data
-            self.page_dict['lines'] = [ triplet[2] for triplet in self.page_dict['lines'] ]
-            self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
+            self._data = self.load_line_items_from_files( [ Path(p) for p in img_paths ] )
         except Exception as e:
             logger.warning("Error when creating the line dataset: {}".format( e ))
-        self.ok = len(self.data) > 0
-
-    def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
-        """ Update a given line dictionary with prediction data, whatever they are."""
-        this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
-        if keep_gt:
-            this_line['gt']=this_line['text']
-        this_line.update( kv )
+        self.ok = len(self._data) > 0
 
     def __getitem__(self, index: int):
-        sample = self._data[index]
-        sample['img']=sample['img'].copy() # Torch warning otherwise
-        logger.debug(f"type(sample['img'])={type(sample['img'])} with shape= {sample['img'].shape}" )
+        sample = self._data[index].copy()
+        padding_func = { 'noise': tsf.bbox_noise_pad, 'zero': tsf.bbox_zero_pad, 'median': tsf.bbox_median_pad } 
+        with Image.open( sample['img'] ) as img:
+            img_array_hwc = np.array( img )
+            if sample['msk_path'] and self.padding_style:
+                with gzip.GzipFile( sample['msk_path'],'r') as msk_in:
+                    binary_mask_hw = np.load( msk_in )
+                    img_array_hwc = padding_func[self.padding_style]( img_array_hwc, binary_mask_hw, channel_dim=2 )
+                    if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvisio
+                        img_array_hwc=img_array_hwc[:,:,None]
+            sample['img'] = img_array_hwc
+
+        del sample['msk_path']
         return self.transform( sample )
 
     def __len__(self):
-        return len(self.data)
+        return len(self._data)
 
-    def construct_line_dicts( self, line_image_paths: list[Path, masks=True]  )->list:
+    def load_line_items_from_files( self, line_img_paths: list[Path] )->list:
         """
         Construct a list of lines dictionaries line image paths.
         """
         line_dicts = []
-        for line_img_path line_image_paths:
-            msk_path = Path(str(line_image_paths).replace( self.img_suffix, self.msk_suffix ))
-            if msk
+        for line_img_path in line_img_paths:
+            ld = { 'img': line_img_path, 'id': line_img_path.with_suffix('').name, 'img_filename': str(line_img_path), 'msk_path': None }
+            if self.with_mask:
+                msk_path = Path(str(line_img_path).replace( self.img_suffix, self.msk_suffix )) 
+                if msk_path.exists():
+                    ld['msk_path']=msk_path 
+            line_dicts.append( ld )
+        return line_dicts
             
 
 
@@ -1153,8 +1154,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
             img_path (Union[Path,str]): charter image path
             segmentation_data (Union[Path, str]): segmentation metadata (XML or JSON)
             transform (Callable): Image transform.
-            padding_style (str): How to pad the bounding box around the polygons, when 
-                building the initial, raw dataset (before applying any transform):
+            padding_style (str): How to pad the bounding box around the polygons
                 + 'median'= polygon's median value,
                 + 'noise' = random noise,
                 + 'zero'= 0-padding, 
