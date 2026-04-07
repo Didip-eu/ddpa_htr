@@ -53,6 +53,7 @@ p = {
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "img_suffix": ".img.jpg",
     "msk_suffix": ".bool.npy.gz",
+    "with_mask": True,
     "htr_suffix": "", 
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
@@ -103,11 +104,13 @@ if __name__ == "__main__":
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 
+    # no pages, only line images (and optional masks)
     if line_scope:
         dataset = LineInferenceDataset(
                         img_paths, 
                         img_suffix=args.img_suffix, 
                         msk_suffix=args.msk_suffix, 
+                        with_mask=args.with_mask,
                         transform = Compose([ 
                             tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
                             tsf.PadToWidth( model.image_specs['img_width'] ) ]),
@@ -117,18 +120,45 @@ if __name__ == "__main__":
             logger.warning("Could not build a proper dataset. Aborting.")
             continue
 
-        for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
+        line_dicts = []
+        for sample in DataLoader(dataset, batch_size=1):
             try:
                 # strings, np.ndarray
                 predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
                 # since batch is 1, flattening batch values
                 line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
-                line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
+                line_dicts.append( { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) })
             except Exception as e:
-                # TODO: update fields
-                logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
+                
+                logger.warning("Inference failed on line {} (image file {}): {}".format( line_id, sample['img_path'], e))
                 continue
+        if args.output_format in ('json', 'xml'):
+            logger.warning("No option for JSON or XML output format → falling back to standard output.")
+            args.output_format = 'stdout'
+        if args.output_format in ('tsv', 'stdout'):
+            header_row = ['Index', 'Id', 'Prediction']
+            if 'gt' in args.output_data:
+                header_row.append( 'GT' )
+            if 'scores' in args.output_data:
+                header_row.append( 'Scores')
+            output_rows=[ '\t'.join( header_row ) ]
+            for idx, line_dict in enumerate(dataset.page_dict['lines']):
+                logger.debug( line_dict )
+                output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
+                if 'gt' in args.output_data and 'gt' in line_dict:
+                    output_row.append( line_dict['gt'] )
+                if 'scores' in args.output_data and 'scores' in line_dict:
+                    output_row.append( str(line_dict['scores']) )
 
+                    output_rows.append( '\t'.join( output_row ) )
+            if args.output_format == 'stdout':
+                print('\n'.join(output_rows))
+            else:
+                with open( output_file_path, 'w') as htr_outfile:
+                    htr_outfile.write( '\n'.join( output_rows) )
+                    htr_outfile.write( '\n')
+
+    # pages (+ segmentation data)
     else:
         for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 

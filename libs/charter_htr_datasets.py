@@ -1114,9 +1114,10 @@ class LineInferenceDataset( VisionDataset ):
                 with gzip.GzipFile( sample['msk_path'],'r') as msk_in:
                     binary_mask_hw = np.load( msk_in )
                     img_array_hwc = padding_func[self.padding_style]( img_array_hwc, binary_mask_hw, channel_dim=2 )
-                    if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvisio
+                    if len(img_array_hwc.shape) == 2: # for ToImage() transf. to work in older torchvision
                         img_array_hwc=img_array_hwc[:,:,None]
             sample['img'] = img_array_hwc
+            sample['width'], sample['height'] = img.size
 
         del sample['msk_path']
         return self.transform( sample )
@@ -1130,7 +1131,7 @@ class LineInferenceDataset( VisionDataset ):
         """
         line_dicts = []
         for line_img_path in line_img_paths:
-            ld = { 'img': line_img_path, 'id': line_img_path.with_suffix('').name, 'img_filename': str(line_img_path), 'msk_path': None }
+            ld = { 'img': line_img_path, 'id': line_img_path.with_suffix('').name, 'img_path': str(line_img_path), 'msk_path': None }
             if self.with_mask:
                 msk_path = Path(str(line_img_path).replace( self.img_suffix, self.msk_suffix )) 
                 if msk_path.exists():
