@@ -52,6 +52,7 @@ p = {
     "segmentation_suffix": ".lines.pred.json", 
     "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
     "img_suffix": ".img.jpg",
+    "msk_suffix": ".bool.npy.gz",
     "htr_suffix": "", 
     "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
     "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
@@ -102,38 +103,20 @@ if __name__ == "__main__":
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 
-    inputs = pack_inputs_outputs( args ) else 
-
-
-    for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
-
-        img_path, segmentation_file_path, output_file_path = img_triplet
-        if segmentation_file_path.suffix != '.json' and args.line_height_factor != 1.0:
-            logger.info("-args.line_height_factor={} not applicable to XML segmentation data: ignored.")
-        logger.debug( "File path={}".format( img_triplet[0]))
-        if not args.overwrite_existing and output_file_path.exists():
-            logger.debug("Found {}: exiting.".format( output_file_path ))
-            continue
-
-        if not segmentation_file_path.exists():
-            logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
-            continue
-    
-        dataset = CharterInferenceDataset( 
-                                    img_path, segmentation_file_path,
-                                    transform = Compose([ 
-                                        tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
-                                        tsf.PadToWidth( model.image_specs['img_width'] ) ]),
-                                    padding_style=model.image_specs['padding_style'],
-                                    line_height_factor=args.line_height_factor,)
+    if line_scope:
+        dataset = LineInferenceDataset(
+                        img_paths, 
+                        img_suffix=args.img_suffix, 
+                        msk_suffix=args.msk_suffix, 
+                        transform = Compose([ 
+                            tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
+                            tsf.PadToWidth( model.image_specs['img_width'] ) ]),
+                        padding_style=args.line_padding_style,)
+        
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
             continue
-         
-        # 2. HTR inference
 
-        # Idea: the live page dictionary is updated with all the info that may be of interest:
-        # depending on the output format chosen, some of it gets deleted later.
         for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
             try:
                 # strings, np.ndarray
@@ -141,60 +124,102 @@ if __name__ == "__main__":
                 # since batch is 1, flattening batch values
                 line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                 line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
-                dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
             except Exception as e:
+                # TODO: update fields
                 logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
                 continue
 
-        # 3. Output
-        if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
-            logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
+    else:
+        for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
-        # stdout and tsv for extra data
-        if args.output_format in ('stdout', 'tsv'):
-            header_row = ['Index', 'Id', 'Prediction']
-            if 'gt' in args.output_data:
-                header_row.append( 'GT' )
-            if 'scores' in args.output_data:
-                header_row.append( 'Scores')
-            if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
-                header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
-            output_rows=[ '\t'.join( header_row ) ]
-            for idx, line_dict in enumerate(dataset.page_dict['lines']):
-                logger.debug( line_dict )
-                output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
-                if 'gt' in args.output_data and 'gt' in line_dict:
-                    output_row.append( line_dict['gt'] )
-                if 'scores' in args.output_data and 'scores' in line_dict:
-                    output_row.append( str(line_dict['scores']) )
+            img_path, segmentation_file_path, output_file_path = img_triplet
+            if segmentation_file_path.suffix != '.json' and args.line_height_factor != 1.0:
+                logger.info("-args.line_height_factor={} not applicable to XML segmentation data: ignored.")
+            logger.debug( "File path={}".format( img_triplet[0]))
+            if not args.overwrite_existing and output_file_path.exists():
+                logger.debug("Found {}: exiting.".format( output_file_path ))
+                continue
+
+            if not segmentation_file_path.exists():
+                logger.info("Skipping image {}: no segmentation file {} found.".format( img_path, segmentation_file_path ))
+                continue
+        
+            dataset = CharterInferenceDataset( 
+                                        img_path, segmentation_file_path,
+                                        transform = Compose([ 
+                                            tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
+                                            tsf.PadToWidth( model.image_specs['img_width'] ) ]),
+                                        padding_style=model.image_specs['padding_style'],
+                                        line_height_factor=args.line_height_factor,)
+            if not dataset.ok:
+                logger.warning("Could not build a proper dataset. Aborting.")
+                continue
+             
+            # 2. HTR inference
+
+            # Idea: the live page dictionary is updated with all the info that may be of interest:
+            # depending on the output format chosen, some of it gets deleted later.
+            for line, sample in enumerate(DataLoader(dataset, batch_size=1)):
+                try:
+                    # strings, np.ndarray
+                    predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
+                    # since batch is 1, flattening batch values
+                    line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
+                    line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
+                    dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
+                except Exception as e:
+                    logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
+                    continue
+
+            # 3. Output
+            if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
+                logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
+
+            # stdout and tsv for extra data
+            if args.output_format in ('stdout', 'tsv'):
+                header_row = ['Index', 'Id', 'Prediction']
+                if 'gt' in args.output_data:
+                    header_row.append( 'GT' )
+                if 'scores' in args.output_data:
+                    header_row.append( 'Scores')
                 if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
-                    output_row.extend([ str(elt) for elt in dataset.page_dict['metadata'].values() ])
-                output_rows.append( '\t'.join( output_row ) )
-            if args.output_format == 'stdout':
-                print('\n'.join(output_rows))
-            else:
-                with open( output_file_path, 'w') as htr_outfile:
-                    htr_outfile.write( '\n'.join( output_rows) )
-                    htr_outfile.write( '\n')
+                    header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
+                output_rows=[ '\t'.join( header_row ) ]
+                for idx, line_dict in enumerate(dataset.page_dict['lines']):
+                    logger.debug( line_dict )
+                    output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
+                    if 'gt' in args.output_data and 'gt' in line_dict:
+                        output_row.append( line_dict['gt'] )
+                    if 'scores' in args.output_data and 'scores' in line_dict:
+                        output_row.append( str(line_dict['scores']) )
+                    if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                        output_row.extend([ str(elt) for elt in dataset.page_dict['metadata'].values() ])
+                    output_rows.append( '\t'.join( output_row ) )
+                if args.output_format == 'stdout':
+                    print('\n'.join(output_rows))
+                else:
+                    with open( output_file_path, 'w') as htr_outfile:
+                        htr_outfile.write( '\n'.join( output_rows) )
+                        htr_outfile.write( '\n')
 
-        # Json and Xml for standard page annotation
-        elif args.output_format in ('json', 'xml'):
-            for line in dataset.page_dict['lines']:
-                if 'scores' in line:
-                    del line['scores']
-                if 'gt' in line:
-                    del line['gt']
-            # deleting top-level 'lines' reference
-            del dataset.page_dict['lines']
-            dataset.page_dict.update({
-                'created': str(datetime.now()), 'creator': __file__,    
-            })
-            if args.output_format == 'json':
-                with open( output_file_path, 'w') as htr_outfile:
-                    htr_outfile.write(json.dumps( dataset.page_dict, indent=2))
-            elif args.output_format == 'xml':
-                seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
-        if output_file_path.exists():
-            logger.info(f"HTR output saved in {output_file_path}")
-            
+            # Json and Xml for standard page annotation
+            elif args.output_format in ('json', 'xml'):
+                for line in dataset.page_dict['lines']:
+                    if 'scores' in line:
+                        del line['scores']
+                    if 'gt' in line:
+                        del line['gt']
+                # deleting top-level 'lines' reference
+                del dataset.page_dict['lines']
+                dataset.page_dict.update({
+                    'created': str(datetime.now()), 'creator': __file__,    
+                })
+                if args.output_format == 'json':
+                    with open( output_file_path, 'w') as htr_outfile:
+                        htr_outfile.write(json.dumps( dataset.page_dict, indent=2))
+                elif args.output_format == 'xml':
+                    seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
+            if output_file_path.exists():
+                logger.info(f"HTR output saved in {output_file_path}")
+                
 
