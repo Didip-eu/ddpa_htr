@@ -32,7 +32,7 @@ sys.path.append( root )
 from libs.htr_model import HTR_Model
 from libs import seglib, transforms as tsf
 from libs import list_utils as lu
-from libs.charter_htr_datasets import CharterInferenceDataset
+from libs.charter_htr_datasets import CharterInferenceDataset, LineInferenceDataset
 
 
 logging_format="%(asctime)s - %(levelname)s: %(funcName)s - %(message)s"
@@ -105,9 +105,9 @@ if __name__ == "__main__":
         model.decoder = HTR_Model.decode_beam_search
 
     # no pages, only line images (and optional masks)
-    if line_scope:
+    if args.line_scope:
         dataset = LineInferenceDataset(
-                        img_paths, 
+                        args.img_paths, 
                         img_suffix=args.img_suffix, 
                         msk_suffix=args.msk_suffix, 
                         with_mask=args.with_mask,
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
-            continue
+            sys.exit()
 
         line_dicts = []
         for sample in DataLoader(dataset, batch_size=1):
@@ -132,6 +132,7 @@ if __name__ == "__main__":
                 
                 logger.warning("Inference failed on line {} (image file {}): {}".format( line_id, sample['img_path'], e))
                 continue
+        print(line_dicts)
         if args.output_format in ('json', 'xml'):
             logger.warning("No option for JSON or XML output format → falling back to standard output.")
             args.output_format = 'stdout'
@@ -142,7 +143,7 @@ if __name__ == "__main__":
             if 'scores' in args.output_data:
                 header_row.append( 'Scores')
             output_rows=[ '\t'.join( header_row ) ]
-            for idx, line_dict in enumerate(dataset.page_dict['lines']):
+            for idx, line_dict in enumerate(line_dicts):
                 logger.debug( line_dict )
                 output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
                 if 'gt' in args.output_data and 'gt' in line_dict:
@@ -150,7 +151,7 @@ if __name__ == "__main__":
                 if 'scores' in args.output_data and 'scores' in line_dict:
                     output_row.append( str(line_dict['scores']) )
 
-                    output_rows.append( '\t'.join( output_row ) )
+                output_rows.append( '\t'.join( output_row ) )
             if args.output_format == 'stdout':
                 print('\n'.join(output_rows))
             else:

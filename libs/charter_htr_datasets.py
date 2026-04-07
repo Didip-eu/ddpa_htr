@@ -1197,7 +1197,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
             self.line_id_to_index = { str(lrecord['id']): idx for idx, lrecord in enumerate( self.page_dict['lines']) }
         except Exception as e:
             logger.warning("Error when creating the line dataset: {}".format( e ))
-        self.ok = len(self.data) > 0
+        self.ok = len(self._data) > 0
 
     def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
         """ Update a given line dictionary with prediction data, whatever they are."""
