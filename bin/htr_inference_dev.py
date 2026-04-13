@@ -10,7 +10,6 @@ HTR inference: with various options, for development and testing purpose:
 # stdlib
 from pathlib import Path
 import sys
-import fargv
 import re
 from typing import Callable, Union
 import json
@@ -25,6 +24,8 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
+import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 # local
 root = str( Path(__file__).parents[1] ) 
@@ -44,23 +45,23 @@ logger = logging.getLogger(__name__)
 p = {
     "appname": "htr_dev",
     "model_path": "./best.mlmodel", 
-    "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
-    "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
-    "img_paths": set([]),
-    "charter_dirs": set([]),
-    "line_scope": [0, "Inference on line images."],
+    "device": FargvChoice(["cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"], description="Computing device"),
+    "decoder": FargvChoice(['greedy','beam-search'], description="Decoding layer: greedy or beam-search."),
+    "img_paths": FargvPositional(default=[]),
+    "charter_dirs": [],
+    "line_scope": (False, "Inference on line images."),
     "segmentation_suffix": ".lines.pred.json", 
-    "output_dir": ['', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'],
+    "output_dir": ('', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'),
     "img_suffix": ".img.jpg",
     "msk_suffix": ".bool.npy.gz",
     "with_mask": True,
-    "htr_suffix": "", 
-    "output_format": [ ("stdout", "json", "tsv", "xml"), "Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."],
-    "output_data": [ set(["pred"]), "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."],
-    "overwrite_existing": [1, "Write over existing output file (default)."],
-    "line_padding_style": [ ('median', 'noise', 'zero', 'none'), "How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"],
-    "line_height_factor": [1, "Factor to be applied to the original line strip height."],
-    "verbosity": [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"],
+    "htr_suffix": '', 
+    "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
+    "output_data": (["pred"], "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
+    "overwrite_existing": (True, "Write over existing output file (default)."),
+    "line_padding_style": FargvChoice(['median', 'noise', 'zero', 'none'], description="How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"),
+    "line_height_factor": FargvFloat(1.0, description="Factor to be applied to the original line strip height."),
+    "verbosity": (2, "Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO, default), 3 (DEBUG)"),
 }
 
 
@@ -95,7 +96,7 @@ def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple
 
 if __name__ == "__main__":
 
-    args, _ = fargv.fargv( p )
+    args, _ = fargv.parse( p )
     logger.debug(args)
 
     if args.device=='cuda' or args.device=='gpu':
@@ -129,10 +130,9 @@ if __name__ == "__main__":
                 line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                 line_dicts.append( { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) })
             except Exception as e:
-                
                 logger.warning("Inference failed on line {} (image file {}): {}".format( line_id, sample['img_path'], e))
                 continue
-        print(line_dicts)
+        
         if args.output_format in ('json', 'xml'):
             logger.warning("No option for JSON or XML output format → falling back to standard output.")
             args.output_format = 'stdout'

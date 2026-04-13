@@ -24,9 +24,11 @@ Note: to minimize dependencies, this script does not include the '-line_height_f
 
 import sys
 import json
-import fargv
 from pathlib import Path
 from datetime import datetime
+
+import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 src_root = Path(__file__).parents[1]
 sys.path.append( str( src_root ))
@@ -35,19 +37,19 @@ from libs import seglib
 p = {
     'file_path': '',
     'polygon_key': 'coords',
-    'output_file': ['', "Output file (default: standard output)."],
-    'overwrite_existing': [0, "Overwrite an existing output file."],
-    'drop_transcription': [0, "Extract line transcription, if it exists"],
-    "comment": ['',"A text string to be added to the <Comments> elt."],
-    "inject_htr": ['',"Inject the argument file's HTR content into the main file, while keeping the segmentation."],
-    "inject_segmentation": ['',"Inject the argument file's segmentation into the main file, while keeping the HTR."],
-    "force": [0, "Force injections on mismatched ids (but not on mismatched line counts)."],
+    'output_file': ('', "Output file (default: standard output)."),
+    'overwrite_existing': (False, "Overwrite an existing output file."),
+    'drop_transcription': (False, "Extract line transcription, if it exists"),
+    "comment": ('',"A text string to be added to the <Comments> elt."),
+    "inject_htr": ('',"Inject the argument file's HTR content into the main file, while keeping the segmentation."),
+    "inject_segmentation": ('',"Inject the argument file's segmentation into the main file, while keeping the HTR."),
+    "force": (False, "Force injections on mismatched ids (but not on mismatched line counts)."),
 }
 
 
 if __name__ == '__main__':
 
-    args, _ = fargv.fargv( p )
+    args, _ = fargv.parse( p )
 
     segdict = None
 

@@ -218,24 +218,24 @@ The training script assumes that there already exists a directory (eg. `./datase
 #### 3.1 A list of training/validation line images
 
 ```bash
-PYTHONPATH=. ./bin/ddp_htr_train.py -img_paths ./dataset/htr_line_ds/*.png -to_tsv 1
+PYTHONPATH=. ./bin/ddp_htr_train.py --img_paths ./dataset/htr_line_ds/*.png --to_tsv 1
 ```
 
 The script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
 
-+ the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
++ the optional `--to-tsv` flag allows for those subsets to be serialized into the images parent directory.
 
 
 #### 3.2 A directory of line images
 
 ```bash
-PYTHONPATH=. ./bin/ddp_htr_train.py -dataset_path dataset/htr_line_ds
+PYTHONPATH=. ./bin/ddp_htr_train.py --dataset_path dataset/htr_line_ds
 ```
 
 By default, the script takes care of splitting all relevant images and metadata files into training, validation, and test subsets.
 
-+ the optional `-to-tsv` flag allows for those subsets to be serialized into the images parent directory.
-+ alternatively, with the `-from_tsv` flag, the set splitting step is skipped and the training subsets are constructed from the TSV lists in the directory.
++ the optional `--to-tsv` flag allows for those subsets to be serialized into the images parent directory.
++ alternatively, with the `--from_tsv` flag, the set splitting step is skipped and the training subsets are constructed from the TSV lists in the directory.
 
 
 
@@ -255,7 +255,7 @@ python3 ./bin/ddp_htr_train.py -h
 Example:
 
 ```bash	
-python3 ./bin/ddp_htr_train.py -batch_size 8 -max_epoch 100 -validation_freq 1 -dataset_path dataset/htr_line_ds
+python3 ./bin/ddp_htr_train.py --batch_size 8 --max_epoch 100 --validation_freq 1 --dataset_path dataset/htr_line_ds
 ```
 
 
@@ -268,25 +268,30 @@ python3 ./bin/ddpa_htr_inference.py [ -<option> ... ]
 where optional flags are one or more of the following:
 
 ```
--model_path=<class 'str'>  Default './best.mlmodel'.
--img_paths=<class 'set'>  Default set().
--charter_dirs=<class 'set'>  Default set().
--segmentation_suffix=<class 'str'>  Default '.lines.pred.json'.
--output_dir=<class 'str'> Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image. Default ''.
--img_suffix=<class 'str'>  Default '.img.jpg'.
--htr_suffix=<class 'str'>  Default '.htr.pred'.
--output_format=<class 'tuple'> Output formats: 'stdout' and 'tsv' = 3-column output '<index>	<line id>	<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file. Default ('stdout', 'json', 'tsv', 'xml').
--output_data=<class 'set'> By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below). Default {'pred'}.
--overwrite_existing=<class 'int'> Write over existing output file (default). Default 1.
--line_padding_style=<class 'tuple'> How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding Default ('median', 'noise', 'zero', 'none').
--help=<class 'bool'> Print help and exit. Default False.
+ --appname, -a <str>    [default: 'htr']
+ --model_path, -m <str>    [default: './best.mlmodel']
+ --device, -d <str>    [default: 'cpu']  choices: ['cpu', 'gpu', 'cuda', 'cuda:0', 'cuda:1', 'cuda:2', 'cuda:3']
+ --decoder, -D <str>    [default: 'greedy']  choices: ['greedy', 'beam-search']
+ --img_paths, -i <list>    [default: []]
+ --charter_dirs, -c <list>    [default: []]
+ --segmentation_suffix, -s <str>    [default: '.lines.pred.json']
+ --output_dir, -o <str>    [default: '']
+ --img_suffix, -I <str>    [default: '.img.jpg']
+ --htr_suffix, -H <str>    [default: '']
+ --output_format, -O <str>    [default: 'stdout']  choices: ['stdout', 'json', 'tsv', 'xml']
+ --output_data, -u <list>    [default: ['pred']]
+ --overwrite_existing, -e <bool>    [default: True]
+ --line_padding_style, -l <str>    [default: 'median']  choices: ['median', 'noise', 'zero', 'none']
+ --line_height_factor, -L <float>    [default: 1.0]
+ --verbosity, -v <int>    [default: 2]
+ --help, -h <bool(auto)>    [default: False]  (switch: --flag sets True)
 ```
 
 
 #### Example:
 
 ```bash
-PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py -model_path /tmp/model_save.mlmodel -img_paths */*/*/*.img.jpg -segmentation_file_suffix 'lines.pred.json
+PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py --model_path /tmp/model_save.mlmodel --img_paths */*/*/*.img.jpg --segmentation_file_suffix 'lines.pred.json
 ```
 
 

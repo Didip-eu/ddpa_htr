@@ -7,7 +7,6 @@ HTR viewer on page, with HTR results provided.
 # stdlib
 from pathlib import Path
 import sys
-import fargv
 import re
 import glob
 from typing import List, Tuple, Callable, Union
@@ -16,6 +15,8 @@ import logging
 
 # 3rd party
 from PIL import Image
+import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 # local
 root = str( Path(__file__).parents[1] ) 
@@ -30,16 +31,16 @@ logger = logging.getLogger(__name__)
 
 p = {
     "appname": "ddpa_htr_viewer",
-    "img_paths": set([]),
-    "charter_dirs": set(["./"]),
+    "img_paths": FargvPositional(default=[]),
+    "charter_dirs": ["./"],
     "htr_file_suffix": "htr.pred.json", # under each image dir, suffix of the subfolder that contains the transcriptions
-    "output_format": [ ("txt", "plt", "png"), "Output format: 'txt' for ASCII plot (default); 'plt' for PyPlot; 'png' for on-disk image;"],
+    "output_format": FargvChoice(["txt", "plt", "png"], description="Output format: 'txt' for ASCII plot (default); 'plt' for PyPlot; 'png' for on-disk image."),
 }
 
 
 if __name__ == "__main__":
 
-    args, _ = fargv.fargv( p )
+    args, _ = fargv.parse( p )
 
     all_img_paths = list(sorted(args.img_paths))
 

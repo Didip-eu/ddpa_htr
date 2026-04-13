@@ -25,6 +25,7 @@ from torchvision.transforms import Compose
 from tqdm import tqdm
 # didip
 import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 
 root = Path(__file__).parents[1] 
@@ -45,41 +46,40 @@ logger = logging.getLogger(__name__)
 
 p = {
     "appname": "htr_train",
-    "batch_size": 8,
-    "input_channels": 3,
-    "img_height": 128,
-    "img_width": 2048,
-    "max_epoch": 200,
-    "patience": 50,
-    "img_paths": [set([]), "Line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
-    "dataset_path": ['', "Directory with line image samples (and implicit metadata files) from which to build the training, validation and testing sets."],
+    "batch_size": FargvInt(8),
+    "input_channels": FargvInt(3),
+    "img_size": FargvTuple( (int,int), default=(128,2048), description="Image size=(height, width)"),
+    "max_epoch": FargvInt(200),
+    "patience": FargvInt(50),
+    "img_paths": FargvPositional(default=[], description="Line image samples (and implicit metadata files) from which to build the training, validation and testing sets."),
+    "dataset_path": ('', "Directory with line image samples (and implicit metadata files) from which to build the training, validation and testing sets."),
     "img_file_suffix": '.png',
     "gt_file_suffix": '.gt.txt',
-    "from_tsv": [0, "Build the train and validation subsets from TSV files (train.tsv and val.tsv) in the dataset path; in test mode: build the dataset from the given path."],
-    "to_tsv": [0, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."],
-    "padding_style": [('median', 'noise', 'zero'), "Line padding style."],
-    "ignored_chars": ['✳,;', "Characters that should be removed before loading time."],#[ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
-    "decoder": [('greedy','beam-search'), "Decoding layer: greedy or beam-search."],
+    "from_tsv": (False, "Build the train and validation subsets from TSV files (train.tsv and val.tsv) in the dataset path; in test mode: build the dataset from the given path."),
+    "to_tsv": (False, "Store the training and validation sample data as TSV files (respectively as 'train.tsv' and 'val.tsv' in the same folder as the training files)."),
+    "padding_style": FargvChoice(['median', 'noise', 'zero'], description="Line padding style."),
+    "ignored_chars": ('✳,;', "Characters that should be removed before loading time."),#[ cc.superscript_charset + cc.diacritic_charset, "Lists of characters that should be ignored (i.e. filtered out) at encoding time." ], 
+    "decoder": FargvChoice(['greedy','beam-search'], description="Decoding layer: greedy or beam-search."),
     "lr": 1e-3,
-    "dry_run": [0, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."],
-    "scheduler": 1,
-    "scheduler_patience": 10,
-    "scheduler_cooldown": 5,
+    "dry_run": (False, "1: Load dataset and model but do not actually train, 2: same, but also display the validation samples."),
+    "scheduler": True,
+    "scheduler_patience": FargvInt(10),
+    "scheduler_cooldown": FargvInt(5),
     "scheduler_factor": 0.8,
-    "device": [("cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"), "Computing device"],
-    "reset_epochs": [ False, "Ignore the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."],
+    "device": FargvChoice(["cpu","cuda", "gpu", "cuda:0", "cuda:1", "cuda:2", "cuda:3"], description="Computing device"),
+    "reset_epochs": ( False, "Ignore the epoch data stored in the model file - use for fine-tuning an existing model on a different dataset."),
     "resume_file": 'last.mlmodel',
-    "mode": ('train', 'test'),
-    "confusion_matrix": 0,
-    "sample_log_window": [4, "How many samples should be decoded for end-of-epoch logging;"],
-    "auxhead": [False, '([BROKEN]Combine output with CTC shortcut'],
-    'verbosity': [2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO-default), 3 (DEBUG)"],
+    "mode": FargvChoice(['train', 'test']),
+    "confusion_matrix": False,
+    "sample_log_window": (4, "How many samples should be decoded for end-of-epoch logging;"),
+    "auxhead": (False, '([BROKEN]Combine output with CTC shortcut'),
+    'verbosity': (2,"Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO-default), 3 (DEBUG)"),
 }
 
 
 if __name__ == "__main__":
 
-    args, _ = fargv.fargv( p )
+    args, _ = fargv.parse( p )
 
 
     if args.verbosity != 2:
@@ -100,7 +100,7 @@ if __name__ == "__main__":
               ('CNN Backbone', 'Cr7,7,32 Mp2,2 Rn64 Rn64 Mp2,2 Rn128 Rn128 Rn128 Rn128 Mp2,2 Rn256 Rn256 Rn256 Rn256'),
           ('Column Maxpool', 'Mp{height//8},1'),
           ('Recurrent head', 'Lbx256 Do0.2,2 Lbx256 Do0.2,2 Lbx256 Do')],
-          height = args.img_height)
+          height = args.img_size[0])
 
     if args.device=='cuda' or args.device=='gpu':
         args.device='cuda:0'
@@ -110,7 +110,7 @@ if __name__ == "__main__":
                              reset_epochs=args.reset_epochs,
                              add_output_layer=True,
                              # those should be overriden by specs in existing model file
-                             image_specs={'padding_style': args.padding_style, 'img_height': args.img_height, 'img_width': args.img_width },
+                             image_specs={'padding_style': args.padding_style, 'img_height': args.img_size[0], 'img_width': args.img_size[1] },
                              device=args.device)
     hyper_params.update( model.hyper_parameters ) # no effect on pristine model
     model.hyper_parameters = hyper_params

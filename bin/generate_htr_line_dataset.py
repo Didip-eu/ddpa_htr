@@ -18,7 +18,6 @@ import tormentor
 import math
 from pathlib import Path
 import sys
-import fargv
 import random
 import tormentor
 import matplotlib.pyplot as plt
@@ -26,20 +25,23 @@ import torch
 
 sys.path.append( str(Path(__file__).parents[1] ))
 
+import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
+
 from libs import charter_htr_datasets as pds
 from libs import transforms as tsf
 from libs.train_utils import split_set
 
 
 p = {
-        'img_paths': [ set([]), 'Image paths'],
-        'repeat': [1, "Number of samples to generate from one image."],
-        'log_tsv': 0,
-        'dummy': 0,
+        'img_paths': FargvPositional( default=[], description='Image paths'),
+        'repeat': (True, "Number of samples to generate from one image."),
+        'log_tsv': False,
+        'dummy': False,
         'img_suffix': '.jpg',
         'lbl_suffix': '.xml',
-        'visual_check': [0, "Dry-run: no serialization + visual check of transformed samples."],
-        'line_ds_path': ['', "Where lines are to be serialized."]
+        'visual_check': (False, "Dry-run: no serialization + visual check of transformed samples."),
+        'line_ds_path': ('', "Where lines are to be serialized.")
 }
 
 
@@ -53,7 +55,7 @@ default_tormentor_dists = {
 }
 
 
-args, _ = fargv.fargv( p )
+args, _ = fargv.parse( p )
 
 random.seed(46)
 imgs = list([ Path( ip ) for ip in args.img_paths ])
