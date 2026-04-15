@@ -1,4 +1,8 @@
 <?xml version = "1.0" encoding = "UTF-8"?>
+<!--
+	Author: nprenet@gmail.com
+	Date: 2026-04-15 10:52:43
+-->
 <xsl:stylesheet version = "1.0"
 	xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
 	xmlns:alto="http://www.loc.gov/standards/alto/ns-v4#"

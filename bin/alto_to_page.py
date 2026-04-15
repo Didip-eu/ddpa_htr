@@ -16,6 +16,10 @@ if len(sys.argv) < 2 or re.match(r'--?h', sys.argv[1]):
     sys.exit()
 
 xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
+<!-- 
+    Author: nprenet@gmail.com
+    Date: 2026-04-15 10:52:43
+-->
 <xsl:stylesheet version = "1.0"
 	xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
 	xmlns:alto="http://www.loc.gov/standards/alto/ns-v4#"
@@ -93,18 +97,14 @@ xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
 </xsl:stylesheet>
 """
 
-
-#source_file, xsl_sheet = sys.argv[1:]
 source_file = sys.argv[1]
 xsl_sheet = sys.argv[2] if len(sys.argv) > 2 else None
-    
 
 ns={'alto': "http://www.loc.gov/standards/alto/ns-v4#"}
 
 dom = ET.parse(source_file)
 
-# first, rewrite polygon/line coordinates s.t. it is more palatable for XSLT
-
+# first, make polygon/line coordinates palatable for XSLT
 def coords_to_pairs( coord_str ):
     coord_str = re.sub(r'\s+',' ',coord_str.strip())
     coord = coord_str.split(' ')
@@ -113,16 +113,15 @@ def coords_to_pairs( coord_str ):
     pairs = ' '.join([ f"{coord[i]},{coord[i+1]}" for i in range(0, len(coord), 2) ])
     return pairs
 
-
 root = dom.getroot()
 for plg in root.findall('.//alto:Polygon', ns):
     points_str = plg.get('POINTS')
     plg.set('POINTS', coords_to_pairs( points_str ))
-
 for tl in root.findall('.//alto:TextLine', ns):
     points_str = tl.get('BASELINE')
     tl.set('BASELINE', coords_to_pairs( points_str ))
 
+# XSL transform
 transform = ET.XSLT( ET.parse( xsl_sheet )) if xsl_sheet and Path(xsl_sheet).exists() else ET.XSLT( ET.XML( xsl.encode() ))
 newdom = transform(dom, today=ET.XSLT.strparam(str(datetime.now())), source=ET.XSLT.strparam(Path(source_file).name))
 
