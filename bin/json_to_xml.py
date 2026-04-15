@@ -9,9 +9,11 @@ See its counterpart in 'ddpa_lines_ng' for that matter.
 
 import sys
 import json
-import fargv
 from pathlib import Path
 from datetime import datetime
+
+import fargv
+from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 src_root = Path(__file__).parents[1]
 sys.path.append( str( src_root ))
@@ -20,12 +22,13 @@ from libs import seglib
 
 
 p = {
-    'file_paths': set([]),
+    'file_paths': FargvPositional(default=[]),
     'polygon_key': 'coords',
-    'output_format': ('xml', 'stdout'),
-    'with_transcription': [1, "Extract line transcription, if it exists"],
-    'overwrite_existing': [0, "Overwrite an existing output file."],
-    'comment': ['',"A text string to be added to the <Comments> elt."],
+    'output_format': FargvChoice(['xml', 'stdout']),
+    'with_transcription': (True, "Extract line transcription, if it exists"),
+    'overwrite_existing': (False, "Overwrite an existing output file."),
+    'comment': ('',"A text string to be added to the <Comments> elt."),
+    'verbose': (False, "Verbose output."),
 }
 
 
@@ -38,6 +41,8 @@ if __name__ == '__main__':
         xml_path = json_path.with_suffix('.xml')
 
         with open( json_path, 'r') as json_if:
+            if args.verbose:
+                print( json_path )
             segdict = json.load( json_if )
             segdict['metadata'].update( {'created': str(datetime.now()), 'creator': __file__ })
             if args.comment:

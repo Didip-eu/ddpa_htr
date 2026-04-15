@@ -7,9 +7,9 @@ Usage:
 
 ```
 # generate training and validation sets, with 6 patches out of every source image
-PYTHONPATH=. ./bin/ddp_generate_cached_datasets.py -img_paths dataset/*.img.jpg -repeat 6
+PYTHONPATH=. ./bin/ddp_generate_cached_datasets.py --img_paths dataset/*.img.jpg --repeat 6
 # generate only validation set
-PYTHONPATH=. ./bin/ddp_generate_cached_datasets.py -img_paths dataset/*.img.jpg -repeat 6 -subsets val
+PYTHONPATH=. ./bin/ddp_generate_cached_datasets.py --img_paths dataset/*.img.jpg --repeat 6 --subsets val
 ```
 
 """
