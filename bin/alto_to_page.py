@@ -30,8 +30,8 @@ xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
 
 	<xsl:template match="/">
 		<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15/pagecontent.xsd">
-		        <MetaData>
-                		<Creator>prov=Universität Graz/DDH/nprenet@uni-graz.at</Creator>
+            <MetaData>
+                <Creator>prov=Universität Graz/DDH/nicolas.renet@uni-graz.at</Creator>
 				<Created>
 					<xsl:value-of select="$today"/>
 				</Created>
@@ -48,7 +48,7 @@ xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
 				<xsl:attribute name="imageHeight">
 					<xsl:value-of select="//alto:Layout/alto:Page/@HEIGHT"/>
 				</xsl:attribute>
-				<xsl:for-each select="//alto:TextBlock">
+				<xsl:for-each select="//alto:TextBlock[@WIDTH and @HEIGHT]">
 					<TextRegion>
 						<xsl:attribute name="id">
 							<xsl:value-of select="@ID"/>
