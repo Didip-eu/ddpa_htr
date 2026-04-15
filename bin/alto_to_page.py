@@ -57,13 +57,13 @@ xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
 						<xsl:variable name="regionHeight" select="@HEIGHT"/>
 						<Coords>
 						<xsl:attribute name="points">
-							<xsl:value-of select="@HPOS"/>,<xsl:value-of select="@VPOS"/>
+							<xsl:value-of select="format-number(@HPOS, '#####')"/>,<xsl:value-of select="format-number(@VPOS, '#####')"/>
 							<xsl:text> </xsl:text>	
-							<xsl:value-of select="@HPOS + $regionWidth"/>,<xsl:value-of select="@VPOS"/>
+							<xsl:value-of select="format-number(@HPOS + $regionWidth, '#####')"/>,<xsl:value-of select="format-number(@VPOS, '#####')"/>
 							<xsl:text> </xsl:text>	
-							<xsl:value-of select="@HPOS + $regionWidth"/>,<xsl:value-of select="@VPOS + $regionHeight"/>
+							<xsl:value-of select="format-number(@HPOS + $regionWidth, '#####')"/>,<xsl:value-of select="format-number(@VPOS + $regionHeight, '#####')"/>
 							<xsl:text> </xsl:text>	
-							<xsl:value-of select="@HPOS"/>,<xsl:value-of select="@VPOS + $regionHeight"/>
+							<xsl:value-of select="format-number(@HPOS, '#####')"/>,<xsl:value-of select="format-number(@VPOS + $regionHeight, '#####')"/>
 						</xsl:attribute>
 						</Coords>
 						<xsl:for-each select="alto:TextLine">
