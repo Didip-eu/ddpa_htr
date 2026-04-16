@@ -71,22 +71,22 @@ xsl="""<?xml version = "1.0" encoding = "UTF-8"?>
 								<xsl:attribute name="id">
 									<xsl:value-of select="@ID"/>
 								</xsl:attribute>
+                                <Coords>
+                                    <xsl:attribute name="points">
+                                        <xsl:value-of select="alto:Shape/alto:Polygon/@POINTS"/>
+                                    </xsl:attribute>
+                                </Coords>
+                                <TextEquiv>
+                                    <Unicode>
+                                    <xsl:value-of select="alto:String/@CONTENT"/>
+                                    </Unicode>
+                                </TextEquiv>
+                                <Baseline>
+                                    <xsl:attribute name="points">
+                                        <xsl:value-of select="@BASELINE"/>
+                                    </xsl:attribute>
+                                </Baseline>
 							</TextLine>
-							<Coords>
-								<xsl:attribute name="points">
-									<xsl:value-of select="alto:Shape/alto:Polygon/@POINTS"/>
-								</xsl:attribute>
-							</Coords>
-							<TextEquiv>
-								<Unicode>
-								<xsl:value-of select="alto:String/@CONTENT"/>
-								</Unicode>
-							</TextEquiv>
-							<Baseline>
-								<xsl:attribute name="points">
-									<xsl:value-of select="@BASELINE"/>
-								</xsl:attribute>
-							</Baseline>
 						</xsl:for-each>
 
 					</TextRegion>
