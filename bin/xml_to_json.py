@@ -76,25 +76,25 @@ schema_dict = {
                   "items": {
                     "type": "array",
                     "items": { "type": "integer" },
-		    "minItems": 2,
-		    "maxItems": 2 } }, 
+            "minItems": 2,
+            "maxItems": 2 } }, 
                 "x-height": { "type": "integer" },
                 "centerline": { 
                   "type": "array",
                   "items": {
                     "type": "array",
                     "items": { "type": "integer" },
-		    "minItems": 2,
-		    "maxItems": 2 },
-		  "minItems": 2 },
+                    "minItems": 2,
+                    "maxItems": 2 },
+                  "minItems": 1 },
                 "baseline": { 
                   "type": "array",
                   "items": {
                     "type": "array",
                     "items": { "type": "integer" },
-		    "minItems": 2,
-		    "maxItems": 2 },
-		  "minItems": 2 } } } } } } } } }
+                    "minItems": 2,
+                    "maxItems": 2 },
+                  "minItems": 2 } } } } } } } } }
 
 
 if __name__ == '__main__':
