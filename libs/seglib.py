@@ -20,6 +20,7 @@ import xml.etree.ElementTree as ET
 import torch
 from torch import Tensor
 import numpy as np
+import shapely
 
 
 
@@ -394,6 +395,9 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
              "regions": [{"id": ..., "coords": [ ... ]}, ... ] }
 
            Regions are stored as a top-element.
+    TODO:
+        - check that unhandled exception on U-17_0995_s01.xml (AttributeError) has been fixed.
+
     """
     def parse_coordinates( pts ):
         return [ [ int(p) for p in pt.split(',') ] for pt in pts.split(' ') ]
@@ -433,14 +437,11 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
                 return None
             return line_dict
 
-    def line_entry_overlap(line_dict: dict, region_dict: dict):
+    def line_to_region_overlap(line_dict: dict, region_dict: dict):
         """ Check overlap between line's bbox and region boundaries."""
-        line_plg_pts = np.array( line_dict['coords'] )
-        line_ltrb = np.array([ np.min( line_plg_pts[:,0] ), np.min( line_plg_pts[:,1]), np.max( line_plg_pts[:,0] ), np.max( line_plg_pts[:,1] )]).tolist()
-        reg_plg_pts = np.array( region_dict['coords'] )
-        reg_ltrb = np.array([ np.min( reg_plg_pts[:,0] ), np.min( reg_plg_pts[:,1]), np.max( reg_plg_pts[:,0] ), np.max( reg_plg_pts[:,1] )]).tolist()
-        ratio = contains( reg_ltrb, line_ltrb ) 
-        return ratio
+        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
+        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
+        return reg_bbox.intersection( line_bbox ).area / line_bbox.area
 
     def extend_box( box_coords, inner_coords ):
         """Extend box coordinates to encompass inner boundaries """
@@ -459,7 +460,7 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         # order of regions: outer -> inner
         region_ids = region_ids + [ region.get('id') ]
 
-        region_coord_elt = region.find('./pc:Coords', ns)
+        region_coord_elt, rg_points = region.find('./pc:Coords', ns), None
         if region_coord_elt is not None:
             rg_points = region_coord_elt.get('points')
             if rg_points is None:
@@ -475,19 +476,19 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         for line_idx, elt in enumerate( list(region.iter())[1:] ):
             if elt.tag == "{{{}}}TextLine".format(ns['pc']):
                 line_entry = construct_line_entry( elt, region_ids )
+                #print(line_entry)
                 if line_entry is None:
                     continue
-                # how much of the line is contained within the region?
-                overlap = line_entry_overlap(line_entry, region_accum[-1] )
-                if overlap < 1.0:
+                overlap = line_to_region_overlap(line_entry, region_accum[-1] )
+                if overlap < 0.5:
                     if strict:
-                        raise ValueError("Page {}, region {}, l. {}: boundaries are not contained within its region.".format(page, region_ids[-1], line_idx))
-                    # extend the region to fit the line
-                    elif overlap >= region_line_overlap:
-                        region_accum[-1]['coords'] = extend_box( region_accum[-1]['coords'], line_entry['coords']+line_entry['baseline'] )
-                    else:
-                        print(f"Line {line_entry['id']} does not meet overlap threshold with region ({overlap:.2f} < {region_line_overlap}): skipping.")
-                        continue
+                        raise ValueError("Page {}, region {}, l. {}: boundaries are not contained within its region. To disable this exception, pass strict=False".format(page, region_ids[-1], line_idx))
+                    # extend region to fit the line
+#                    elif overlap >= region_line_overlap:
+#                        region_accum[-1]['coords'] = extend_box( region_accum[-1]['coords'], line_entry['coords']+line_entry['baseline'] )
+#                    else:
+#                        print(f"Line {line_entry['id']} does not meet overlap threshold with region ({overlap:.2f} < {region_line_overlap}): skipping.")
+#                        continue
                 line_accum.append( line_entry )
             elif elt.tag == "{{{}}}TextRegion".format(ns['pc']):
                 process_region(elt, region_accum, line_accum, region_ids)
@@ -505,7 +506,7 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
 
         if 'pc' not in ns:
             raise ValueError(f"Could not find a name space in file {page}. Parsing aborted.")
-
+    
         lines = []
         regions = []
         page_dict = {}
@@ -543,6 +544,53 @@ def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True,
         page_dict['regions'] = regions
 
     return page_dict 
+
+def segdict_reassign_lines( segdict: dict):
+    """
+    Given a segmentation dictionary, reassign lines to their most likely containing regions:
+    assign each line to region with maximum overlap, as a ratio of the line's area; between
+    two competing regions, choose the smaller one.
+    """
+    def line_to_region_overlap(line_dict: dict, region_dict: dict):
+        """ Check overlap between line's bbox and region boundaries."""
+        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
+        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
+        return reg_bbox.intersection( inner_plg ).area / line_bbox.area
+
+    region_to_bbox = [ shapely.envelope( shapely.multipoints( np.array( r['coords'] ))) for r in segdict['regions'] ]
+    new_segdict = copy.deepcopy( segdict )
+    for r in new_segdict['regions']:
+        r['lines']=[]
+    # all lines, sorted by centroids
+    lines = [ l for r in segdict['regions'] for l in r['lines'] ]  
+    for l in lines:
+        l['bbox']=shapely.envelope( shapely.multipoints( np.array( l['coords'] )))
+        print(l['bbox'])
+    lines.sort( key=lambda ln: ln['bbox'].centroid.x )
+    # map line index to (<region index>, overlap)
+    line_to_region = [(-1,0.0) for l in lines ]
+    print(line_to_region)
+    for l_idx, l in enumerate(lines):
+        max_overlap = 0
+        for r_idx, r in enumerate( segdict['regions'] ):
+            this_overlap = region_to_bbox[r_idx].intersection( l['bbox'] ).area / l['bbox'].area
+            print(f"intersection: {region_to_bbox[r_idx].intersection( l['bbox'] ).area}", end=", ")
+            #print(f"line box area: {l['bbox'].area}")
+            print(f"line {l['id']} ({l['bbox']}) / region: {r['id']} ({region_to_bbox[r_idx]}): overlap={this_overlap}")
+            if this_overlap > max_overlap:
+                max_overlap = this_overlap
+                line_to_region[l_idx]=(r_idx, this_overlap )
+                print(f"asssign line {l['id']} to region: {r['id']}: overlap={this_overlap}")
+            elif this_overlap == max_overlap and line_to_region[l_idx][0]>=0:
+                stored_region_idx = line_to_region[l_idx][0] # region index
+                if region_to_bbox[r_idx].area < region_to_bbox[stored_region_idx].area:
+                    line_to_region[l_idx]=(r_idx, this_overlap )
+    # assign each line to its region object
+    # (vertical sorting by centroid has been done previously)
+    for l_idx, lr in enumerate( line_to_region ):
+        del lines[l_idx]['bbox']
+        new_segdict['regions'][ lr[0] ]['lines'].append( lines[l_idx] )
+    return new_segdict
 
 
 def segdict_sink_lines(segdict: dict):
@@ -649,45 +697,6 @@ def layout_regseg_check_class(regseg: dict, region_labels: list[str] ) -> list[b
         print(f"Class label {e} does not exist in the segmentation file.")
     return output
 
-
-def contains( outer: tuple, inner: tuple):
-    """
-    How much of <inner> region (typically: a line) is contained
-    within an <outer> region (typically: a text region).
-
-    Args:
-        outer (tuple[int,int,int,int]): bounding box (L,T,R,B)
-        inner (tuple[int,int,int,int]): bounding box (L,T,R,B)
-    Returns:
-        float: overlap, as a ratio of inner region.
-    """
-    l,t,r,b = range(4)
-    normal_order = True
-    if inner[t]<outer[t]:
-        outer, inner = inner, outer
-        normal_order = False
-    total_area = (inner[r]-inner[l])*(inner[b]-inner[t]) if normal_order else (outer[r]-outer[l])*(outer[b]-outer[t])
-    # no intersection
-    if outer[b]<=inner[t] or outer[r]<=inner[l]:
-        return 0
-    # 1 contains 2 or conversely
-    if outer[l]<=inner[l] and outer[r]>=inner[r] and outer[t]<=inner[t] and outer[b]>=inner[b]:
-        if normal_order:
-            return 1.0
-        return 0 #(inner[b]-inner[t])*(inner[r]-ltrb[l])
-    # case 1: partial overlap on the right
-    if inner[r] > outer[r]:
-        if inner[b]<=outer[b]:
-            return (inner[b]-inner[t])*(outer[r]-inner[l])/total_area
-        return (outer[r]-inner[l]) * (outer[b]-inner[t])/total_area
-    # case 2: partial overlap on the left
-    if inner[l] < outer[l]:
-        if inner[b]<=outer[b]:
-            return (inner[b]-inner[t])*(inner[r]-outer[l])/total_area
-        return (inner[r]-outer[l])*(outer[b]-inner[t])/total_area
-    # case 3: partial overlap on bottom
-    if outer[l] <= inner[l] and inner[r] <= outer[r]:
-        return (outer[b]-inner[t])*(inner[r]-inner[l])/total_area
 
 
 def dummy():
