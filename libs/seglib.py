@@ -41,7 +41,7 @@ def polygon_map_from_json_file(  segmentation_json: str) -> Tensor:
         return polygon_map_from_segmentation_dict( json.load( json_file ))
 
 
-def polygon_map_from_xml_file( page_xml: str ) -> Tensor:
+def polygon_map_from_page_xml_file( page_xml: str ) -> Tensor:
     """Read line polygons from a PageXML file and store them into a tensor, as pixel maps.
     Channels allow for easy storage of overlapping polygons.
 
@@ -52,7 +52,7 @@ def polygon_map_from_xml_file( page_xml: str ) -> Tensor:
         Tensor: the polygons rendered as a 4-channel image (a tensor).
     """
 
-    segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+    segmentation_dict = sgf.segmentation_dict_from_page_xml( page_xml )
     return polygon_map_from_segmentation_dict( segmentation_dict)
 
 def polygon_map_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> Tensor:
@@ -115,7 +115,7 @@ def line_binary_mask_from_json_file( segmentation_json: str, polygon_key='coords
         return line_binary_mask_from_segmentation_dict( json.load( json_file ), polygon_key=polygon_key, channels=channels)
 
 
-def line_binary_mask_from_xml_file( page_xml: str, channels=1 ) -> Tensor:
+def line_binary_mask_from_page_xml_file( page_xml: str, channels=1 ) -> Tensor:
     """From a PageXML file describing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
 
@@ -126,7 +126,7 @@ def line_binary_mask_from_xml_file( page_xml: str, channels=1 ) -> Tensor:
     Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
-    segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+    segmentation_dict = sgf.segmentation_dict_from_page_xml( page_xml )
     return line_binary_mask_from_segmentation_dict( segmentation_dict, channels=channels )
 
 
@@ -285,7 +285,7 @@ def line_metrics_from_segmentation_dict( segmentation_dict: dict) -> dict:
     return { k:v.round().item() for k,v in metrics_dict.items() }
 
 
-def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False ) -> list[tuple[np.ndarray, np.ndarray]]:
+def line_images_from_img_page_xml_files(img: str, page_xml: str, as_dictionary=False ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation PageXML file describing polygons, return
     a list of pairs (<line cropped BB>, <polygon mask>), or optionally a full page dictionary with
     those enriched lines as a top element.
@@ -302,7 +302,7 @@ def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False 
             dictionary with 'lines' as extra, top-level element.
     """
     with Image.open(img, 'r') as img_wh:
-        segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+        segmentation_dict = sgf.segmentation_dict_from_page_xml( page_xml )
         line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
         if not as_dictionary:
             return line_pairs
@@ -402,7 +402,7 @@ def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tenso
     return pairs_line_bb_and_mask
 
 
-def line_masks_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.ndarray, np.ndarray]]:
+def line_masks_from_img_page_xml_files(img: str, page_xml: str ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation PageXML file describing polygons, return
     the bounding box coordinates and the boolean masks.
 
@@ -415,7 +415,7 @@ def line_masks_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.nda
             and a tensor (N,H,W) of page-wide line masks.
     """
     with Image.open(img, 'r') as img_wh:
-        segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+        segmentation_dict = sgf.segmentation_dict_from_page_xml( page_xml )
         return line_masks_from_img_segmentation_dict( img_wh, segmentation_dict )
 
 
