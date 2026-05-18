@@ -281,6 +281,7 @@ class PageDataset(VisionDataset):
 
             page_dict = {}
             if (lbl_path.name)[-4:]=='.xml':
+                # always return a nesting of "regions" and "lines"
                 page_dict = seglib.segmentation_dict_from_xml( lbl_path, get_text=True )
             elif (lbl_path.name)[-5:]=='json':
                 with open( lbl_path ) as jsonf:
@@ -297,14 +298,14 @@ class PageDataset(VisionDataset):
                 reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
                 reg_dict['lines']=[]
                 regions[ reg['id'] ]=reg_dict
-            for line in page_dict['lines']:
-                outer_reg = regions[ line['regions'][0] ]
+            for line in seglib.line_dicts_from_segmentation_dict( page_dict ):
+                parent_reg = regions[ line['parents'][0] ]
                 polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
                 # shifting crop coordinates
-                line['coords'] = (polyg_array - outer_reg['bbox_ltrb'][:2] ).tolist()
-                line['baseline'] = (baseline_array - outer_reg['bbox_ltrb'][:2] ).tolist()
-                del line['regions']
-                outer_reg['lines'].append( line )
+                line['coords'] = (polyg_array - parent_reg['bbox_ltrb'][:2] ).tolist()
+                line['baseline'] = (baseline_array - parent_reg['bbox_ltrb'][:2] ).tolist()
+                del line['parents']
+                parent_reg['lines'].append( line )
             for r in regions.values():
                 new_lbl_path = Path(r['image_filename']).with_suffix('.json')
                 if not r['lines']: 

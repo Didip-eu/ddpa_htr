@@ -1,65 +1,143 @@
-"""
-seglib.py
 
-Handling of segmentation outputs:
-   + images and masks from serialized segmentations (JSON and XML)
-   + format conversion (XML <-> JSON)
-"""
 #stdlib
 from pathlib import Path
 import json
-from typing import Union, Any
+from typing import Callable, Optional, Union, Mapping, Any
+import itertools
 import re
 import sys
-from datetime import datetime
+import math
+import copy
 
 # 3rd-party
 from PIL import Image, ImageDraw
 import skimage as ski
-import xml.etree.ElementTree as ET
 import torch
 from torch import Tensor
 import numpy as np
-import shapely
+
+# local
+from . import segformats as sgf, line_geometry as lgm
+
+"""
+Any routine that involves joint manipulation of images and segmentation metadata.
+
++ for internal manipulation and conversion of various formats (XML, JSON, Alto) → segformats.py
++ for segmentation evaluation routines → segmetrics.py
+"""
 
 
+def polygon_map_from_json_file(  segmentation_json: str) -> Tensor:
+    """Read line polygons from a JSON file and store them into a tensor, as pixel maps.
+    Channels allow for easy storage of overlapping polygons.
 
-def line_binary_mask_from_json_file( segmentation_json: str, polygon_key='coords' ) -> Tensor:
-    """From a JSON segmentation file,  return a boolean mask where any pixel belonging
+    Args:
+        segmentation_json (str): path of a JSON file
+
+    Returns:
+        Tensor: the polygons rendered as a 4-channel image (a tensor).
+    """
+    with open( segmentation_json, 'r' ) as json_file:
+        return polygon_map_from_segmentation_dict( json.load( json_file ))
+
+
+def polygon_map_from_xml_file( page_xml: str ) -> Tensor:
+    """Read line polygons from a PageXML file and store them into a tensor, as pixel maps.
+    Channels allow for easy storage of overlapping polygons.
+
+    Args:
+        page_xml (str): path of a PageXML file.
+
+    Returns:
+        Tensor: the polygons rendered as a 4-channel image (a tensor).
+    """
+
+    segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+    return polygon_map_from_segmentation_dict( segmentation_dict)
+
+def polygon_map_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> Tensor:
+    """Store line polygons into a tensor, as pixel maps.
+
+    Args:
+        segmentation_dict (dict): kraken's segmentation output, i.e. a dictionary of the form::
+
+                 {
+                 'image_width': w, 
+                 'image_height': h,
+                 'text_direction': '$dir',
+                 'type': 'baseline',
+                 'lines': [
+                   {'baseline': [[x0, y0], [x1, y1], ...], 'coords': [[x0, y0], [x1, y1], ... [x_m, y_m]]},
+                   ...
+                 ]
+                 'regions': [ ... ] }
+
+    Returns:
+        Tensor: the polygons rendered as a 4-channel image.
+    """
+    #polygon_boundaries = [ line[polygon_key] for line in segmentation_dict['lines'] ]
+    polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict, polygon_key=polygon_key)
+
+    # create 2D matrix of 32-bit integers
+    # (fillPoly() only accepts signed integers - risk of overflow is non-existent)
+    mask_size = segmentation_dict['image_height'], segmentation_dict['image_width']
+
+    label_map = np.zeros( mask_size, dtype='int32' )
+
+    # rendering polygons
+    for lbl, polyg in enumerate( polygon_boundaries ):
+        points = np.array(polyg)[:,::-1] # x <-> y
+        polyg_mask = ski.draw.polygon2mask( mask_size, points )
+        apply_polygon_mask_to_map( label_map, polyg_mask, lbl+1 )
+
+    #Image.fromarray( label_map ).show()
+
+    # 8-bit/pixel, 4 channels (note: order is little-endian)
+    polygon_img = array_to_rgba_uint8( label_map )
+    #ski.io.imshow( polygon_img.permute(1,2,0).numpy() )
+
+    return polygon_img
+
+
+def line_binary_mask_from_json_file( segmentation_json: str, polygon_key='coords', channels=1 ) -> Tensor:
+    """From a JSON segmentation file, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
 
     Args:
         segmentation_json (str): a JSON file describing the lines.
         polygon_key (str): polygon dictionary entry.
+        channels (int): number of channels.
 
     Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
     with open( segmentation_json, 'r' ) as json_file:
-        return line_binary_mask_from_segmentation_dict( json.load( json_file ), polygon_key=polygon_key)
+        return line_binary_mask_from_segmentation_dict( json.load( json_file ), polygon_key=polygon_key, channels=channels)
 
 
-def line_binary_mask_from_xml_file( page_xml: str ) -> Tensor:
+def line_binary_mask_from_xml_file( page_xml: str, channels=1 ) -> Tensor:
     """From a PageXML file describing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
 
     Args:
         page_xml (str): a Page XML file describing the lines.
+        channels (int): number of channels.
 
     Returns:
         Tensor: a flat boolean tensor with size (H,W)
     """
-    segmentation_dict = segmentation_dict_from_xml( page_xml )
-    return line_binary_mask_from_segmentation_dict( segmentation_dict )
+    segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
+    return line_binary_mask_from_segmentation_dict( segmentation_dict, channels=channels )
 
 
-def line_binary_mask_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords' ) -> Tensor:
+def line_binary_mask_from_segmentation_dict( segmentation_dict: dict, polygon_key='coords', channels=1 ) -> Tensor:
     """From a segmentation dictionary describing polygons, return a boolean mask where any pixel belonging
     to a polygon is 1 and the other pixels 0.
 
     Args:
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
         polygon_key (str): polygon dictionary entry.
+        channels (int): number of channels (default is 1).
 
     Returns:
         Tensor: a flat boolean tensor with size (H,W)
@@ -67,7 +145,62 @@ def line_binary_mask_from_segmentation_dict( segmentation_dict: dict, polygon_ke
     polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict, polygon_key=polygon_key)
     # create 2D boolean matrix
     mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
-    return torch.tensor( np.sum( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ], axis=0))
+    one_channel_mask = np.sum( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ], axis=0)
+    if channels > 1:
+        return torch.tensor( np.tile( one_channel_mask, channels ).reshape( one_channel_mask.shape + (channels,)))
+    return torch.tensor( one_channel_mask )
+
+
+def didip_json_to_label_mask( segmentation_json: str, channels=3, largest_dimension=1248, output_file_path='', overwrite_existing=False ):
+    """Convert a DiDip JSON segmentation file into a Doc-UFCN label mask.
+
+    Args:
+        label_file (str): path to a segmentation file, DiDip-style
+        out (str): output file; if empty, use the standard output.
+    """
+    with open( segmentation_json, 'r' ) as json_file:
+        segmentation_dict = json.load( json_file )
+        polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict)
+        mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
+        one_channel_img = Image.fromarray( np.uint8( np.sum( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ], axis=0)), mode="L")
+        new_width, new_height = (largest_dimension/mask_size[1] * mask_size[0], largest_dimension)
+        if new_width > largest_dimension:
+            new_width, new_height = (largest_dimension, largest_dimension/mask_size[0] * mask_size[1])
+
+        img_array = np.array( one_channel_img.resize( (int(new_width), int(new_height)) ))
+        if channels>1:
+            img_array = np.repeat( img_array, channels ).reshape( img_array.shape + (channels,))
+        if output_file_path and overwrite_existing:
+            pil_img = Image.fromarray( img_array*255, mode='RGB' if channels==3 else "L" )
+            pil_img.save( output_file_path )
+        else:
+            return np.array( img_array )
+
+def didip_json_to_docufcn_label_json( segmentation_json: Path, output_file_path='', overwrite_existing=False):
+    """ Convert a DiDip JSON segmentation file into a Doc-UFCN label file.
+    Note: assumes a single-region file; only for evaluation use in segmentation pipeline.
+
+    Args:
+        label_file (str): path to a segmentation file, DiDip-style
+        out (str): output file; if empty, use the standard output.
+    """
+    with open( segmentation_json, 'r' ) as json_file:
+        segmentation_dict = json.load( json_file )
+        new_segdict = {
+                "img_size": [ segmentation_dict["image_width"], segmentation_dict["image_height"]],
+                "textline": [],
+        }
+        for line in segmentation_dict["regions"][0]["lines"]:
+            new_segdict["textline"].append({
+                "confidence": 1.0,
+                "polygon": line['coords'],
+                })
+
+        if output_file_path and overwrite_existing:
+            with open( output_file_path, 'w') as output_file:
+                output_file.write( json.dumps( new_segdict, indent=2 ))
+        else:
+            return new_segdict
 
 
 def line_binary_mask_stack_from_json_file( segmentation_json: str, polygon_key='coords' ) -> Tensor:
@@ -115,46 +248,47 @@ def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='
     Returns:
         list[list[int]]: a list of lists of coordinates.
     """
+    flat_dict = sgf.flatten_segmentation_dict( segmentation_dict )
+    if factor==1.0:
+        return [ l[polygon_key] for l in flat_dict['lines'] ]
     line_polygons = []
-    if 'lines' in segmentation_dict:
-        if factor==1.0:
-            return [ line[polygon_key] for line in segmentation_dict['lines'] ]
-        #return [ (lgm.strip_from_baseline( line['baseline'], line['x-height']*factor, ltrb=tuple(np.array(line['regions'][0]['coords'])[[0,2]].flatten()) ) if 'x-height' in line else line[polygon_key]) for line in segmentation_dict['lines'] ]
-        for line in segmentation_dict['lines']:
-            if 'x-height' in line:
-                ltrb = tuple(np.array(line['regions'][0]['coords'])[[0,2]].flatten())
-                line_polygons.append( lgm.strip_from_baseline( line['baseline'], line['x-height'], factor, ltrb=ltrb) )
-            else:
-                line_polygons.append( line[polygon_key] )
-    elif 'regions' in segmentation_dict:
-        #return [ (lgm.strip_from_baseline( line['baseline'], line['x-height']*factor, ltrb=tuple(np.array(reg['coords'])[[0,2]].flatten()) ) if 'x-height' in line else line[polygon_key]) for reg in segmentation_dict['regions'] for line in reg['lines']]
-        if factor==1.0:
-            return [ line[polygon_key] for reg in segmentation_dict['regions'] for line in reg['lines']]
-        for reg in segmentation_dict['regions']:
-            ltrb=tuple(np.array(reg['coords'])[[0,2]].flatten())
-            line_polygons.extend([ lgm.strip_from_baseline( line['baseline'], line['x-height'], factor, ltrb=ltrb ) if 'x-height' in line else line[polygon_key] for line in reg['lines'] ] )
+    id_to_reg = { r['id']:r for r in flat_dict['regions'] }
+    for line in flat_dict['lines']:
+        # look for innermost containing region
+        ltrb = tuple(np.array( id_to_reg[line['regions'][-1]]['coords'])[[0,2]].flatten())
+        line_polygons.append( lgm.strip_from_baseline( line['baseline'], line['x-height'], factor, ltrb=ltrb ) if 'x-height' in line else line[polygon_key] )
     return line_polygons
+ 
 
-
-def line_dicts_from_segmentation_dict( segmentation_dict: dict) -> list[dict]:
-    """From a segmentation dictionary, return a list of all line dictionaries.
+def line_metrics_from_segmentation_dict( segmentation_dict: dict) -> dict:
+    """From a segmentation dictionary, return basic line metrics.
 
     Args:
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file. The 'lines' entry is either
         top-level key, or nested as in 'regions > region > lists'.
     Returns:
-        list[dict]: a list of dictionaries.
+        dict: a list of dictionary.
     """
-    if 'lines' in segmentation_dict:
-        return segmentation_dict['lines']
-    elif 'regions' in segmentation_dict:
-        return [ line for reg in segmentation_dict['regions'] for line in reg['lines']]
-    return []
+    lines = [ ld for ld in sgf.line_dicts_from_segmentation_dict( segmentation_dict ) if len(ld['baseline'])>=3 ]
+    x_heights = np.array([ l['x-height'] for l in lines ])
+    line_spacing = -1
+    if len(lines)>=3:
+        # subtract means of baseline's y-values 
+        line_spacings = [ np.abs(np.mean([ pt[1] for pt in lines[l]['baseline']])-np.mean([ pt[1] for pt in lines[l+1]['baseline']])) for l in range(len(lines)-1) ]
+    
+    metrics_dict = { 
+             'x_height_avg': np.mean( x_heights),
+             'x_height_std': np.var( x_heights ),
+             'line_spacing_avg': np.mean( line_spacings),
+             'line_spacing_std': np.std( line_spacings),
+            }
+    return { k:v.round().item() for k,v in metrics_dict.items() }
 
 
 def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation PageXML file describing polygons, return
-    a list of pairs (<line cropped BB>, <polygon mask>).
+    a list of pairs (<line cropped BB>, <polygon mask>), or optionally a full page dictionary with
+    those enriched lines as a top element.
 
     Args:
         img (str): the input image's file path
@@ -164,22 +298,23 @@ def line_images_from_img_xml_files(img: str, page_xml: str, as_dictionary=False 
             for keeping track of line ids when running inference.
 
     Returns:
-        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask:
-        np.ndarray (HW))
+        list: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW)), or a page segmentation
+            dictionary with 'lines' as extra, top-level element.
     """
     with Image.open(img, 'r') as img_wh:
-        segmentation_dict = segmentation_dict_from_xml( page_xml )
+        segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
         line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict )
-        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, line_dicts_from_segmentation_dict(segmentation_dict)) ]
-        if as_dictionary:
-            segmentation_dict['lines'] = line_triplets
-            return segmentation_dict
-        return line_pairs
+        if not as_dictionary:
+            return line_pairs
+        segmentation_dict['lines']=list(zip( *(zip(*line_pairs)), sgf.line_dicts_from_segmentation_dict( segmentation_dict)))
+
+        return segmentation_dict
 
 
 def line_images_from_img_json_files( img: str, segmentation_json: str, as_dictionary=False, factor=1.0 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation JSON file describing polygons, return
-    a list of pairs (<line cropped BB>, <polygon mask>).
+    a list of pairs (<line cropped BB>, <polygon mask>), or optionally a full page dictionary with
+    those enriched lines as a top element.
 
     Args:
         img (str): the input image's file path
@@ -189,16 +324,16 @@ def line_images_from_img_json_files( img: str, segmentation_json: str, as_dictio
         factor (float): scale line polygon height to <factor>.
 
     Returns:
-        Union[list,dict]: a segmentation dictionary or a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
+        Union[list,dict]: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW)), or a page segmentation
+            dictionary with 'lines' as extra, top-level element.
     """
     with Image.open(img, 'r') as img_wh, open( segmentation_json, 'r' ) as json_file:
         segmentation_dict = json.load( json_file )
         line_pairs = line_images_from_img_segmentation_dict( img_wh, segmentation_dict, factor=factor )
-        line_triplets = [ (*line_pair, line_dict) for line_pair, line_dict in zip( line_pairs, line_dicts_from_segmentation_dict(segmentation_dict)) ]
-        if as_dictionary:
-            segmentation_dict['lines'] = line_triplets
-            return segmentation_dict
-        return line_pairs
+        if not as_dictionary:
+            return line_pairs
+        segmentation_dict['lines']=list(zip( *(zip(*line_pairs)), sgf.line_dicts_from_segmentation_dict( segmentation_dict)))
+        return segmentation_dict
 
 
 def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dict: dict, polygon_key='coords', factor=1.0 ) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -235,6 +370,38 @@ def line_images_from_img_segmentation_dict(img_whc: Image.Image, segmentation_di
     return pairs_line_bb_and_mask
 
 
+def line_images_from_img_polygon_map(img_wh: Image.Image, polygon_map_chw: Tensor) -> list[tuple[np.ndarray, np.ndarray]]:
+    """From a tensor storing polygons, return a list of pairs (<line cropped BB>, <polygon mask>).
+
+    Args:
+        img_whc (Image.Image): the input image (needed for the size information).
+        segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
+
+    Returns:
+        list[tuple[np.ndarray, np.ndarray]]: a list of pairs (<line image BB>: np.ndarray (HWC), mask: np.ndarray (HW))
+    """
+
+    max_label = torch.max( polygon_map_chw )
+    img_hwc = np.array( img_wh )
+
+    pairs_line_bb_and_mask = []# [None] * max_label
+
+    for lbl in range(1, max_label+1 ):
+        page_label_mask_hw = retrieve_polygon_mask_from_map( polygon_map_chw, lbl )
+
+        # BB of non-zero pixels
+        non_zero_ys, non_zero_xs = page_label_mask_hw.numpy().nonzero()
+        y_min, x_min, y_max, x_max = np.min(non_zero_ys), np.min(non_zero_xs), np.max(non_zero_ys), np.max(non_zero_xs)
+        line_bbox = img_hwc[y_min:y_max+1, x_min:x_max+1]
+
+        bb_label_mask = expand_flat_tensor_to_n_channels(page_label_mask_hw[y_min:y_max+1, x_min:x_max+1], 3)
+
+        #pairs_line_bb_and_mask[ lbl-1 ]=(line_bbox, bb_label_mask) 
+        pairs_line_bb_and_mask.append( (line_bbox, bb_label_mask) )
+
+    return pairs_line_bb_and_mask
+
+
 def line_masks_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.ndarray, np.ndarray]]:
     """From an image file path and a segmentation PageXML file describing polygons, return
     the bounding box coordinates and the boolean masks.
@@ -248,7 +415,7 @@ def line_masks_from_img_xml_files(img: str, page_xml: str ) -> list[tuple[np.nda
             and a tensor (N,H,W) of page-wide line masks.
     """
     with Image.open(img, 'r') as img_wh:
-        segmentation_dict = segmentation_dict_from_xml( page_xml )
+        segmentation_dict = sgf.segmentation_dict_from_xml( page_xml )
         return line_masks_from_img_segmentation_dict( img_wh, segmentation_dict )
 
 
@@ -297,355 +464,43 @@ def line_masks_from_img_segmentation_dict(img_whc: Image.Image, segmentation_dic
     return (np.stack( bbs ), np.stack( masks ))
 
 
-def xml_from_segmentation_dict(seg_dict: str, pagexml_filename: str='', polygon_key='coords', with_text=False):
-    """Serialize a JSON dictionary describing the lines into a PageXML file.
-    Caution: this is a crude function, with no regard for validation.
+def expand_flat_tensor_to_n_channels( t_hw: Tensor, n: int ) -> np.ndarray:
+    """Expand a flat map by duplicating its only channel into n identical ones.
+    Channels dimension is last for convenient use with PIL images.
 
     Args:
-         seg_dict (dict[str,Union[str,list[Any]]]): segmentation dictionary of the form
-
-            {"text_direction": ..., "type": "baselines", "lines": [{"tags": ..., "baseline": [ ... ]}]}
-            or
-            {"text_direction": ..., "type": "baselines", "regions": [ {"id": "r0", "lines": [{"tags": ..., "baseline": [ ... ]}]}, ... ]}
-        pagexml_filename (str): if provided, output is saved in a PageXML file (standard output is the default).
-        polygon_key (str): if the segmentation dictionary contain alternative polygons (f.i. 'extBoundary'),
-            use them, instead of the usual line 'coords'.
-        with_text (bool): encode line transcription, if it exists. Default is False.
-    """
-    def boundary_to_point_string( list_of_pts ):
-        return ' '.join([ f"{pair[0]:.0f},{pair[1]:.0f}" for pair in list_of_pts ] )
-
-    rootElt = ET.Element('PcGts', attrib={
-        "xmlns": "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15", 
-        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance", 
-        "xsi:schemaLocation": "http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15/pagecontent.xsd"})
-    metadataElt = ET.SubElement(rootElt, 'MetaData')
-    creatorElt = ET.SubElement( metadataElt, 'Creator')
-    creatorElt.text=seg_dict['metadata']['creator'] if ('metadata' in seg_dict and 'creator' in seg_dict['metadata']) else 'Universität Graz/DH/nicolas.renet@uni-graz.at'
-    createdElt = ET.SubElement( metadataElt, 'Created')
-    createdElt.text=datetime.now().isoformat()
-    lastChangeElt = ET.SubElement( metadataElt, 'LastChange')
-    lastChangeElt.text=createdElt.text
-    commentElt = ET.SubElement( metadataElt, 'Comments')
-    if 'comments' in seg_dict['metadata']:
-        commentElt.text = seg_dict['metadata']['comments']
-    # for back-compatibility
-    elif 'comment' in seg_dict:
-        commentElt.text = seg_dict['comment']
-    if 'line_height_factor' in seg_dict:
-        lineHeightFactorElt = ET.SubElement( metadataElt, 'LineHeightFactor' )
-        lineHeightFactorElt.text = str(seg_dict['line_height_factor'])
-
-    img_name = Path(seg_dict['image_filename']).name
-    img_width, img_height = seg_dict['image_width'], seg_dict['image_height']    
-    pageElt = ET.SubElement(rootElt, 'Page', attrib={'imageFilename': img_name, 'imageWidth': f"{img_width}", 'imageHeight': f"{img_height}"})
-    # if no region in segmentation dict, create one (image-wide)
-    if 'regions' not in seg_dict:
-        seg_dict['regions']=[{'id': 'r0', 'coords': [[0,0],[img_width-1,0],[img_width-1,img_height-1],[0,img_height-1]]}, ]
-    for reg in seg_dict['regions']:
-        reg_xml_id = f"r{reg['id']}" if (type(reg['id']) is int or reg['id'][0]!='r') else reg['id']
-        regElt = ET.SubElement( pageElt, 'TextRegion', attrib={'id': reg_xml_id})
-        ET.SubElement(regElt, 'Coords', attrib={'points': boundary_to_point_string(reg['coords'])})
-        # 3 cases: 
-        # - top-level list of lines with region ref
-        # - top-level list of lines with no regions
-        # - top-level regions with a list of lines in each
-        lines = [ l for l in seg_dict['lines'] if (('region' in l and l['region']==reg['id']) or 'region' not in l) ] if 'lines' in seg_dict else reg['lines']
-        for line in lines:
-            line_xml_id = f"l{line['id']}" if type(line['id']) is int else line['id']
-            textLineElt = ET.SubElement( regElt, 'TextLine', attrib={'id': line_xml_id} )
-            ET.SubElement( textLineElt, 'Coords', attrib={'points': boundary_to_point_string(line[polygon_key])} )
-            if 'baseline' in line:
-                ET.SubElement( textLineElt, 'Baseline', attrib={'points': boundary_to_point_string(line['baseline'])})
-            if with_text and 'text' in line:
-                ET.SubElement( ET.SubElement( textLineElt, 'TextEquiv'), 'Unicode').text = line['text']
-
-    tree = ET.ElementTree( rootElt )
-    ET.indent(tree, space='\t', level=0)
-    if pagexml_filename:
-        tree.write( pagexml_filename, encoding='utf-8' )
-    else:
-        tree.write( sys.stdout, encoding='unicode' )
-
-
-def segmentation_dict_from_xml(page: str, get_text=False, regions_as_boxes=True, strict=False, region_line_overlap=.9) -> dict[str,Union[str,list[Any]]]:
-    """Given a pageXML file name, return a JSON dictionary describing the lines.
-    The resulting dictionary is flat, with two separate entries for lines and regions.
-    Use the `segdict_sink_lines` routine to construct a nested dictionary, if needed.
-
-    Args:
-        page (str): path of a PageXML file.
-        get_text (bool): extract line text content, if present (default: False); this
-            option causes line with no text to be yanked from the dictionary.
-        regions_as_boxes (bool): when regions have more than 4 points or are not rectangular,
-            store their bounding boxes instead; the boxe's boundary is determined
-            by its pertaining lines, not by its nominal coordinates(default: True).
-        strict (bool): if True, raise an exception if line coordinates are not comprised within
-            their region's boundaries; otherwise (default), the region value is automatically
-            extended to encompass the line coordinates.
-        region_line_overlap (float): lines that do not overlap their region by this
-            threshold are removed from the output dictionary.
+        t_hw (Tensor): a flat map.
+        n (int): number of (identical) channels in the resulting tensor.
 
     Returns:
-        dict[str,Union[str,list[Any]]]: a dictionary of the form::
-
-            {"metadata": { ... },
-             "text_direction": ..., "type": "baselines", 
-             "lines": [{"id": ..., "coords": [ ... ], "baseline": [ ... ]}, ... ],
-             "regions": [{"id": ..., "coords": [ ... ]}, ... ] }
-
-           Regions are stored as a top-element.
-    TODO:
-        - check that unhandled exception on U-17_0995_s01.xml (AttributeError) has been fixed.
-
+        np.ndarray: a (H,W,n) array.
     """
-    def parse_coordinates( pts ):
-        return [ [ int(p) for p in pt.split(',') ] for pt in pts.split(' ') ]
+    if len(t_hw.shape) != 2:
+        raise TypeError("Function expects a 2D map!")
+    t_hwc = t_hw.reshape( t_hw.shape+(1,)).expand(-1,-1,n)
+    return t_hwc.numpy()
 
-    def construct_line_entry(line: ET.Element, region_ids: list = [] ) -> dict:
-            line_id = line.get('id')
-            baseline_elt = line.find('./pc:Baseline', ns)
-            if baseline_elt is None:
-                return None
-            bl_points = baseline_elt.get('points')
-            if bl_points is None or len(bl_points)==0:
-                return None
-            baseline_points = parse_coordinates( bl_points )
-            coord_elt = line.find('./pc:Coords', ns)
-            if coord_elt is None:
-                return None
-            c_points = coord_elt.get('points')
-            if c_points is None or len(c_points)==0:
-                return None
-            polygon_points = parse_coordinates( c_points )
-
-            line_text, line_custom_attribute = '', ''
-            if get_text:
-                text_elt = line.find('./pc:TextEquiv', ns) 
-                if text_elt is not None:
-                    line_custom_attribute = text_elt.get('custom') if 'custom' in text_elt.keys() else ''
-                    unicode_elt = text_elt.find('./pc:Unicode', ns)
-                    if unicode_elt is not None:
-                        line_text = unicode_elt.text 
-            line_dict = {'id': line_id, 'baseline': baseline_points, 
-                        'coords': polygon_points, 'regions': region_ids}
-            if line_text and not re.match(r'\s*$', line_text):
-                line_dict['text'] = line_text 
-                if line_custom_attribute:
-                    line_dict['custom']=line_custom_attribute
-            elif get_text:
-                return None
-            return line_dict
-
-    def line_to_region_overlap(line_dict: dict, region_dict: dict):
-        """ Check overlap between line's bbox and region boundaries."""
-        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
-        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
-        return reg_bbox.intersection( line_bbox ).area / line_bbox.area
-
-    def extend_box( box_coords, inner_coords ):
-        """Extend box coordinates to encompass inner boundaries """
-        inner_xs, inner_ys = [ pt[0] for pt in inner_coords ], [ pt[1] for pt in inner_coords ]
-        inner_left, inner_right, inner_top, inner_bottom = min(inner_xs), max(inner_xs), min(inner_ys), max(inner_ys)
-        return [ [ inner_left if inner_left < box_coords[0][0] else box_coords[0][0],
-                 inner_top if inner_top < box_coords[0][1] else box_coords[0][1]],
-                [ inner_right if inner_right > box_coords[1][0] else box_coords[1][0],
-                 inner_top if inner_top < box_coords[1][1] else box_coords[1][1]],
-                [ inner_right if inner_right > box_coords[2][0] else box_coords[2][0],
-                 inner_bottom if inner_bottom > box_coords[2][1] else box_coords[2][1]],
-                [ inner_left if inner_left < box_coords[3][0] else box_coords[3][0],
-                 inner_bottom if inner_bottom > box_coords[3][1] else box_coords[3][1]],]
-
-    def process_region( region: ET.Element, region_accum: list, line_accum: list, region_ids:list ):
-        # order of regions: outer -> inner
-        region_ids = region_ids + [ region.get('id') ]
-
-        region_coord_elt, rg_points = region.find('./pc:Coords', ns), None
-        if region_coord_elt is not None:
-            rg_points = region_coord_elt.get('points')
-            if rg_points is None:
-                raise ValueError("Region has no coordinates. Aborting.")
-            rg_points = parse_coordinates( rg_points )
-            if regions_as_boxes:
-                xs, ys = [ pt[0] for pt in rg_points ], [ pt[1] for pt in rg_points ]
-                left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
-                rg_points = [[left,top], [right,top], [right,bottom], [left, bottom]]
-
-        region_accum.append( {'id': region.get('id'), 'coords': rg_points } )
-
-        for line_idx, elt in enumerate( list(region.iter())[1:] ):
-            if elt.tag == "{{{}}}TextLine".format(ns['pc']):
-                line_entry = construct_line_entry( elt, region_ids )
-                #print(line_entry)
-                if line_entry is None:
-                    continue
-                overlap = line_to_region_overlap(line_entry, region_accum[-1] )
-                if overlap < 0.5:
-                    if strict:
-                        raise ValueError("Page {}, region {}, l. {}: boundaries are not contained within its region. To disable this exception, pass strict=False".format(page, region_ids[-1], line_idx))
-                    # extend region to fit the line
-#                    elif overlap >= region_line_overlap:
-#                        region_accum[-1]['coords'] = extend_box( region_accum[-1]['coords'], line_entry['coords']+line_entry['baseline'] )
-#                    else:
-#                        print(f"Line {line_entry['id']} does not meet overlap threshold with region ({overlap:.2f} < {region_line_overlap}): skipping.")
-#                        continue
-                line_accum.append( line_entry )
-            elif elt.tag == "{{{}}}TextRegion".format(ns['pc']):
-                process_region(elt, region_accum, line_accum, region_ids)
-
-    with open( page, 'r' ) as page_file:
-
-        # extract namespace
-        ns = {}
-        for line in page_file:
-            m = re.match(r'\s*<([^:]+:)?PcGts.+xmlns=[\'"]([^"]+)["\']', line)
-            if m:
-                ns['pc'] = m.group(2)
-                page_file.seek(0)
-                break
-
-        if 'pc' not in ns:
-            raise ValueError(f"Could not find a name space in file {page}. Parsing aborted.")
-    
-        lines = []
-        regions = []
-        page_dict = {}
-
-        page_tree = ET.parse( page_file )
-        page_root = page_tree.getroot()
-
-        metadata_elt = page_root.find('./pc:Metadata', ns)
-        if metadata_elt is None:
-            page_dict = { 'metadata': { 'created': str(datetime.now()), 'creator': __file__, } }
-        else:
-            created_elt = metadata_elt.find('./pc:Created', ns)
-            creator_elt = metadata_elt.find('./pc:Creator', ns)
-            comments_elt = metadata_elt.find('./pc:Comments', ns)
-            page_dict: {
-                    'metadata': {
-                        'created': created_elt.text if created_elt else str(datetime.datetime.now()),
-                        'creator': creator_elt.text if creator_elt else __filename__,
-                        'comments': comments_elt.text if comments_elt else "",
-                    }
-            }
-
-        page_dict['type']='baselines'
-        page_dict['text_direction']='horizontal-lr'
-
-        pageElement = page_root.find('./pc:Page', ns)
-
-        page_dict['image_filename']=pageElement.get('imageFilename')
-        page_dict['image_width'], page_dict['image_height']=[ int(pageElement.get('imageWidth')), int(pageElement.get('imageHeight'))]
-
-        for textRegionElement in pageElement.findall('./pc:TextRegion', ns):
-            process_region( textRegionElement, regions, lines, [] )
-
-        page_dict['lines'] = lines
-        page_dict['regions'] = regions
-
-    return page_dict 
-
-def segdict_reassign_lines( segdict: dict):
-    """
-    Given a segmentation dictionary, reassign lines to their most likely containing regions:
-    assign each line to region with maximum overlap, as a ratio of the line's area; between
-    two competing regions, choose the smaller one.
-    """
-    def line_to_region_overlap(line_dict: dict, region_dict: dict):
-        """ Check overlap between line's bbox and region boundaries."""
-        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
-        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
-        return reg_bbox.intersection( inner_plg ).area / line_bbox.area
-
-    region_to_bbox = [ shapely.envelope( shapely.multipoints( np.array( r['coords'] ))) for r in segdict['regions'] ]
-    new_segdict = copy.deepcopy( segdict )
-    for r in new_segdict['regions']:
-        r['lines']=[]
-    # all lines, sorted by centroids
-    lines = [ l for r in segdict['regions'] for l in r['lines'] ]  
-    for l in lines:
-        l['bbox']=shapely.envelope( shapely.multipoints( np.array( l['coords'] )))
-        print(l['bbox'])
-    lines.sort( key=lambda ln: ln['bbox'].centroid.x )
-    # map line index to (<region index>, overlap)
-    line_to_region = [(-1,0.0) for l in lines ]
-    print(line_to_region)
-    for l_idx, l in enumerate(lines):
-        max_overlap = 0
-        for r_idx, r in enumerate( segdict['regions'] ):
-            this_overlap = region_to_bbox[r_idx].intersection( l['bbox'] ).area / l['bbox'].area
-            print(f"intersection: {region_to_bbox[r_idx].intersection( l['bbox'] ).area}", end=", ")
-            #print(f"line box area: {l['bbox'].area}")
-            print(f"line {l['id']} ({l['bbox']}) / region: {r['id']} ({region_to_bbox[r_idx]}): overlap={this_overlap}")
-            if this_overlap > max_overlap:
-                max_overlap = this_overlap
-                line_to_region[l_idx]=(r_idx, this_overlap )
-                print(f"asssign line {l['id']} to region: {r['id']}: overlap={this_overlap}")
-            elif this_overlap == max_overlap and line_to_region[l_idx][0]>=0:
-                stored_region_idx = line_to_region[l_idx][0] # region index
-                if region_to_bbox[r_idx].area < region_to_bbox[stored_region_idx].area:
-                    line_to_region[l_idx]=(r_idx, this_overlap )
-    # assign each line to its region object
-    # (vertical sorting by centroid has been done previously)
-    for l_idx, lr in enumerate( line_to_region ):
-        del lines[l_idx]['bbox']
-        new_segdict['regions'][ lr[0] ]['lines'].append( lines[l_idx] )
-    return new_segdict
-
-
-def segdict_sink_lines(segdict: dict):
-    """Convert a segmentation dictionary with top-level line array ('lines') 
-    to a nested dictionary where each region in the 'regions' array contains its 
-    corresponding 'lines' array. No change applied if lines are already wrapped
-    into the regions.
+def crops_from_segdict( img: Image.Image, segdict: dict, force_rgb=False, ignore_empty_regions=False ):
+    """From a segmentation dictionary, return the text regions and their
+    corresponding image crops (nested regions are ignored).
 
     Args:
-        segdict (dict): segmentation dictionary of the form::
-
-                {..., "lines": [ {"id":..., "regions": [...]}, ... ], "regions": [ ... ] }
-
-            OR
-
-                {..., "lines": [ {"id":..., "region": "r0"}, ... ], "regions": [ ... ] }
-
+        img (Image.Image): Image to crop.
+        segdict (dict): a segmentatino dictionary
+        force_rgb (bool): convert binary/gray images to RGB (default: False).
+        ignore_empty_regions (bool): ignore those regions that do not have any lines: useful
+            when re-segmenting with inherited PageXML as layout files (default: False).
     Returns:
-        dict: a modified copy of the original dictionary::
-
-            {..., "regions": [ {"id":..., lines=[{"id": ... }, ... ]}, ... ] }
+        tuple[list[Image.Image], list[str]]: a tuple with
+            - a list of images (HWC)
+            - a list of box coordinates (LTRB)
     """
-    segdict = segdict.copy()
-    if 'lines' not in segdict or not segdict['lines']:
-        return segdict
-    # if no 'regions' entry for lines, assign to each line its proper region
-    if 'regions' not in segdict['lines'][0]:
-        for line in segdict['lines']:
-            if 'region' in line:
-                line['regions']=[ line['region'] ]
-                del line['region']
-            else:
-                for reg in segdict['regions']:
-                    if (line['coords'] >= np.min( reg['coords'], axis=0 )).all() and (line['coords'] <= np.max( reg['coords'], axis=0 )).all():
-                        print("Check coordinates")
-                        if 'regions' not in line:
-                            line['regions']=[]
-                    line['regions'].append( reg['id'] )
-    # fix old Kraken format
-    if type(segdict['regions']) is dict:
-        segdict['regions'] = segdict['regions']['text']
- 
-    for line in segdict['lines']:
-        this_reg=[ reg for reg in segdict['regions'] if reg['id']==line['regions'][0] ][0] if ('regions' in line and line['regions']) else line['region']
-        if 'lines' not in this_reg:
-            this_reg['lines']=[]
-        this_reg['lines'].append(line)
-        del line['regions']
-    del segdict['lines']
-
-    # regions with no lines assigned are still valid
-    for reg in segdict['regions']:
-        if 'lines' not in reg:
-            reg['lines']=[]
-    return segdict
+    if 'regions' not in segdict:
+        return tuple()
+    # make it easier to check for empty regions
+    if force_rgb and img.mode != 'RGB':
+        img = img.convert('RGB')
+    return tuple( zip( *[ ( img.crop( tuple(r['coords'][0]+r['coords'][2])), r['coords'][0]+r['coords'][2], None) for r in segdict['regions'] if (not ignore_empty_regions or ('lines' in r and len(r['lines']))) ]) )
 
 
 def layout_regseg_to_crops( img: Image.Image, regseg: dict, region_labels: list[str], force_rgb=False ) -> tuple[list[Image.Image], list[str]]:
@@ -699,7 +554,89 @@ def layout_regseg_check_class(regseg: dict, region_labels: list[str] ) -> list[b
 
 
 
-def dummy():
-    """Just to check that the module is testable."""
-    return True
+def tile_img( img_wh: tuple[int,int], size, constraint=20, channel_dim=2 ):
+    """ Slice an image into patches: return list of patch coordinates.
+
+    Args:
+        image size (tuple[int,int]): (width, height) of image
+        size (int): size of the patch square.
+        constraint (int): minimum overlap between patches.
+        channel_dim (int): which dimension stores the channels: 0 or 2 (default).
+    Returns:
+        list[list]: a list of pairs [top,left] coordinates.
+    """
+    width, height = img_wh
+    assert height >= size and width >= size
+    x_pos, y_pos = [], []
+    if width == size:
+        x_pos = [0]
+    else:
+        col = math.ceil( width / size )
+        if (col*size - width)/(col-1) < constraint:
+            col += 1
+        overlap = (col*size - width)//(col-1)
+        x_pos = [ c*(size-overlap) if c < col-1 else width-size for c in range(col) ]
+    if height == size:
+        y_pos = [0]
+    else:
+        row = math.ceil( height / size )
+        if (row*size - height)/(row-1) < constraint:
+            row += 1
+        overlap = (row*size - height)//(row-1)
+        y_pos = [ r*(size-overlap) if r < row-1 else height-size for r in range(row) ]
+    return list(itertools.product(y_pos, x_pos ))
+
+
+def get_binary_mask( img_whc: Image.Image, thresholding_alg: Callable=ski.filters.threshold_otsu ) -> Tensor:
+    """Compute a binary mask from an image, using the given thresholding algorithm: FG=1s, BG=0s
+
+    Args:
+        img (PIL image): input image
+
+    Returns:
+        Tensor: a binary map with FG pixels=1 and BG=0.
+    """
+    img_hwc= np.array( img_whc )
+    threshold = thresholding_alg( ski.color.rgb2gray( img_hwc ) if img_hwc.shape[2]>1 else img_hwc )*255
+    img_bin_hw = torch.tensor( (img_hwc < threshold)[:,:,0], dtype=torch.bool )
+
+    return img_bin_hw
+
+
+def promote_regions_from_json_file( filename: Path ):
+    """
+    From a segmentation dictionary, promote regions as new stand-alone images
+    and create 1+ dictionaries accordingly. Assumes that regions are top-level elements.
+
+    Returns:
+        list[tuple[Image,dict]]: a list of tuples (image,dictionary).
+    """
+    with open( filename, 'r') as json_if:
+        segdict = json.load( json_if )
+        dir_path = Path(filename).parent
+        region_list = []
+        for reg_idx, region in enumerate(segdict['regions']):
+            new_segdict = copy.deepcopy(segdict)
+            new_segdict['metadata']['created']=str(datetime.now())
+            new_segdict['regions'] = new_segdict['regions'][reg_idx:reg_idx+1] 
+            # new region coordinates (crop-wide)
+            new_segdict['regions'][0]['coords'] = (np.array( region['coords'] ) - region['coords'][0]).tolist()
+            # new image dimensions
+            new_segdict['image_width'], new_segdict['image_height']= new_segdict['regions'][0]['coords'][2]
+            x_offset, y_offset = region['coords'][0]
+            # offset lines
+            for line_idx, line in enumerate(region['lines']):
+                for attr in ('coords', 'centerline', 'baseline'):
+                    new_coords=np.array(line[attr])-[x_offset, y_offset]
+                    assert np.all( new_coords >= 0 )
+                    new_segdict['regions'][0]['lines'][line_idx][attr]=new_coords.tolist()
+            # crop region
+            with Image.open( dir_path.joinpath( segdict['image_filename'] )) as page_img:
+                #print(np.array( region['coords'])[[0,2]].flatten())
+                region_img = page_img.crop( tuple(np.array( region['coords'])[[0,2]].flatten().tolist() ))
+                region_img_filename = re.sub(r'\.(img\.)?(png|jpg)$', f".r{reg_idx}"+r'\g<0>', segdict['image_filename'])
+                new_segdict['image_filename']=region_img_filename
+                assert( region_img.size == (new_segdict['image_width'], new_segdict['image_height']))
+            region_list.append( (region_img, new_segdict) )
+        return region_list
 
