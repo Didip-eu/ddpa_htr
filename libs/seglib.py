@@ -257,7 +257,6 @@ def line_polygons_from_segmentation_dict( segmentation_dict: dict, polygon_key='
     for line in flat_dict['lines']:
         # look for innermost containing region
         ltrb = tuple(np.array( id_to_reg[line['parents'][0]]['coords'])[[0,2]].flatten())
-        print(line)
         line_polygons.append( polygon_utils.strip_from_baseline( line['baseline'], line['x-height'], factor, ltrb=ltrb ) if 'x-height' in line else line[polygon_key] )
     return line_polygons
  
@@ -271,13 +270,13 @@ def line_metrics_from_segmentation_dict( segmentation_dict: dict) -> dict:
     Returns:
         dict: a list of dictionary.
     """
-    lines = [ ld for ld in sgf.line_dicts_from_segmentation_dict( segmentation_dict ) if len(ld['baseline'])>=3 ]
+    lines = [ ld for ld in sgf.line_dicts_from_segmentation_dict( segmentation_dict ) if len(ld['baseline'])>=2 ]
     x_heights = np.array([ l['x-height'] for l in lines ])
-    line_spacing = -1
+    line_spacings = -1
     if len(lines)>=3:
         # subtract means of baseline's y-values 
         line_spacings = [ np.abs(np.mean([ pt[1] for pt in lines[l]['baseline']])-np.mean([ pt[1] for pt in lines[l+1]['baseline']])) for l in range(len(lines)-1) ]
-    
+
     metrics_dict = { 
              'x_height_avg': np.mean( x_heights),
              'x_height_std': np.var( x_heights ),
@@ -294,8 +293,7 @@ def line_images_from_img_page_xml_files(img: str, page_xml: str, as_dictionary=F
 
     Args:
         img (str): the input image's file path
-        page_xml: :type page_xml: str a Page XML file describing the
-            lines.
+        page_xml (str): a Page XML file describing the lines.
         as_dictionary (bool): return segmentation dict where each line is a tuple (<img>,<msk>,<line_dict>); useful
             for keeping track of line ids when running inference.
 
