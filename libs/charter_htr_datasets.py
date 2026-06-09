@@ -40,7 +40,7 @@ from transformers import TrOCRProcessor, AutoTokenizer, AutoModelForImageTextToT
 # local
 sys.path.append(str(Path(__file__).parents[0]))
 import download_utils as du
-import seglib
+import seglib, segformats as sgf
 import transforms as tsf
 
 
@@ -280,12 +280,16 @@ class PageDataset(VisionDataset):
             complete_touchfile_path.unlink(missing_ok=True)
 
             page_dict = {}
-            if (lbl_path.name)[-4:]=='.xml':
-                # always return a nesting of "regions" and "lines"
-                page_dict = seglib.segmentation_dict_from_xml( lbl_path, get_text=True )
-            elif (lbl_path.name)[-5:]=='json':
+            segformat = sgf.get_format( lbl_path )
+
+            if segformat == sgf.SegFormat.PAGE:
+                page_dict = seglib.segmentation_dict_from_xml( lbl_path, get_text=True ) 
+            elif segformat == sgf.SegFormat.JSON:
                 with open( lbl_path ) as jsonf:
                     page_dict = json.load( jsonf )
+            else:
+                logger.info("Unknown segmentation label format: skpping item")
+                continue
 
             regions = {}
             for reg in page_dict['regions']:

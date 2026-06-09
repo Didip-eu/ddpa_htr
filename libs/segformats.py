@@ -1,3 +1,14 @@
+"""
+A module for:
+
++ conversions between established segmentation formats (ALTO, Page) and internal, DiDip-style JSON format
+  (as documented by the corresponding schema in segformat_documents.py)
++ validation (Page or JSON)
++ transformations of a segmentation (JSON) dictionary: either grammatical (flattening, region and/or line extraction)
+  or semantic (involving checking or changing the data)
++ ASCII visualization of a page segmentation.
+
+"""
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -15,6 +26,7 @@ from typing import Callable, Optional, Union, Mapping, Any
 import numpy as np
 import shapely
 import jsonschema
+from unidecode import unidecode
 
 from .segformat_documents import JsonSchema, XslAltoPage, PageXmlSchema
 
@@ -36,7 +48,10 @@ def get_format( segfile: str )->int:
     page_regexp = r'<([^:<>]+:)?PcGts.+xmlns'
     alto_regexp = r'<([^:<>]+:)?alto.+xmlns'
     with open(segfile) as segfile_if:
-        current_line = segfile_if.readline()
+        try:
+            current_line = segfile_if.readline()
+        except UnicodeDecodeError as e:
+            return SegFormat.Unknown
         # pass xml declaration and any empty subsequent line
         if re.match(r'<\?xml[^>]+>\s*$', current_line):
             while True:
@@ -50,10 +65,13 @@ def get_format( segfile: str )->int:
         else:
             segfile_if.seek(0)
             try:
-                json.load( segfile_if )
-                return SegFormat.JSON
+                segdict = json.load( segfile_if )
+                # coarse check
+                if 'image_filename' in segdict and 'regions' in segdict:
+                    return SegFormat.JSON
+                return SegFormat.Unknown
             except ValueError:
-                print("Could not parse JSON content: unknown (non-XML) format!")
+                print(f"{Path(__file__).name}.get_format: unknown (non-JSON) format!")
                 return SegFormat.Unknown
 
 
@@ -309,61 +327,6 @@ def segmentation_dict_from_page_xml(page_source: str, get_text=True, regions_as_
 
     return page_dict 
 
-def segdict_reassign_lines( segdict: dict):
-    """
-    Given a segmentation dictionary, reassign lines to their most likely containing regions:
-    assign each line to region with maximum overlap, as a ratio of the line's area; between
-    two competing regions, choose the smaller one.
-
-    Args:
-        segdict (dict): a segmentation dictionary, DiDip-style, with regions a top-level element.
-
-    Returns:
-        dict: a restructured dictionary.
-
-    """
-    def line_to_region_overlap(line_dict: dict, region_dict: dict):
-        """ Check overlap between line's bbox and region boundaries."""
-        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
-        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
-        return reg_bbox.intersection( inner_plg ).area / line_bbox.area
-
-    region_to_bbox = [ shapely.envelope( shapely.multipoints( np.array( r['coords'] ))) for r in segdict['regions'] ]
-    new_segdict = copy.deepcopy( segdict )
-    for r in new_segdict['regions']:
-        r['lines']=[]
-    # all lines, sorted by centroids
-    lines = [ l for r in segdict['regions'] for l in r['lines'] ]  
-    for l in lines:
-        l['bbox']=shapely.envelope( shapely.multipoints( np.array( l['coords'] )))
-        #print(l['bbox'])
-    lines.sort( key=lambda ln: ln['bbox'].centroid.x )
-    # map line index to (<region index>, overlap)
-    line_to_region = [(-1,0.0) for l in lines ]
-    #print(line_to_region)
-    for l_idx, l in enumerate(lines):
-        max_overlap = 0
-        for r_idx, r in enumerate( segdict['regions'] ):
-            this_overlap = region_to_bbox[r_idx].intersection( l['bbox'] ).area / l['bbox'].area
-            #print(f"intersection: {region_to_bbox[r_idx].intersection( l['bbox'] ).area}", end=", ")
-            #print(f"line box area: {l['bbox'].area}")
-            #print(f"line {l['id']} ({l['bbox']}) / region: {r['id']} ({region_to_bbox[r_idx]}): overlap={this_overlap}")
-            if this_overlap > max_overlap:
-                max_overlap = this_overlap
-                line_to_region[l_idx]=(r_idx, this_overlap )
-                print(f"asssign line {l['id']} to region {r['id']}: overlap={this_overlap}")
-            elif this_overlap == max_overlap and line_to_region[l_idx][0]>=0:
-                stored_region_idx = line_to_region[l_idx][0] # region index
-                if region_to_bbox[r_idx].area < region_to_bbox[stored_region_idx].area:
-                    print(f"asssign line {l['id']} to smaller region {r['id']}: overlap={this_overlap}")
-                    line_to_region[l_idx]=(r_idx, this_overlap )
-    # assign each line to its region object
-    # (vertical sorting by centroid has been done previously)
-    for l_idx, lr in enumerate( line_to_region ):
-        del lines[l_idx]['bbox']
-        new_segdict['regions'][ lr[0] ]['lines'].append( lines[l_idx] )
-    return new_segdict
-
 
 def segdict_sink_lines_deprecate(segdict: dict):
     """Convert a segmentation dictionary with top-level line array ('lines') 
@@ -546,16 +509,140 @@ def page_xml_validate( page_source: str, schema_source: str=PageXmlSchema ):
 
     return xmlschema.validate( page_root )
 
-def json_doctor( segdict: dict, operations={'region_fit': True, 'line_surgery': True} )->dict:
+def json_doctor( segdict: dict, operations={'region_fit': True, 'line_surgery': True}, verbose=False )->dict:
     """
     Fix semantic issues in a JSON segmentation dictionary:
 
-    + 
-    + extend regions to encompass their line bounding boxes
     + re-assign lines to their proper regions
-    + 
+    + extend regions to encompass their line bounding boxes
+    
+    Args:
+        segdict (dict): segmentation dictionary, DiDip-style.
+
+    Returns:
+        dict: a modified copy of the input dictionary.
     """
-    pass
+    # Steps:
+    # 1. Clip all coordinates to image size
+    # 2. Line reassignment: fix most glaring errors regarding line-to-region assignments (tolerance
+    #     for line region overlap is a parameter)
+    # 3. Fine-tuning: regions can be extended to fit their line coordinates (overlap between regions
+    #    is not considered an issue in most contexts)
+
+    def extend_box( outer_coords, inner_coords ):
+        """
+        Extend outer box to fit the inner coordinates, within the image's limits.
+        """
+        outer_coords, inner_coords = np.array( outer_coords ), np.array( inner_coords )
+        o_l, o_t, o_r, o_b = *(outer_coords.min(axis=0).tolist()), *(outer_coords.max(axis=0).tolist())
+        i_l, i_t, i_r, i_b = *(inner_coords.min(axis=0).tolist()), *(inner_coords.max(axis=0).tolist())
+
+        l = i_l if o_l >= i_l else o_l
+        t = i_t if o_t >= i_t else o_t
+        r = i_r if o_r <= i_r else o_r
+        b = i_b if o_b <= i_b else o_b
+        
+        if r >= segdict['image_width']:
+            r = segdict['image_width']-1
+        if b >= segdict['image_height']:
+            b = segdict['image_height']-1
+        #if verbose:
+        #    print(f"extended region: {[[l,t],[r,t],[r,b],[l,b]]}")
+        return [[l,t],[r,t],[r,b],[l,b]]
+
+    segdict_new = copy.deepcopy( segdict )
+    # ensure that every line polygon is within image's limits
+    if verbose:
+        print("Check polygons against image limit...")
+    for r in segdict_new['regions']:
+        for l in r['lines']:
+            new_coords=np.clip( l['coords'], [0,0], [segdict['image_width']-1, segdict['image_height']-1] ).tolist()
+            if verbose and new_coords != l['coords']:
+                print(f"region  {r['id']}, line {l['id']}: coords → {new_coords}")
+            l['coords']=new_coords
+
+    if verbose:
+        print("Re-assign lines...")
+    segdict_butchered = segdict_reassign_lines( segdict_new, verbose=verbose )
+    if verbose and segdict_butchered != segdict_new:
+        print("Some lines were reassigned!")
+    if verbose:
+        print("Extend regions around their lines...")
+    for reg in segdict_butchered['regions']:
+        inner_line_coords = [ c for l in reg['lines'] for c in l['coords']]
+        if not inner_line_coords:
+            continue
+        new_coords = extend_box( reg['coords'], inner_line_coords )
+        if verbose and new_coords != reg['coords']:
+            print(f"region  {reg['id']} extended: {reg['coords']} → {new_coords}")
+        reg['coords']=new_coords
+    return segdict_butchered
+
+
+def segdict_reassign_lines( segdict: dict, verbose=False):
+    """
+    Given a segmentation dictionary, reassign lines to their most likely containing regions:
+    assign each line to region with maximum overlap, as a ratio of the line's area; between
+    two competing regions, choose the smaller one.
+
+    Args:
+        segdict (dict): a segmentation dictionary, DiDip-style, with regions a top-level element.
+
+    Returns:
+        dict: a restructured dictionary.
+
+    """
+    def line_to_region_overlap(line_dict: dict, region_dict: dict):
+        """ Check overlap between line's bbox and region boundaries."""
+        line_bbox = shapely.envelope( shapely.multipoints( np.array( line_dict['coords'] )))
+        reg_bbox = shapely.envelope( shapely.multipoints( np.array( region_dict['coords'] )))
+        return reg_bbox.intersection( inner_plg ).area / line_bbox.area
+
+    region_to_bbox = [ shapely.envelope( shapely.multipoints( np.array( r['coords'] ))) for r in segdict['regions'] ]
+    new_segdict = copy.deepcopy( segdict )
+    for r in new_segdict['regions']:
+        r['lines']=[]
+    # all lines, sorted by centroids
+    lines = [ l for r in segdict['regions'] for l in r['lines'] ]  
+    for l in lines:
+        l['bbox']=shapely.envelope( shapely.multipoints( np.array( l['coords'] )))
+        #print(l['bbox'])
+    lines.sort( key=lambda ln: ln['bbox'].centroid.x )
+    # map line index to (<region index>, overlap)
+    line_to_region = [(-1,0.0) for l in lines ]
+    #print(line_to_region)
+    for l_idx, l in enumerate(lines):
+        max_overlap = 0
+        for r_idx, r in enumerate( segdict['regions'] ):
+            this_overlap = region_to_bbox[r_idx].intersection( l['bbox'] ).area / l['bbox'].area
+            #print(f"intersection: {region_to_bbox[r_idx].intersection( l['bbox'] ).area}", end=", ")
+            #print(f"line box area: {l['bbox'].area}")
+            #print(f"line {l['id']} ({l['bbox']}) / region: {r['id']} ({region_to_bbox[r_idx]}): overlap={this_overlap}")
+            if this_overlap > max_overlap:
+                max_overlap = this_overlap
+                line_to_region[l_idx]=(r_idx, this_overlap )
+                #if verbose:
+                #    print(f"asssign line {l['id']} to region {r['id']}: overlap={this_overlap}")
+            elif this_overlap == max_overlap and line_to_region[l_idx][0]>=0:
+                stored_region_idx = line_to_region[l_idx][0] # region index
+                if region_to_bbox[r_idx].area < region_to_bbox[stored_region_idx].area:
+                    #if verbose:
+                    #    print(f"asssign line {l['id']} to smaller region {r['id']}: overlap={this_overlap}")
+                    line_to_region[l_idx]=(r_idx, this_overlap )
+    # assign each line to its region object
+    # (vertical sorting by centroid has been done previously)
+    for l_idx, lr in enumerate( line_to_region ):
+        del lines[l_idx]['bbox']
+        new_segdict['regions'][ lr[0] ]['lines'].append( lines[l_idx] )
+    if verbose: 
+        for r in new_segdict['regions']:
+            r_id, r_l, r_t, r_r, r_b = r['id'].replace('eSc_textblock_',''), *(np.array(r['coords']).min(axis=0).tolist()), *(np.array(r['coords']).max(axis=0).tolist())
+            print(f"region {r_id}: [<{r_l},{r_r}>, <{r_t}, {r_b}>]")
+            region_bboxes=[ (l['id'].replace('eSc_line_',''), *(np.array(l['coords']).min(axis=0).tolist()), *(np.array(l['coords']).max(axis=0).tolist()) ) for l in r['lines'] ]
+            for  l_id, l_l, l_t, l_r, l_b in sorted( region_bboxes, key=lambda x: x[2] ):
+                print(f"\tline {l_id}: [<{l_l},{l_r}>, <{l_t},{l_b}>]")
+
+    return new_segdict
 
 
 def flatten_segmentation_dict( segmentation_dict: dict ) -> dict:
@@ -622,4 +709,189 @@ def region_dicts_from_segmentation_dict( segmentation_dict: dict ) -> list[dict]
             del r['regions']
     return regions
 
+
+def any_to_ascii( segfile: str, scale_hw=(.01,.02), lines=0, repair=False, text=False)->str:
+    """
+    ASCII-rendition of a segmentation file.
+
+    Args:
+        segfile (str): path of a JSON, Page, or Alto segmentation file.
+        scale_hw (Union[tuple[float,float],float,int]): if passed a tuple, interpreted as scaling
+            factor for pixel-to-terminal-line and pixel-to-terminal-col (respectively) coordinate 
+            transformation; if passed a single number between .5 and 5, interpreted as a factor of
+            the default scale (=.01,.02).
+        lines (int): if non-zeero, show line ids within their regions: 1=only lines that fit within
+            region display box; 2=lines that fit within canvas display box.
+        repair (bool): try repair a faulty segmentation (default: False).
+        text (bool): display text, if present (default: False).
+
+    Returns:
+        str: a character-based rendition of the layout.
+    """
+    segdict = None
+    segmentation_format = get_format( segfile )
+    if segmentation_format == SegFormat.Unknown:
+        print(f"{Path(__file__).name}.any_to_ascii: Could not determine input format. Abort.")
+        return ''
+    if segmentation_format == SegFormat.JSON:
+        with open(segfile) as seg_if:
+            segdict = json.load( seg_if )
+    elif segmentation_format == SegFormat.PAGE:
+        segdict = segmentation_dict_from_page_xml( segfile )
+    elif segmentation_format == SegFormat.ALTO:
+        segdict = segmentation_dict_from_page_xml( alto_to_page_xml_string( segfile ))
+
+    if not segdict:
+        raise ValueError("Could not parse a valid segmentation dictionary. Abort.")
+
+    if repair:
+        segdict = json_doctor( segdict )
+    return segdict_to_ascii( segdict, scale_hw=scale_hw, lines=lines, text=text)
+
+def segdict_to_ascii( segdict:dict, scale_hw=(.01,.02), lines=0, summary=True, text=False)->str:
+    """
+    ASCII-rendition of a JSON segmentation dictionary.
+
+    Eg.::
+
+        ┼┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┌────────────────┐┄┄┄┄┄┄┼
+        ┆                  │r:2a93943e      │      ┆
+        ┆     ┌────────────└──l:8┌────────────────┐┆
+        ┆     │r:ef1657c4       ││r:ed8f3022      │┆
+        ┆     │  l:1e355b0a...  ││  l:8590f3bf... │┆
+        ┆     │  l:1e1c59e1.... ││  l:5c1a7591... │┆
+        ┆     │  l:aa302e79...  ││  l:50a89193... │┆
+        ┆     │  l:0bcc2987...  ││  l:ab831781... │┆
+        ┆     │  l:f45a1fa8...  ││  l:b808a65a... │┆
+        ┆     │  l:1d001e4b...  ││  l:640bb0ff....│┆
+        ┆     │  l:e30c7a81..   │┌────┐0a959ab... │┆
+        ┆     │  l:7bb2bb1f.... ││r:8fa3e8012b... │┆
+        ┆     │  l:85832788...  ││  l:│7383a84... │┆
+        ┆     ┌──────┐d5625...  │└────┘bd94110..  │┆
+        ┆     │r:f77b369130..   ││  l:2b0c22bb... │┆
+        ┆     │  l:a6│ecf48...  ││  l:1dac6035... │┆
+        ┆     │  l:6f│ff3a2...  ││  l:acb1c73e... │┆
+        ┆     └──────┘60b9c...  ││  l:5393c17b... │┆
+        ┆     │  l:299e800c...  ││  l:4e171c9c... │┆
+        ┆     │  l:508f7f75...  ││  l:d1ffc59c... │┆
+        ┆     │  l:496470a0...  ││  l:5c56470d... │┆
+        ┆     │  l:0ba0e73a...  ││  l:8a93cee6    │┆
+        ┆     │  l:30b7e6ef...  ││  l:6d2db756    │┆
+        ┆     │  l:e66fbbbb...  ││  l:b48006e0... │┆
+        ┆     │  ...            ││  ...           │┆
+        ┆     └─────────────────┘└────────────────┘┆
+        ┆                                          ┆
+        ┼┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┼
+
+    Args:
+        segdict (dict): path of a JSON segmentation file.
+        scale_hw (Union[tuple[float,float],float,int]): if passed a tuple, interpreted as scaling
+            factor for pixel-to-terminal-line and pixel-to-terminal-col (respectively) coordinate 
+            transformation; if passed a single number between .5 and 5, interpreted as a factor of
+            the default scale (=.01,.02).
+        lines (int): if non-zeero, show line ids within their regions: 1=only lines that fit within
+            region display box; 2=lines that fit within canvas display box.
+        summary (bool): print a short summy of the layout features (image size, regions and lines)
+
+    Returns:
+        str: an terminal-friendly representation of the layout.
+    """
+
+    def longest_common_prefix( words ):
+        if not words:
+            return ''
+        max_length = sorted( [ len(w) for w in words ] )[0]
+        for i in range(max_length):
+            if not all( [ words[0][i]==words[j][i] for j in range(len(words)) ] ):
+                break
+        return words[0][:i]
+
+    if not segdict:
+        raise ValueError("Provide a valid segmentation dictionary, or a segmentation file.")
+        
+    default_scale = (.01,.02)
+    width, height = segdict['image_width'], segdict['image_height']
+    if type(scale_hw) in [float,int]:
+        if scale_hw < .5:
+            print("Warning: scaling factor to be applied to the default display ratio set to lowest permissible value (0.5)")
+            scale_hw = .5
+        elif scale_hw > 3.0:
+            print("Warning: scaling factor to be applied to the default display ratio set to highest permissible value (3.0)")
+            scale_hw = 3.0
+        scale_hw=[ s*scale_hw for s in default_scale ] 
+    canvas = np.full( (np.array([height,width])*scale_hw).astype('uint16'), ord(' '))
+    # page box
+    canvas[[0,0,-1,-1],[0,-1,-1,0]]=ord('┼')
+    canvas[1:-1,[0,-1]]=ord('┆')
+    canvas[[0,-1],1:-1]=ord('┄')
+    reg_id_prefix = longest_common_prefix( [ reg['id'] for reg in segdict['regions']] )
+    line_ids = [ l['id'] for reg in segdict['regions'] if 'lines' in reg for l in reg['lines']]
+    line_id_prefix = longest_common_prefix( line_ids ) if lines else ''
+    for reg in segdict['regions'][:]:
+        reg['id']=reg['id'].replace( reg_id_prefix, 'r:')
+        reg_arr = np.array( [c[::-1] for c in reg['coords']] ).astype('uint16')
+        lt, rb = reg_arr[:,::-1].min(axis=0).tolist(), reg_arr[:,::-1].max(axis=0).tolist()
+        scaled_reg_hw = (rb[0]-lt[0]+1, rb[1]-lt[1]+1)
+        #print(*(np.array(canvas.shape)-1, (reg_arr*scale_hw).astype('uint16').T))
+        scaled_reg_arr = np.clip((reg_arr*scale_hw).astype('uint16').T, None, [[canvas.shape[0]-1],[canvas.shape[1]-1]])
+        # boxes
+        canvas[ scaled_reg_arr[0], scaled_reg_arr[1] ]=ord('+')
+        canvas[ scaled_reg_arr[0,0:4], scaled_reg_arr[1,0:4] ]=[ ord(c) for c in '┌┐┘└']
+        canvas[ scaled_reg_arr[0,0]+1:scaled_reg_arr[0,2], scaled_reg_arr[1,[0,1]]]=ord('│')
+        canvas[ scaled_reg_arr[0,[1,2]], scaled_reg_arr[1,0]+1:scaled_reg_arr[1,2]]=ord('─')
+
+        # region ids
+        reg_id_as_intlist = [ ord(c) for c in reg['id'] ]
+        region_id_offset = 1
+        reg_id_start_x = int(scaled_reg_arr[1,0]+region_id_offset)
+        reg_id_end_x = reg_id_start_x + len( reg['id'] )
+        reg_id_cut = max(0, reg_id_end_x-canvas.shape[1]) # region's id too long to fit into the canvas
+        # discard degenerate region on the canvas lower edge 
+        if scaled_reg_arr[0,0] < canvas.shape[0]-1:
+            canvas[ scaled_reg_arr[0,0]+1, reg_id_start_x:reg_id_end_x ]=reg_id_as_intlist[0:len(reg_id_as_intlist)-reg_id_cut]
+        # lines
+        if lines and 'lines' in reg:
+            sorted_lines = sorted(reg['lines'], key=lambda x: x['coords'][0][1])
+            for i,l in enumerate([l['id'].replace(line_id_prefix,'l:') for l in sorted_lines]):
+                l_xs =np.array( sorted_lines[i]['coords'] )[:,0]
+                line_display_length = int(np.floor((l_xs.max()-l_xs.min()+1) * scale_hw[1] ))-1
+                l_id_as_intlist = [ ord(c) for c in l ]
+                line_id_offset = region_id_offset+2
+                canvas_row_idx, canvas_col_idx = scaled_reg_arr[0,0]+2+i, scaled_reg_arr[1,0]+line_id_offset
+                # omitting lines beyond the canvas' size
+                if len(reg['lines'])!=1 and (lines==1 and canvas_row_idx >= scaled_reg_arr[0,2]-1) or (lines == 2 and canvas_row_idx >= canvas.shape[0]-2): 
+                    #canvas[ canvas_row_idx, canvas_col_idx:canvas_col_idx+len('...')] = [ ord(c) for c in '...' ]
+                    break
+                else:
+                    line_end_x = int(canvas_col_idx+line_display_length)
+                    line_cut = max(0, line_end_x - int(scaled_reg_arr[1,2]))
+                    line_display_length -= line_cut
+                    canvas[ canvas_row_idx, canvas_col_idx:canvas_col_idx+line_display_length ] = [ ord('.') ] * line_display_length 
+                    # display text content instead of id
+                    line_content = l_id_as_intlist
+                    if text and 'text' in sorted_lines[i]:
+                        line_content = [ ord(c) for c in unidecode(sorted_lines[i]['text']) ]
+                    line_content_end_x = int(canvas_col_idx+len(line_content))
+                    line_content_cut = max(0, line_content_end_x - int(scaled_reg_arr[1,2] ))
+                    line_display_length = max(1, len(line_content) - line_content_cut)
+                    #print(f"canvas[{canvas_col_idx}:{canvas_col_idx+id_display_length}")
+                    canvas[ canvas_row_idx, canvas_col_idx:canvas_col_idx+line_display_length] = line_content[:line_display_length]
+                    #id_end_x -= id_cut
+                    #canvas[ canvas_row_idx, canvas_col_idx:id_end_x] = l_id_as_intlist[:len(l_id_as_intlist)-id_cut] 
+
+    # Summary: sort regions by area size
+    lines_per_region = '\n'.join([ f"  {reg['id']}: {len(reg['lines'])} l." 
+                                  for reg in sorted( segdict['regions'], 
+                                                    key=lambda r: (r['coords'][1][0]-r['coords'][0][0])*(r['coords'][2][1]-r['coords'][1][1]), reverse=True )])
+    summary_text = "\n".join([ 
+                f"Image filename: {segdict['image_filename']}",
+                f"Image size: {segdict['image_width']} x {segdict['image_height']}",
+                f"Lines: {len(line_ids)}",
+                f"Regions: {len(segdict['regions'])}",
+                lines_per_region
+                              ]) if summary else ''
+
+    page_display = '\n'.join([(''.join([ chr(c) for c in l ])) for l in canvas ] )
+
+    return f"\n{summary_text}\n\n{page_display}" 
 
