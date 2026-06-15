@@ -26,6 +26,7 @@ from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
 import fargv
 from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
+from segtformats import segtformats as sgf
 
 # local
 root = str( Path(__file__).parents[1] ) 
@@ -249,7 +250,7 @@ if __name__ == "__main__":
                     with open( output_file_path, 'w') as htr_outfile:
                         htr_outfile.write(json.dumps( dataset.page_dict, indent=2))
                 elif args.output_format == 'xml':
-                    seglib.xml_from_segmentation_dict( dataset.page_dict, output_file_path )
+                    sgf.page_xml_from_segmentation_dict( dataset.page_dict, output_file=output_file_path )
             if output_file_path.exists():
                 logger.info(f"HTR output saved in {output_file_path}")
                 

@@ -33,6 +33,8 @@ from datetime import datetime
 import fargv
 from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
+from segtformats import segtformats as sgf
+
 src_root = Path(__file__).parents[1]
 sys.path.append( str( src_root ))
 from libs import seglib
@@ -72,9 +74,9 @@ if __name__ == '__main__':
 
             # always 
             if 'lines' in segdict:
-                segdict = seglib.segdict_sink_lines( segdict )
+                segdict = sgf.segdict_sink_lines( segdict )
 
-            lines = seglib.line_dicts_from_segmentation_dict( segdict )
+            lines = sgf.line_dicts_from_segmentation_dict( segdict )
 
             # at most one of the two suffixes must be set 
             if bool(args.inject_htr_suffix) != bool(args.inject_segmentation_suffix):
@@ -87,7 +89,7 @@ if __name__ == '__main__':
                     if len(segdict['regions']) != len(injection_dict['regions']):
                         print("Region counts in the two files do not seem to match. Please do a manual check.")
                         sys.exit()
-                    injection_lines = seglib.line_dicts_from_segmentation_dict( injection_dict )
+                    injection_lines = sgf.line_dicts_from_segmentation_dict( injection_dict )
                     if len(lines) != len(injection_lines):
                         print("Line counts in the two files do not seem to match. Please do a manual check.")
                         sys.exit()

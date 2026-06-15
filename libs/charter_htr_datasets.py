@@ -36,11 +36,13 @@ torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are sti
 from torchvision.transforms import v2
 from transformers import TrOCRProcessor, AutoTokenizer, AutoModelForImageTextToText
 
+from segtformats import segtformats as sgf
+
 
 # local
 sys.path.append(str(Path(__file__).parents[0]))
 import download_utils as du
-import seglib, segformats as sgf
+import seglib
 import transforms as tsf
 
 

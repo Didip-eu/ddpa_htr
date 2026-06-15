@@ -16,14 +16,17 @@ import torch
 from torch import Tensor
 import numpy as np
 
+# DiDip
+
+from segtformats import segtformats as sgf
+
 # local
-from . import segformats as sgf
 from . import polygon_utils
 
 """
 Any routine that involves joint manipulation of images and segmentation metadata.
 
-+ for internal manipulation and conversion of various formats (XML, JSON, Alto) → segformats.py
++ for internal manipulation and conversion of various formats (XML, JSON, Alto) → use segtformats
 + for segmentation evaluation routines → segmetrics.py
 """
 
