@@ -301,7 +301,7 @@ Auxiliary scripts, that may come handy for curating or transforming data:
 
 + `bin/json_to_json.py`: merging or transformations of JSON metadata.
 
-Other format-handling utilities for conversion between ALTO, PAGE, and JSON are now provided by a separate, standalone package [segtformats](git@github.com:nicolasrenet/segtformats.git).
+Other format-handling utilities for conversion between ALTO, PAGE, and JSON are now provided by a separate, standalone package [segtformats](https://github.com/nicolasrenet/segtformats).
 
 The following scripts are one-offs or deprecated. They are not meant for public consumption:
 
