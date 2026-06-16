@@ -46,8 +46,8 @@ Although this dataset is too small for the model to learn much, it allows for ex
 
 The HTR workflow relies on two data formats:
 
-+ PageXML, with [reference schema here](doc/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. publishing a dataset on Zenodo) or applications (Transkribus).
-+ a JSON internal format ([example here](doc/segmentation_dict_example.json)) with a similar structure, but also added features (eg. 'x-height' and 'centerline' line attributes): used for storing intermediary states or for easy feeding to the UI.
++ PageXML, with [reference schema here](http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15/pagecontent.xsd) and [browseable tree there](https://ocr-d.de/en/gt-guidelines/pagexml/pagecontent_xsd_Element_pc_PcGts.html#PcGts): used for exchanging data with non-DiDip entities (eg. publishing a dataset on Zenodo) or applications (Transkribus).
++ a JSON internal format ([example here](doc/segmentation_dict_example.json) and [validation schema](https://github.com/nicolasrenet/segtformats/blob/main/src/segtformats/segtformat_documents.py) with a similar structure, but also added features (eg. 'x-height' and 'centerline' line attributes): used for storing intermediary states or for easy feeding to the UI.
 
 Most tools in the pipeline (training and inference) can handle both input and output formats. Explicit conversion between formats can also be done with standalone utilities (cf. end of this document).
 
@@ -299,9 +299,9 @@ PYTHONPATH=$HOME/graz/htr/vre/ddpa_htr ./bin/ddp_htr_inference.py --model_path /
 
 Auxiliary scripts, that may come handy for curating or transforming data:
 
-+ `bin/xml_to_json.py`: PageXML → JSON segmentation dictionary (see [JSON metadata example](doc/segmentation_dict_example.json) for format)
-+ `bin/json_to_xml.py`: JSON segmentation dictionary → PageXML
 + `bin/json_to_json.py`: merging or transformations of JSON metadata.
+
+Other format-handling utilities for conversion between ALTO, PAGE, and JSON are now provided by a separate, standalone package [segtformats](git@github.com:nicolasrenet/segtformats.git).
 
 The following scripts are one-offs or deprecated. They are not meant for public consumption:
 
