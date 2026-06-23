@@ -21,7 +21,8 @@ import numpy as np
 from segtformats import segtformats as sgf
 
 # local
-from . import polygon_utils
+sys.path.append(str(Path(__file__).parent))
+import polygon_utils
 
 """
 Any routine that involves joint manipulation of images and segmentation metadata.

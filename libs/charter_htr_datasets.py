@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import Callable, Union, Optional
 import sys
+from datetime import datetime
 from functools import partial
 
 # 3rd-party
@@ -24,7 +25,6 @@ from PIL import Image
 import skimage as ski
 import gzip
 import pandas
-
 import numpy as np
 import torch
 from torch import Tensor
@@ -35,7 +35,6 @@ import torchvision.transforms as transforms
 torchvision.disable_beta_transforms_warning() # transforms.v2 namespaces are still Beta
 from torchvision.transforms import v2
 from transformers import TrOCRProcessor, AutoTokenizer, AutoModelForImageTextToText
-
 from segtformats import segtformats as sgf
 
 
@@ -146,6 +145,7 @@ class PageDataset(VisionDataset):
             img_suffix (str): image suffix. Default: '.jpg'
             device (str): computing device ('cpu', 'gpu', 'cuda:0', ...)
         """
+        super().__init__( root )
         self.dataset_resource = None
         if resource_file:
             if not Path( resource_file ).exists():
@@ -285,7 +285,7 @@ class PageDataset(VisionDataset):
             segformat = sgf.get_format( lbl_path )
 
             if segformat == sgf.SegFormat.PAGE:
-                page_dict = seglib.segmentation_dict_from_xml( lbl_path, get_text=True ) 
+                page_dict = sgf.segmentation_dict_from_page_xml( lbl_path, get_text=True ) 
             elif segformat == sgf.SegFormat.JSON:
                 with open( lbl_path ) as jsonf:
                     page_dict = json.load( jsonf )
@@ -296,7 +296,12 @@ class PageDataset(VisionDataset):
             regions = {}
             for reg in page_dict['regions']:
                 # - crop and name image
-                reg_dict = {}
+                reg_dict = {
+                        "metadata": {
+                            "created": datetime.now().isoformat("T", "seconds"),
+                        "   creator": "{}.PageDataset.build_page_region_data".format(str(Path(__file__).name)),
+                        }
+                }
                 img_prefix = ip.with_suffix('')
                 reg_dict['image_filename'] = re.sub(r'{}'.format(img_suffix), f"-{reg['id']}.png", str(ip))
                 reg_dict['bbox_ltrb'] = [ *reg['coords'][0], *reg['coords'][2] ]
@@ -304,7 +309,7 @@ class PageDataset(VisionDataset):
                 reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
                 reg_dict['lines']=[]
                 regions[ reg['id'] ]=reg_dict
-            for line in seglib.line_dicts_from_segmentation_dict( page_dict ):
+            for line in sgf.line_dicts_from_segmentation_dict( page_dict ):
                 parent_reg = regions[ line['parents'][0] ]
                 polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
                 # shifting crop coordinates

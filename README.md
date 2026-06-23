@@ -110,7 +110,7 @@ We can compile lines out of an explicit list of charter image files through the 
     5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
    ```
 
-  For building datasets out of JSON metadata, look up for the relevant flag (eg. `-lbl_suffix json`)  in the module's documentation.
+  For building datasets out of JSON metadata, look up for the relevant flag (eg. `lbl_suffix='json'`)  in the module's documentation.
    
 2. Serialize the lines:
    
