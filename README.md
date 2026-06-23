@@ -136,11 +136,11 @@ We can compile lines out of an explicit list of charter image files through the 
    ```
 
 
-Alternatively, to compile lines out of all charters contained in the page work folder, use the `from_page_folder` option:
+There are several options for building a page dataset. For example, to compile regions out of _all_ charters contained in the page work folder, using the corresponding `*.lines.gt.json` labels:
  
 ```python
 from libs.charter_htr_datasets import PageDataset
-PageDataset( from_page_folder=Path('./dataset/page_ds'), limit=3).dump_lines('dataset/htr_line_ds', overwrite_existing=True)
+PageDataset( from_page_folder=Path('./dataset/page_ds'), lbl_suffix='.lines.gt.json', limit=3).dump_lines('dataset/htr_line_ds', overwrite_existing=True)
 2025-11-16 12:14:28,695 - build_page_region_data: Building region data items (this might take a while).
 100%|======================================================================| 3/424 [00:01<02:35,  2.71it/s]
 2025-11-16 12:14:29,804 - __init__:
