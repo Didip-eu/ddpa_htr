@@ -43,6 +43,7 @@ sys.path.append(str(Path(__file__).parents[0]))
 import download_utils as du
 import seglib
 import transforms as tsf
+from segtformats import segtformats as sgf
 
 
 
@@ -1077,7 +1078,7 @@ class LineInferenceDataset( VisionDataset ):
 
     Key differences with CharterInferenceDataset:
 
-    + input is a set of line files, not a single charter entity
+    + input is a set of line files, not a single charter entity (no need for segmentation labels)
     + arbitrary large: line images and (optional) masks stay on disk until loading time
     + no handling of a page dictionary for storing prediction results
     """
@@ -1181,10 +1182,19 @@ class CharterInferenceDataset( LineInferenceDataset ):
         super().__init__('', transform=trf )
 
         img_path = Path( img_path ) if type(img_path) is str else img_path
+        if not img_path.exists():
+            raise FileNotFoundError({img_path})
         segmentation_data = Path( segmentation_data ) 
+        segmentation_format = sgf.get_format( segmentation_data )
+        if segmentation_format == sgf.SegFormat.Unknown:
+            raise ValueError(f"Label {segmentation_data.name}: Label format should be JSON, PAGE, or ALTO (passed {segmentation_format})")
 
         # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
-        line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor) if segmentation_data.suffix == '.json' else seglib.line_images_from_img_xml_files
+        line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor)
+        if segmentation_format == sgf.SegFormat.PAGE:
+            line_extraction_func = seglib.line_images_from_img_page_xml_files
+        elif segmentation_format == sgf.SegFormat.ALTO:
+            line_extraction_func = seglib.line_images_from_img_alto_files
 
         if padding_style and padding_style not in ['noise', 'zero', 'median']:
             raise ValueError(f"Incorrect padding style: '{padding_style}'. Valid styles: 'noise', 'zero', or 'median'.")
@@ -1198,7 +1208,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
             self.page_dict = line_extraction_func( img_path, segmentation_data, as_dictionary=True )
             for img_hwc, mask_hwc, line_dict in self.page_dict['lines']:
                 mask_hw = mask_hwc[:,:,0]
-                self.data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
+                self._data.append( { 'img': line_padding_func[padding_style]( img_hwc, mask_hw, channel_dim=2 ) if padding_style else img_hwc, 
                                     'height':img_hwc.shape[0],
                                     'width': img_hwc.shape[1],
                                     'id': str(line_dict['id']),
@@ -1214,6 +1224,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
     def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
         """ Update a given line dictionary with prediction data, whatever they are."""
         this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
+        print(f"updating line {self.line_id_to_index[ line_id ]}")
         if keep_gt:
             this_line['gt']=this_line['text']
         this_line.update( kv )
@@ -1225,7 +1236,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
         return self.transform( sample )
 
     def __len__(self):
-        return len(self.data)
+        return len(self._data)
 
 
 class TrOCRInferenceDataset( VisionDataset ):

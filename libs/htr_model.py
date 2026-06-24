@@ -66,6 +66,9 @@ class HTR_Model():
         self.image_specs = image_specs
         if alphabet is None:
             self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase), override_map={k:k for k in ' .'})
+        # Old-style alphabet serialization
+        elif type(alphabet) is list:
+            self.alphabet = Alphabet.load_old( alphabet )
         else:
             # during save/resume cycles, alphabet is serialized as a str
             self.alphabet = eval( alphabet) if type(alphabet) is str else alphabet
@@ -273,15 +276,15 @@ class HTR_Model():
         if Path(file_name).exists():
             state_dict = torch.load(file_name, map_location="cpu")
             # for compatibility with older model serialization
-            constructor_parameters = state_dict['constructor_parameters'] 
-            hyper_parameters = state_dict['hyper_parameters']
+            constructor_parameters = state_dict['constructor_parameters'] if 'constructor_parameters' in state_dict else state_dict['constructor_params']
+            hyper_parameters = state_dict['hyper_parameters'] if 'hyper_parameters' in state_dict else 'None'
             # last 3 keys for back-compatibility
-            for k in ('constructor_parameters', 'hyper_parameters', 'epochs', 'train_mode'):
+            for k in ('constructor_parameters', 'constructor_params', 'hyper_parameters', 'hyper_params', 'train_epochs', 'validation_epochs', 'epochs', 'train_mode'):
                 if k in state_dict:
                     del state_dict[ k ]
 
-            print(constructor_parameters)
-
+            #print("Constructor_parameters:", constructor_parameters)
+            
             model = HTR_Model( **constructor_parameters )
             model.net.load_state_dict( state_dict )
             if device != model.device:

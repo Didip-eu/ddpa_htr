@@ -51,7 +51,7 @@ p = {
     "img_paths": FargvPositional(default=[]),
     "charter_dirs": [],
     "line_scope": (False, "Inference on line images."),
-    "segmentation_suffix": ".lines.pred.json", 
+    "segmentation_suffix": (".lines.pred.json", "Suffix of line segmentation label."),
     "output_dir": ('', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'),
     "img_suffix": ".img.jpg",
     "msk_suffix": ".bool.npy.gz",
@@ -87,6 +87,8 @@ def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple
     path_triplets = []
     for img_path in all_img_paths:
         img_stem = re.sub(r'{}$'.format( args.img_suffix), '', img_path.name )
+        if img_stem == img_path.name:
+            logger.warning(f"Suffix '{args.img_suffix}' not found in image name {img_path.name}: is the value for the --img_suffix option correct?")
         segfile_path = Path( re.sub(r'{}$'.format( args.img_suffix), segmentation_suffix, str(img_path) ))
         output_dir = img_path.parent if not args.output_dir else Path(args.output_dir)
         out_file_path = f'{img_stem}.{args.appname}.pred{args.htr_suffix}.{args.output_format}'
@@ -106,6 +108,14 @@ if __name__ == "__main__":
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 
+    img_height, img_width, padding_style = 128, 2048, args.line_padding_style
+    if 'img_height' in model.image_specs:
+        img_height = model.image_specs['img_height']
+    if 'img_width' in model.image_specs:
+        img_width = model.image_specs['img_width']
+    if 'padding_style' in model.image_specs:
+        padding_style = model.image_specs['padding_style']
+
     # no pages, only line images (and optional masks)
     if args.line_scope:
         dataset = LineInferenceDataset(
@@ -114,9 +124,9 @@ if __name__ == "__main__":
                         msk_suffix=args.msk_suffix, 
                         with_mask=args.with_mask,
                         transform = Compose([ 
-                            tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
-                            tsf.PadToWidth( model.image_specs['img_width'] ) ]),
-                        padding_style=args.line_padding_style,)
+                            tsf.ResizeToHeight( img_height, img_width ),
+                            tsf.PadToWidth( img_width ) ]),
+                        padding_style=line_padding_style,)
         
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")
@@ -179,9 +189,9 @@ if __name__ == "__main__":
             dataset = CharterInferenceDataset( 
                                         img_path, segmentation_file_path,
                                         transform = Compose([ 
-                                            tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
-                                            tsf.PadToWidth( model.image_specs['img_width'] ) ]),
-                                        padding_style=model.image_specs['padding_style'],
+                                            tsf.ResizeToHeight( img_height, img_width ), 
+                                            tsf.PadToWidth( img_width ) ]),
+                                        padding_style=padding_style,
                                         line_height_factor=args.line_height_factor,)
             if not dataset.ok:
                 logger.warning("Could not build a proper dataset. Aborting.")
@@ -195,6 +205,7 @@ if __name__ == "__main__":
                 try:
                     # strings, np.ndarray
                     predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
+                    print(predicted_string)
                     # since batch is 1, flattening batch values
                     line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                     line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
@@ -219,7 +230,7 @@ if __name__ == "__main__":
                 output_rows=[ '\t'.join( header_row ) ]
                 for idx, line_dict in enumerate(dataset.page_dict['lines']):
                     logger.debug( line_dict )
-                    output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
+                    output_row = [ str(idx), line_dict['id'], line_dict['text'] if 'text' in line_dict else '-']
                     if 'gt' in args.output_data and 'gt' in line_dict:
                         output_row.append( line_dict['gt'] )
                     if 'scores' in args.output_data and 'scores' in line_dict:

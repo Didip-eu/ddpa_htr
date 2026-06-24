@@ -79,12 +79,13 @@ class Alphabet:
 
     @staticmethod
     def load( alpha_repr: dict ):
-        """Alphabet instance from serialization object, i.e. a dictionary of the form:
+        """
+        
+        Alphabet instance from serialization object, i.e. a dictionary of the form:
 
             {'mapping_dict': ..., 'unknown_chr': ... }
         """
         return eval( alpha_repr )
-
 
     def __len__(self):
         return len(self._mapper)+1 # add null char to alphabet length.
@@ -232,4 +233,19 @@ class Alphabet:
                 dest_to_start[d]=set([s])
         return { k:sorted(list(dest_to_start[k])) for k in sorted(dest_to_start.keys()) }
 
+    @staticmethod
+    def load_old( alphabet_as_list: list[list] ):
+        """
+        DEPRECATED: Load an old-style serialization, where the alphabet is stored as a list of list.
+        (For backward compatibility only.)
+        """
+        mapping_dict = {}
+        for elt in alphabet_as_list:
+            if type(elt) is str:
+                mapping_dict[elt]=elt
+            elif type(elt) is list:
+                for c in elt:
+                    mapping_dict[c] = elt[0] 
+        return Alphabet( LemmatizerBMP(mapping_dict = mapping_dict ))
 
+    

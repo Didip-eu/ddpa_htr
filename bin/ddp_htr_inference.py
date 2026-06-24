@@ -27,7 +27,7 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
 import fargv
-from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
+from fargv import FargvChoice, FargvFloat, FargvPositional
 from segtformats import segtformats as sgf
 
 # local
@@ -56,6 +56,7 @@ p = {
     "output_dir": ('', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'),
     "img_suffix": ".img.jpg",
     "htr_suffix": "", 
+    #"out_file": FargvChoice(["auto","stdout"], description="Output file: 'auto' writes an output file name from the input file's stem; 'stdout' prints on the standard output."),
     "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
     "output_data": (["pred"], "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
     "overwrite_existing": (True, "Write over existing output file (default)."),
