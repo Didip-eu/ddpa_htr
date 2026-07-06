@@ -18,6 +18,7 @@ import numpy as np
 # local
 sys.path.append(str(Path(__file__).parents[0]))
 import list_utils as lu
+import alphabet_compatible
 from pylelemmatize import LemmatizerBMP
 
 
@@ -246,6 +247,12 @@ class Alphabet:
             elif type(elt) is list:
                 for c in elt:
                     mapping_dict[c] = elt[0] 
-        return Alphabet( LemmatizerBMP(mapping_dict = mapping_dict ))
+        alphabet = Alphabet( LemmatizerBMP(mapping_dict = mapping_dict ))
+
+        # Use old alphabet library to retrieve char 2 code maps
+        alpha_compat = alphabet_compatible.Alphabet( alphabet_as_list )
+        alphabet._utf2lbl = alpha_compat._utf_2_code
+        alphabet._lbl2utf = alpha_compat._code_2_utf
+        return alphabet
 
     
