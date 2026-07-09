@@ -1224,7 +1224,6 @@ class CharterInferenceDataset( LineInferenceDataset ):
     def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
         """ Update a given line dictionary with prediction data, whatever they are."""
         this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
-        print(f"updating line {self.line_id_to_index[ line_id ]}")
         if keep_gt:
             this_line['gt']=this_line['text']
         this_line.update( kv )
