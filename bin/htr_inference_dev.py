@@ -175,6 +175,7 @@ if __name__ == "__main__":
         for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
             img_path, segmentation_file_path, output_file_path = img_triplet
+            logger.info(f"{img_path} ({segmentation_file_path})" )
             if segmentation_file_path.suffix != '.json' and args.line_height_factor != 1.0:
                 logger.info("-args.line_height_factor={} not applicable to XML segmentation data: ignored.")
             logger.debug( "File path={}".format( img_triplet[0]))
@@ -205,7 +206,7 @@ if __name__ == "__main__":
                 try:
                     # strings, np.ndarray
                     predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
-                    print(predicted_string)
+                    #print(predicted_string)
                     # since batch is 1, flattening batch values
                     line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                     line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }

@@ -1191,6 +1191,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
 
         # extract line images: functions line_images_from_img_* return a pair (<seg_dict>, <sequence of tuples (<line_img_hwc>: np.ndarray, <mask_hwc>: np.ndarray)>)
         line_extraction_func = partial( seglib.line_images_from_img_json_files, factor=line_height_factor)
+        # no line height factor applicable here
         if segmentation_format == sgf.SegFormat.PAGE:
             line_extraction_func = seglib.line_images_from_img_page_xml_files
         elif segmentation_format == sgf.SegFormat.ALTO:
