@@ -193,11 +193,16 @@ if __name__ == "__main__":
                     del line['scores']
                 if 'gt' in line:
                     del line['gt']
-            # deleting top-level 'lines' reference
+            # at this point, top-level line reference point to distinct object - a mapping is necessary
+            line_map = { l['id']:(r_idx,l_idx) for r_idx,r in enumerate(dataset.page_dict['regions']) for l_idx,l in enumerate(r['lines'])}
+            for l in dataset.page_dict['lines']:
+                r_idx, l_idx = line_map[l['id']]
+                dataset.page_dict['regions'][r_idx]['lines'][l_idx]=l
             del dataset.page_dict['lines']
-            dataset.page_dict.update({
-                'created': str(datetime.now()), 'creator': __file__,    
+            dataset.page_dict['metadata'].update({
+                'created': str(datetime.now()), 'creator': __file__,
             })
+
             if args.output_format == 'json':
                 with open( output_file_path, 'w') as htr_outfile:
                     htr_outfile.write(json.dumps( dataset.page_dict, indent=2))
