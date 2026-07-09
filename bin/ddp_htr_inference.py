@@ -58,7 +58,7 @@ p = {
     "htr_suffix": "", 
     #"out_file": FargvChoice(["auto","stdout"], description="Output file: 'auto' writes an output file name from the input file's stem; 'stdout' prints on the standard output."),
     "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
-    "output_data": ('', "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
+    "output_data": ('', "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata', separated with a colon. E.g. 'gt:scores'."),
     "overwrite_existing": (True, "Write over existing output file (default)."),
     "line_padding_style": FargvChoice(['median', 'noise', 'zero', 'none'], description="How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"),
     "line_height_factor": FargvFloat(1.0, description="Factor to be applied to the original line strip height."),
@@ -114,6 +114,8 @@ if __name__ == "__main__":
     if 'padding_style' in model.image_specs:
         padding_style = model.image_specs['padding_style']
 
+    output_data = args.output_data.split(':')
+
     for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
         img_path, segmentation_file_path, output_file_path = img_triplet
@@ -150,33 +152,33 @@ if __name__ == "__main__":
                 # since batch is 1, flattening batch values
                 line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                 line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
-                dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
+                dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in output_data) )
             except Exception as e:
                 logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
                 continue
 
         # 3. Output
-        if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
-            logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
+        if args.output_format in ('json', 'xml') and ('gt' in output_data or 'scores' in output_data):
+            logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(output_data))
 
         # stdout and tsv for extra data
         if args.output_format in ('stdout', 'tsv'):
             header_row = ['Index', 'Id', 'Prediction']
-            if 'gt' in args.output_data:
+            if 'gt' in output_data:
                 header_row.append( 'GT' )
-            if 'scores' in args.output_data:
+            if 'scores' in output_data:
                 header_row.append( 'Scores')
-            if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+            if 'metadata' in output_data and 'metadata' in dataset.page_dict:
                 header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(dataset.page_dict['lines']):
                 logger.debug( line_dict )
                 output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
-                if 'gt' in args.output_data and 'gt' in line_dict:
+                if 'gt' in output_data and 'gt' in line_dict:
                     output_row.append( line_dict['gt'] )
-                if 'scores' in args.output_data and 'scores' in line_dict:
+                if 'scores' in output_data and 'scores' in line_dict:
                     output_row.append( str(line_dict['scores']) )
-                if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                if 'metadata' in output_data and 'metadata' in dataset.page_dict:
                     output_row.extend([ str(elt) for elt in dataset.page_dict['metadata'].values() ])
                 output_rows.append( '\t'.join( output_row ) )
             if args.output_format == 'stdout':
