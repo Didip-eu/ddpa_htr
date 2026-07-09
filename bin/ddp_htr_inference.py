@@ -58,7 +58,7 @@ p = {
     "htr_suffix": "", 
     #"out_file": FargvChoice(["auto","stdout"], description="Output file: 'auto' writes an output file name from the input file's stem; 'stdout' prints on the standard output."),
     "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
-    "output_data": (["pred"], "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
+    "output_data": ('', "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
     "overwrite_existing": (True, "Write over existing output file (default)."),
     "line_padding_style": FargvChoice(['median', 'noise', 'zero', 'none'], description="How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"),
     "line_height_factor": FargvFloat(1.0, description="Factor to be applied to the original line strip height."),

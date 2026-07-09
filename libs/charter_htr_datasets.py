@@ -1044,7 +1044,7 @@ class TrOCRLineDataset( HTRLineDataset ):
         with Image.open( img_path ) as img:
             img_array_hwc = np.array( img ) # img path --> img ndarray
 
-            print(img_array_hwc.dtype)
+            logger.debug(img_array_hwc.dtype)
             # apply mask
             if self.config['padding_style'] is not None:
                 assert 'binary_mask' in sample and sample['binary_mask'].exists()
@@ -1058,7 +1058,7 @@ class TrOCRLineDataset( HTRLineDataset ):
             # img ndarray --> tensor
             # 1. back to PIL
             # 2. TrOCR encoding
-            print(img_array_hwc.dtype)
+            logger.debug(img_array_hwc.dtype)
             sample['img']=self.processor( Image.fromarray( img_array_hwc ), return_tensors='pt').pixel_values.to(self.device)
             logger.debug("Before transform: sample['img'].dtype={}".format( sample['img'].dtype))
             print(sample['transcription'])
@@ -1225,7 +1225,7 @@ class CharterInferenceDataset( LineInferenceDataset ):
     def update_pagedict_line(self, line_id:str, kv: dict, keep_gt=0 ):
         """ Update a given line dictionary with prediction data, whatever they are."""
         this_line = self.page_dict['lines'][ self.line_id_to_index[ line_id ]]
-        if keep_gt:
+        if keep_gt and 'text' in this_line:
             this_line['gt']=this_line['text']
         this_line.update( kv )
 
