@@ -55,6 +55,7 @@ p = {
     "output_dir": ('', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'),
     "img_suffix": ".img.jpg",
     "msk_suffix": ".bool.npy.gz",
+    "output_suffix": '',
     "with_mask": True,
     "htr_suffix": '', 
     "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
@@ -92,6 +93,8 @@ def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple
         segfile_path = Path( re.sub(r'{}$'.format( args.img_suffix), segmentation_suffix, str(img_path) ))
         output_dir = img_path.parent if not args.output_dir else Path(args.output_dir)
         out_file_path = f'{img_stem}.{args.appname}.pred{args.htr_suffix}.{args.output_format}'
+        if args.output_suffix:
+            out_file_path = f'{img_stem}{args.output_suffix}'
         path_triplets.append( ( img_path, segfile_path, output_dir.joinpath( out_file_path )))
     #return path_triplets
     return sorted( path_triplets, key=lambda x: str(x))
