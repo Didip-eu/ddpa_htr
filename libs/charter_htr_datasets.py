@@ -729,7 +729,7 @@ class PageDataset(VisionDataset):
         # Folder creation, when needed
         if from_page_folder != '' and not self.page_work_folder_path.exists():
            raise FileNotFoundError(f"Work folder {self.page_work_folder_path} does not exist. Abort.")
-       elif not from_page_files:
+        elif not from_page_files:
             self.root_path.mkdir( parents=True, exist_ok=True )
             self.page_work_folder_path.mkdir( parents=True, exist_ok=True)
 
@@ -804,6 +804,7 @@ class PageDataset(VisionDataset):
 
             lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
             if not lbl_path.exists():
+                logger.warning(f"No label {lbl_path.name} for image {ip.name}")
                 continue
 
             # check completion flag
@@ -812,53 +813,7 @@ class PageDataset(VisionDataset):
                 continue
             complete_touchfile_path.unlink(missing_ok=True)
 
-            page_dict = {}
-            segformat = sgf.get_format( lbl_path )
-
-            if segformat == sgf.SegFormat.PAGE:
-                page_dict = sgf.segmentation_dict_from_page_xml( lbl_path, get_text=True ) 
-            elif segformat == sgf.SegFormat.JSON:
-                with open( lbl_path ) as jsonf:
-                    page_dict = json.load( jsonf )
-            else:
-                logger.info("Unknown segmentation label format: skipping item")
-                continue
-
-            regions = {}
-            for reg in page_dict['regions']:
-                # - crop and name image
-                reg_dict = {
-                        "metadata": {
-                            "created": datetime.now().isoformat("T", "seconds"),
-                        "   creator": "{}.PageDataset.build_page_region_data".format(str(Path(__file__).name)),
-                        }
-                }
-                img_prefix = ip.with_suffix('')
-                reg_dict['image_filename'] = re.sub(r'{}'.format(img_suffix), f"-{reg['id']}.png", str(ip))
-                reg_dict['bbox_ltrb'] = [ *reg['coords'][0], *reg['coords'][2] ]
-                reg_dict['image_width'] = reg_dict['bbox_ltrb'][2]-reg_dict['bbox_ltrb'][0]
-                reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
-                reg_dict['lines']=[]
-                regions[ reg['id'] ]=reg_dict
-            for line in sgf.line_dicts_from_segmentation_dict( page_dict ):
-                parent_reg = regions[ line['parents'][0] ]
-                polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
-                # shifting crop coordinates
-                line['coords'] = (polyg_array - parent_reg['bbox_ltrb'][:2] ).tolist()
-                line['baseline'] = (baseline_array - parent_reg['bbox_ltrb'][:2] ).tolist()
-                del line['parents']
-                parent_reg['lines'].append( line )
-            for r in regions.values():
-                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
-                if not r['lines']: 
-                    continue
-                new_img = img.crop( r['bbox_ltrb'] )
-                new_img.save( r['image_filename'])
-                with open( new_lbl_path, 'w') as jsonf:
-                    del r['bbox_ltrb']
-                    jsonf.write( json.dumps(r, indent=4) )
-
-                data.append( (Path(r['image_filename']), new_lbl_path) )
+            data.append( (ip, lbl_path) )
             open(complete_touchfile_path, 'w')
         return data
 
@@ -897,14 +852,16 @@ class PageDataset(VisionDataset):
         img_whc = Image.open(img_path, 'r')
         
         page_dict = {}
-        if (annotation_path.name)[-4:]=='.xml':
-            page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) 
-        elif (annotation_path.name)[-5:]=='.json':
+        input_format = sgf.get_format( annotation_path )
+
+        if input_format == sgf.SegFormat.PAGE:
+            page_dict = sgf.segmentation_dict_from_page_xml( annotation_path, get_text=True ) 
+        elif input_format == sgf.SegFormat.JSON:
             with open( annotation_path ) as jsonf:
                 page_dict = json.load( jsonf )
         masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict )) 
         bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
-        texts = [ l['text'] for l in page_dict['lines'] ]
+        texts = [ l['text'] for l in sgf.flatten_segmentation_dict(page_dict)['lines'] ]
 
         return img_whc, {'masks': masks_nhw, 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
 
@@ -936,9 +893,9 @@ class PageDataset(VisionDataset):
         label['boxes'], label['masks'], label['texts'] = boxes[keep], masks[keep], [ t for (t,k) in zip(label['texts'], keep) if k ]
         return (img_chw.cpu(), label)
 
-    def dump_lines_regionwide( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
         """
-        From the region image and metadata, save line samples in the line work folder; each line yields:
+        From the page image and metadata, save line samples in the line work folder; each line yields:
         - line crop (as PNG, by default)
         - polygon mask (as tensor)
         - transcription text (text file)
@@ -972,11 +929,11 @@ class PageDataset(VisionDataset):
             with open(sentinel_path, 'r') as sf:
                 start = int(sf.read())
         # each region is loaded (and augmented) here
-        for region_idx in tqdm( range(len(self))):
-            if region_idx < start:
+        for page_idx in tqdm( range(len(self))):
+            if page_idx < start:
                 continue
-            img_chw, annotation = self[region_idx]
-            img_prefix = re.sub(r'{}'.format( self.config['reg_img_suffix']), '', Path(annotation['path']).name)
+            img_chw, annotation = self[page_idx]
+            img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', Path(annotation['path']).name)
             for line_idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
                 line_tensor = (img_chw.cpu().numpy())[:,t:b+1, l:r+1]
