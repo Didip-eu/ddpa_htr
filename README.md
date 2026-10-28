@@ -94,8 +94,7 @@ We can compile lines out of an explicit list of charter image files through the 
                 Archive root folder:	-
                 Page_work folder:	/home/nicolas/tmp/data/transcriptions_johannes/aligned
                 Data points:	100
-   ```  
-    
+   ``` 
 
    + Option 2: region-wide extraction with `PageRegionDataset`:
 
