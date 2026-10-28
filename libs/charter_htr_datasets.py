@@ -56,544 +56,6 @@ class DataException( Exception ):
     """"""
     pass
 
-class PageRegionDataset(VisionDataset):
-    """A generic dataset class for charters, equipped with page-wide functionalities:
-
-    * region and line/transcription extraction methods (from original page images and XML metadata)
-    * page/region augmentation functionalities
-
-    File-management logic relies on several locations:
-
-    - a **root** folder where archives are saved and decompressed (set at initialization time, with a 
-      reasonable default in the current location); past this step, all write operations happen in 
-      the work folders described below.
-    - a **page work folder**
-      + defaults to the root directory of the tarball, in last resort
-      + OR: implied from <from_page_files> or <from_region_files> option, when loading data from existing
-        pages or regions
-      + OR: implied from <from_page_folder> option, when loading data from existing page folder
-      + OR: specified/created through the <page_work_folder> parameter - archive is checked;
-        after extraction, page files are copied in the work folder
-    - [optional] a cache for augmented pages? 
-    - a **line work folder** where line samples extracted from the page are to be saved: it is a parameter
-      to the line serialization routine.
-
-    Remarks:
-
-    - Depending on the options passed at initialization time, the page work folder may be under <root> or not.
-    - So far, we assume that there is a one-to-one relationship between PageXML files and an image. In practice,
-      this is not always true for all external datasets, but it is a reasonable assumption for a previous curation
-      step takes care of this.
-
-    TODO:
-    - ability to extract line polygons with scaled height (JSON-only)? The segmentation app 'ddpa_lines_ng' already
-      provides this, either as a library function or a stand-alone script; adding this feature would introduce 
-      dependencies that better to the segmentation tools.
-    - ability to cache augmented pages (Tormentor augmentations are _very_ costly) as tensors? Since the pages/regions
-      themselves are not used for training, this is not very useful; the augmentation is used only once, in order
-      to generate the lines.
-
-    """
-
-    def __init__( self,
-                root: str='./data',
-                resource_file: str = '',
-                page_work_folder: str = '',
-                line_work_folder: str = './dataset/htr_line_dataset', 
-                from_page_folder: str = '',
-                from_page_files: list[Path]=[],
-                from_region_files: list[Path]=[],
-                transform: Optional[Callable] = None,
-                augmentation_class: Callable= None,
-                extract_pages: bool = False,
-                dry_run: bool = False,
-                limit: int = 0,
-                resume_task: bool = False,
-                lbl_suffix: str = '.xml',
-                img_suffix: str = '.jpg',
-                device: str = 'cpu',
-                ) -> None:
-        """Initialize a dataset instance.
-
-        Args:
-            root (str): Where the archive is to be downloaded and the subfolder containing
-                original files (pageXML documents and page images) is to be created. 
-                Default: subfolder `data' in this project's directory.
-            resource_file (str): a JSON file storing URL and other info needed for downloading and 
-                extracting tarballs.
-            page_work_folder (str): Where page images and XML annotations are to be extracted.
-            from_page_folder (str): if set, the samples have to be extracted from the
-                raw page data contained in the given directory. GT metadata are either
-                JSON files or PageXML.
-            from page_files (list[Path]): if set, supersedes previous options; all files must
-                be contained in the same folder.
-            from region_files (list[Path]): if set, supersedes previous options; all files must
-                be contained in the same folder.
-            transform (Callable): A v2.transform to apply to the PIL image at loading time.
-            augmentation_class (Callable[tuple[Tensor,dict]]): any transform that takes a tensor as an input
-                and cannot be safely composed as a v2.transform. Eg. Tormentor augmentation
-            extract_pages (bool): if True, extract the archive's content into the base
-                folder no matter what; otherwise (default), check first for a file tree 
-                with matching name and checksum.
-            dry_run (bool): if True (default), compute all paths (root, page_work_folder, line_work_folder)
-                but does not write anything.
-            limit (int): stop the compilation after <limit> charters, if <limit> > 0. Default: 0.
-            resume_task (bool): If True, the work folder is not purged. Only those page
-                items (lines, regions) that not already in the work folder are extracted.
-                (Partially implemented: works only for lines.)
-            lbl_suffix (str): '.xml' for PageXML (default) or valid, unique suffix of JSON file.
-                Ex. '.htr.gt.json'
-            img_suffix (str): image suffix. Default: '.jpg'
-            device (str): computing device ('cpu', 'gpu', 'cuda:0', ...)
-        """
-        super().__init__( root )
-        self.dataset_resource = None
-        if resource_file:
-            if not Path( resource_file ).exists():
-                raise FileNotFoundError("Resource file {} does not exist. Exit.")
-            with open( resource_file ) as resrc_if:
-                self.dataset_resource = json.load( resrc_if )
-        # A dataset resource dictionary needed, unless we build from existing files
-        if self.dataset_resource is None and not (from_page_folder or from_page_files or from_region_files):
-            raise FileNotFoundError("In order to create a dataset instance, you need either:" +
-                                    "\n\t + a valid JSON resource file (-resource_file option)"
-                                    "\n\t + one of the following options: -from_page_folder, -from_page_files, -from_region_files")
-
-        self._transforms = v2.Compose([
-                            v2.ToImage(),
-                            v2.ToDtype( torch.float32, scale=True),])
-        if transform is not None:
-            self._transforms = v2.Compose([ self._transforms, tranform] )
-        self.augmentation_class = augmentation_class
-        self.device = device
-
-        self._data = []
-
-        self.root_path = Path(root) 
-        self.archive_root_folder_path = self.root_path.joinpath( self.dataset_resource['tarball_root_name'] ) if  self.dataset_resource else '-'
-        self.page_work_folder_path = self.archive_root_folder_path
-
-        from_page_files = list(from_page_files)
-        from_region_files = list(from_region_files)
-
-        if from_region_files or from_page_files:
-            dataset_dirs = set( [ img.parent for img in (from_region_files if from_region_files else from_page_files) ] )
-            if len(dataset_dirs) > 1:
-                raise Exception(f'Source files should belong to the same directory (found {len(dataset_dirs)} parent folders: {[str(f) for f in dataset_dirs]}.')
-            self.page_work_folder_path = list(dataset_dirs)[0]
-        elif from_page_folder:
-            self.page_work_folder_path = Path(from_page_folder) 
-        elif page_work_folder:
-            self.page_work_folder_path = Path(page_work_folder)
-
-        logger.debug(self)
-        if dry_run:
-            logger.info('Dry run: exiting.')
-            return
-
-        # Folder creation, when needed
-        if from_page_folder != '' and not self.page_work_folder_path.exists():
-           raise FileNotFoundError(f"Work folder {self.page_work_folder_path} does not exist. Abort.")
-        elif not (from_page_files or from_region_files):
-            self.root_path.mkdir( parents=True, exist_ok=True )
-            self.page_work_folder_path.mkdir( parents=True, exist_ok=True)
-
-        image_paths = []
-        # Assume pages are already there = ignore archive
-        if from_region_files:
-            image_paths = sorted( from_region_files )
-        elif from_page_files:
-            image_paths = sorted( from_page_files )
-        elif from_page_folder:
-            image_paths = sorted( self.page_work_folder_path.glob('*{}'.format(img_suffix)))
-        else:
-            self.download_and_extract( self.root_path, self.dataset_resource, extract=extract_pages )
-            # copy files from archive folder to page_work_folder
-            if self.archive_root_folder_path != self.page_work_folder_path:
-                logger.debug("Copying files...")
-                self._purge( self.page_work_folder_path )
-                for page_img_path in self.archive_root_folder_path.glob('*{}'.format( img_suffix )):
-                    lbl_img_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(page_img_path)))
-                    if page_lbl_path.exists():
-                        shutil.copyfile( page_img_path, self.page_work_folder_path.joinpath( page_img_path.name) )
-                        logger.debug("Copying {} to work folder {}...".format( page_img_path, self.page_work_folder_path))
-                        shutil.copyfile( page_lbl_path, self.page_work_folder_path.joinpath( page_lbl_path.name ) )
-                        logger.debug("Copying {} to work folder {}...".format( page_lbl_path, self.page_work_folder_path))
-
-            image_paths = sorted( self.page_work_folder_path.glob('*{}'.format(img_suffix))) 
-
-        if not image_paths:
-            raise FileNotFoundError("Could not find a dataset source!")
-
-        if from_region_files:
-            self._data = [ (ip, Path( re.sub(r'\.png$', '.json', str(ip)))) for ip in image_paths ]
-        else:
-            self._data = self.build_page_region_data( image_paths, img_suffix, lbl_suffix, limit=limit, overwrite_existing=not resume_task )
-
-        self.config = {
-                'resume_task': resume_task,
-                'lbl_suffix': lbl_suffix,
-                'img_suffix': img_suffix,
-                'reg_img_suffix': '.png',
-        }
-
-        logger.info(self)
-
-
-    def build_page_region_data( self, image_paths, img_suffix, lbl_suffix, limit=0, overwrite_existing=1):
-        """
-        Build and save data samples (img, label), with a 1-to-many relationship between original image 
-        and samples:
-        + ensure that every image has its annotation counterpart.
-        + a sample is a page region and a corresponding line dictionary (stored as json)
-
-        Args:
-            image_paths (list[Path]): a list of page image files.
-            img_suffix (str): suffix of page image file.
-            lbl_suffix (str): suffix of page annotation file.
-            limit (int): stop the compilation after <limit> charters.
-            overwrite_existing (bool): write over existing files.
-
-        Return:
-            list[tuple(Path,Path)]: a list of pairs (<region_img_file_path.png>, <annotation_file_path.json>)
-        """
-        warnings.simplefilter('error', Image.DecompressionBombWarning)
-        data = []
-        logger.info("Building region data items (this might take a while).")
-
-        for idx, ip in enumerate( tqdm( image_paths )):
-
-            if limit and idx >= limit:
-                break
-            img = None
-            try:
-                img = Image.open(ip)
-            except Image.DecompressionBombWarning as dcb:
-                logger.error( f'{dcb}: ignoring page {ip}' )
-                continue
-
-            lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
-            if not lbl_path.exists():
-                continue
-
-            # check completion flag
-            complete_touchfile_path = Path(re.sub(r'{}$'.format( img_suffix ), '.complete', str(ip) ))
-            if not overwrite_existing and complete_touchfile_path.exists():
-                continue
-            complete_touchfile_path.unlink(missing_ok=True)
-
-            page_dict = {}
-            segformat = sgf.get_format( lbl_path )
-
-            if segformat == sgf.SegFormat.PAGE:
-                page_dict = sgf.segmentation_dict_from_page_xml( lbl_path, get_text=True ) 
-            elif segformat == sgf.SegFormat.JSON:
-                with open( lbl_path ) as jsonf:
-                    page_dict = json.load( jsonf )
-            else:
-                logger.info("Unknown segmentation label format: skipping item")
-                continue
-
-            regions = {}
-            for reg in page_dict['regions']:
-                # - crop and name image
-                reg_dict = {
-                        "metadata": {
-                            "created": datetime.now().isoformat("T", "seconds"),
-                        "   creator": "{}.PageDataset.build_page_region_data".format(str(Path(__file__).name)),
-                        }
-                }
-                img_prefix = ip.with_suffix('')
-                reg_dict['image_filename'] = re.sub(r'{}'.format(img_suffix), f"-{reg['id']}.png", str(ip))
-                reg_dict['bbox_ltrb'] = [ *reg['coords'][0], *reg['coords'][2] ]
-                reg_dict['image_width'] = reg_dict['bbox_ltrb'][2]-reg_dict['bbox_ltrb'][0]
-                reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
-                reg_dict['lines']=[]
-                regions[ reg['id'] ]=reg_dict
-            for line in sgf.line_dicts_from_segmentation_dict( page_dict ):
-                parent_reg = regions[ line['parents'][0] ]
-                polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
-                # shifting crop coordinates
-                line['coords'] = (polyg_array - parent_reg['bbox_ltrb'][:2] ).tolist()
-                line['baseline'] = (baseline_array - parent_reg['bbox_ltrb'][:2] ).tolist()
-                del line['parents']
-                parent_reg['lines'].append( line )
-            for r in regions.values():
-                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
-                if not r['lines']: 
-                    continue
-                new_img = img.crop( r['bbox_ltrb'] )
-                new_img.save( r['image_filename'])
-                with open( new_lbl_path, 'w') as jsonf:
-                    del r['bbox_ltrb']
-                    jsonf.write( json.dumps(r, indent=4) )
-
-                data.append( (Path(r['image_filename']), new_lbl_path) )
-            open(complete_touchfile_path, 'w')
-        return data
-
-    def __getitem__(self, index) -> dict[str, Union[Tensor, int, str]]:
-        """This method returns a page sample.
-
-        Args:
-            index (int): item index.
-
-        Returns:
-            tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
-        """
-        img_path, label_path = self._data[index]
-        img_whc, label = self._load_image_and_label(img_path, label_path)
-
-        if self._transforms:
-            img_chw, target = self._transforms( img_whc, label )
-        if self.augmentation_class:
-            img_chw, label = self.augment_with_bboxes( (img_chw, label), self.augmentation_class(), device=self.device)
-        return (img_chw, label)
-
-    def _load_image_and_label(self, img_path:Path, annotation_path:Path, augmentation:Callable=None):
-        """
-        Load an image and its target (bounding boxes and masks). Note that at this point, the
-        data samples are made of regions crops and corresponding JSON labels. The XML switch
-        has been kept anyway, for easy reversal to page-wide processing.
-
-        Parameters:
-            img_path (Path): image path
-            annotation_path (Path): annotation path
-            augmentation (Callable): suitable augmentation function
-
-        Returns:
-            tuple[Image,dict]: A tuple containing the image and a dictionary with 'masks', 'boxes' and 'labels' keys.
-        """
-        img_whc = Image.open(img_path, 'r')
-        
-        page_dict = {}
-        if (annotation_path.name)[-4:]=='.xml':
-            page_dict = seglib.segmentation_dict_from_xml( annotation_path, get_text=True ) 
-        elif (annotation_path.name)[-5:]=='.json':
-            with open( annotation_path ) as jsonf:
-                page_dict = json.load( jsonf )
-        masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict )) 
-        bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
-        texts = [ l['text'] for l in page_dict['lines'] ]
-
-        return img_whc, {'masks': masks_nhw, 'boxes': bboxes_n4, 'path': img_path, 'orig_size': img_whc.size, 'texts': texts}
-
-
-    @staticmethod
-    def augment_with_bboxes( sample, augmentation: Callable, device='cpu' ):
-        """  Augment a sample (img + masks), and add bounding boxes to the target.
-        (For Tormentor only.)
-
-        Args:
-            sample (tuple[Tensor,dict]): tuple with image (as tensor) and label dictionary.
-            augmentation (Callable): a Tormentor-style augmentation function.
-
-        Returns:
-            Tensor: the transformed image.
-            dict: the labels, with the appropriate changes on the masks and bounding boxes.
-        """
-        img, label = sample
-        img_chw = sample[0].to(device)
-        img_chw = augmentation(img_chw)
-        masks, texts = label['masks'].to(device), label['texts']
-        masks = torch.stack( [ augmentation(m, is_mask=True) for m in label['masks'] ], axis=0).to(device) 
-
-        # construct boxes, filter out invalid ones
-        boxes=BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks), format='xyxy', canvas_size=img_chw.shape)
-        keep=(boxes[:,0]-boxes[:,2])*(boxes[:,1]-boxes[:,3]) != 0
-        
-        
-        label['boxes'], label['masks'], label['texts'] = boxes[keep], masks[keep], [ t for (t,k) in zip(label['texts'], keep) if k ]
-        return (img_chw.cpu(), label)
-
-    def dump_lines_regionwide( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
-        """
-        From the region image and metadata, save line samples in the line work folder; each line yields:
-        - line crop (as PNG, by default)
-        - polygon mask (as tensor)
-        - transcription text (text file)
-        
-        Args:
-            line_work_folder (Union[str,Path]): where to serialize the lines.
-            overwrite_existing (bool): write over existing line files.
-            line_as_tensor (bool): save line crops as tensors (compressed).
-            resume (bool): resume a dump task---work folder is checked for existing, completed pages.
-            iteration (int): integer suffix to be added to sample filename (useful when generating 
-                randomly augmented samples, with multiple calls to the functions on the same region).
-            dry_run (bool): Try and extract the line, but do write anything on disk (default: False).
-        """
-        line_work_folder_path = Path( line_work_folder )
-        dummy_line_count = 0
-        if not dry_run:
-            line_work_folder_path.mkdir( parents=True, exist_ok=True)
-        else:
-            logger.info("Line extraction (dummy run): line_work_folder_path={line_work_folder_path}")
-
-        # when this routine is called only once per region
-        if iteration==-1:
-            if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
-                logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
-                return
-            if not (resume or dry_run):
-                self._purge( line_work_folder_path )
-        start = 0
-        sentinel_path = line_work_folder_path.joinpath('.sentinel')
-        if sentinel_path.exists():
-            with open(sentinel_path, 'r') as sf:
-                start = int(sf.read())
-        # each region is loaded (and augmented) here
-        for region_idx in tqdm( range(len(self))):
-            if region_idx < start:
-                continue
-            img_chw, annotation = self[region_idx]
-            img_prefix = re.sub(r'{}'.format( self.config['reg_img_suffix']), '', Path(annotation['path']).name)
-            for line_idx, box in enumerate( annotation['boxes'] ):
-                l,t,r,b = [ int(elt.item()) for elt in box ]
-                line_tensor = (img_chw.cpu().numpy())[:,t:b+1, l:r+1]
-                # compressed arrays << compressed tensors
-                mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).cpu().numpy()
-                line_text = annotation['texts'][line_idx]
-                outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
-                if dry_run:
-                    logger.info(f"tensor: {line_tensor.shape}, mask: {mask_array.shape}, text: {line_text[:10]}..., outfile_prefix: {outfile_prefix}")
-                    dummy_line_count += 1
-                    continue
-                if iteration >= 0:
-                    outfile_prefix = f"{outfile_prefix}-i{iteration}"
-                if not line_as_tensor:
-                    line_array = (line_tensor.transpose(1,2,0)*255).astype('uint8')
-                    ski.io.imsave( f'{outfile_prefix}.png', line_array )
-                else:
-                    with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
-                        torch.save( line_tensor, zf )
-                with gzip.GzipFile( f'{outfile_prefix}.bool.npy.gz', 'w') as zf:
-                    np.save( zf, mask_array )
-                with open( f'{outfile_prefix}.gt.txt', 'w') as of:
-                    of.write( line_text )
-            if dry_run:
-                continue
-            # indicates that this region dump is complete (for resuming task)
-            with open( sentinel_path, 'w') as sf:
-                sf.write(f'{page_idx}')
-        
-        if not dry_run and sentinel_path.exists():
-            sentinel_path.unlink()
-
-        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png'))) if not dry_run else dummy_line_count))
-
-
-    def __len__(self) -> int:
-        """Number of samples in the dataset.
-
-        Returns:
-            int: number of pages
-        """
-        return len(self._data)
-
-    def statistics(self) -> str:
-        """Compute basic stats about sample sets.
-
-        + avg, median, min, max on image heights and widths
-
-
-        Returns:
-            str: a string.
-        """
-        heights, widths, page_gt_lengths, line_gt_lengths = [], [], [], []
-        for img, lbl in tqdm( self._data ):
-            page_dict = {}
-            if (lbl.name)[-4:]=='.xml':
-                page_dict = seglib.segmentation_dict_from_xml( lbl, get_text=True ) 
-            elif (lbl.name)[-5:]=='.json':
-                with open( lbl ) as jsonf:
-                    page_dict = json.load( jsonf )
-            widths.append( int(page_dict['image_width'] ))
-            heights.append( int(page_dict['image_height'] ))
-            page_gt_lengths.append( np.sum( [ len(line['text']) for line in page_dict['lines'] ]))
-            line_gt_lengths.extend( [ len(line['text']) for line in page_dict['lines'] ])
-
-        height_stats = [ int(s) for s in(np.mean( heights ), np.median(heights), np.min(heights), np.max(heights))]
-        width_stats = [int(s) for s in (np.mean( widths ), np.median(widths), np.min(widths), np.max(widths))]
-        page_gt_length_stats = [int(s) for s in (np.mean( page_gt_lengths ), np.median(page_gt_lengths), np.min(page_gt_lengths), np.max(page_gt_lengths))]
-        line_gt_length_stats = [int(s) for s in (np.mean( line_gt_lengths ), np.median(line_gt_lengths), np.min(line_gt_lengths), np.max(line_gt_lengths))]
-
-        stat_list = ('Mean', 'Median', 'Min', 'Max')
-        row_format = "{:>20}"+ ("{:>10}" * len(stat_list))
-        return '\n'.join([
-            row_format.format("", *stat_list),
-            row_format.format("Img height", *height_stats),
-            row_format.format("Img width", *width_stats),
-            row_format.format("GT length (page)", *page_gt_length_stats),
-            row_format.format("GT length (line)", *line_gt_length_stats),
-        ])
-
-
-    def _purge(self, folder: str) -> int:
-        """Empty the line image subfolder: all line images and transcriptions are
-        deleted, as well as the TSV file.
-
-        Args:
-            folder (str): Name of the subfolder to _purge (relative the caller's pwd
-
-        Returns:
-            int: number of deleted files.
-        """
-        cnt = 0
-        for item in [ f for f in Path( folder ).iterdir() if not f.is_dir()]:
-            item.unlink()
-            cnt += 1
-        return cnt
-
-    def __str__(self) -> str:
-        return f"""
-                Root path:\t{self.root_path}
-                Archive path:\t{self.root_path.joinpath( self.dataset_resource['tarball_filename']) if self.dataset_resource else '-'}
-                Archive root folder:\t{self.archive_root_folder_path}
-                Page_work folder:\t{self.page_work_folder_path}
-                Data points:\t{len(self._data)}
-                """
-
-
-    def download_and_extract( self, root_path: Path, fl_meta: dict, extract=False) -> None:
-        """Download the archive and extract it. If a valid archive already exists in the root location,
-        extract only.
-
-        Args:
-            root_path (Path): where to save and extract the archive
-            fl_meta (dict): a dictionary with file meta-info (keys: url, filename, md5, full-md5, origin, desc)
-            extract (bool): If False (default), skip archive extraction step.
-
-        Raises:
-            OSError: the base folder does not exist.
-        """
-        output_file_path = None
-        # downloadable archive
-        if 'url' in fl_meta:
-            output_file_path = root_path.joinpath( fl_meta['tarball_filename'])
-
-            if 'md5' not in fl_meta or not du.is_valid_archive(output_file_path, fl_meta['md5']):
-                logger.info("Downloading archive...")
-                du.resumable_download(fl_meta['url'], root_path, fl_meta['tarball_filename'], google=(fl_meta['origin']=='google'))
-            else:
-                logger.info("Found valid archive {} (MD5: {})".format( output_file_path, self.dataset_resource['md5']))
-        elif 'file' in fl_meta:
-            output_file_path = Path(fl_meta['file'])
-
-        archive_root_folder_path = root_path.joinpath( self.dataset_resource['tarball_root_name'] ) 
-        # skip if archive already extracted (unless explicit override)
-        if not extract: # and du.check_extracted( raw_data_folder_path.joinpath( self.dataset_resource['tarball_root_name'] ) , fl_meta['full-md5'] ):
-            logger.info("Skipping the extraction stage ('extract' option=F). You should check whether {} contains a valid archive tree.".format( archive_root_folder_path ))
-            return
-        if output_file_path.suffix == '.tgz' or output_file_path.suffixes == [ '.tar', '.gz' ] :
-            with tarfile.open(output_file_path, 'r:gz') as archive:
-                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( root_path )
-        # task description
-        elif output_file_path.suffix == '.zip':
-            with zipfile.ZipFile(output_file_path, 'r' ) as archive:
-                logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
-                archive.extractall( root_path )
-
 
 class PageDataset(VisionDataset):
     """A generic dataset class for charters, equipped with page-wide functionalities:
@@ -608,7 +70,7 @@ class PageDataset(VisionDataset):
       the work folders described below.
     - a **page work folder**
       + defaults to the root directory of the tarball, in last resort
-      + OR: implied from <from_page_files> , when loading data from existing
+      + OR: implied from <from_page_files>, when loading data from existing
         pages
       + OR: implied from <from_page_folder> option, when loading data from existing page folder
       + OR: specified/created through the <page_work_folder> parameter - archive is checked;
@@ -686,7 +148,7 @@ class PageDataset(VisionDataset):
         self.dataset_resource = None
         if resource_file:
             if not Path( resource_file ).exists():
-                raise FileNotFoundError("Resource file {} does not exist. Exit.")
+                raise FileNotFoundError(f"Resource file {resource_file} does not exist. Abort.")
             with open( resource_file ) as resrc_if:
                 self.dataset_resource = json.load( resrc_if )
         # A dataset resource dictionary needed, unless we build from existing files
@@ -789,7 +251,7 @@ class PageDataset(VisionDataset):
         """
         warnings.simplefilter('error', Image.DecompressionBombWarning)
         data = []
-        logger.info("Building region data items (this might take a while).")
+        logger.info("Building page-wide data items (this might take a while).")
 
         for idx, ip in enumerate( tqdm( image_paths )):
 
@@ -852,13 +314,15 @@ class PageDataset(VisionDataset):
         img_whc = Image.open(img_path, 'r')
         
         page_dict = {}
-        input_format = sgf.get_format( annotation_path )
+        input_format = sgf.get_format( annotation_path, strict=False )
 
         if input_format == sgf.SegFormat.PAGE:
             page_dict = sgf.segmentation_dict_from_page_xml( annotation_path, get_text=True ) 
         elif input_format == sgf.SegFormat.JSON:
             with open( annotation_path ) as jsonf:
                 page_dict = json.load( jsonf )
+        elif input_format == sgf.SegFormat.Unknown:
+                raise ValueError("Unknown metadata format.")
         masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict )) 
         bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
         texts = [ l['text'] for l in sgf.flatten_segmentation_dict(page_dict)['lines'] ]
@@ -1081,6 +545,188 @@ class PageDataset(VisionDataset):
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
                 archive.extractall( root_path )
 
+
+class PageRegionDataset(PageDataset):
+    """A dataset subclass for charters, equipped with page-to-region functionalities:
+
+    + Same source page-wide source files
+    + Data items are region images and region-wide labels
+    + Augmentations are applied-region wide
+    """
+
+    def __init__( self, **kwarg) -> None:
+        """Initialize a dataset instance.
+        """
+        super().__init__( **kwarg )
+
+
+    def build_page_data( self, image_paths, img_suffix, lbl_suffix, limit=0, overwrite_existing=1):
+        """
+        Build and save data samples (img, label), with a 1-to-many relationship between original image 
+        and samples:
+        + ensure that every image has its annotation counterpart.
+        + a sample is a page region and a corresponding line dictionary (stored as json)
+
+        Args:
+            image_paths (list[Path]): a list of page image files.
+            img_suffix (str): suffix of page image file.
+            lbl_suffix (str): suffix of page annotation file.
+            limit (int): stop the compilation after <limit> charters.
+            overwrite_existing (bool): write over existing files.
+
+        Return:
+            list[tuple(Path,Path)]: a list of pairs (<region_img_file_path.png>, <annotation_file_path.json>)
+        """
+        warnings.simplefilter('error', Image.DecompressionBombWarning)
+        data = []
+        logger.info("Building region data items (this might take a while).")
+
+        for idx, ip in enumerate( tqdm( image_paths )):
+
+            if limit and idx >= limit:
+                break
+            img = None
+            try:
+                img = Image.open(ip)
+            except Image.DecompressionBombWarning as dcb:
+                logger.error( f'{dcb}: ignoring page {ip}' )
+                continue
+
+            lbl_path = Path(re.sub(r'{}$'.format( img_suffix ), lbl_suffix, str(ip) ))
+            if not lbl_path.exists():
+                continue
+
+            # check completion flag
+            complete_touchfile_path = Path(re.sub(r'{}$'.format( img_suffix ), '.complete', str(ip) ))
+            if not overwrite_existing and complete_touchfile_path.exists():
+                continue
+            complete_touchfile_path.unlink(missing_ok=True)
+
+            page_dict = {}
+            segformat = sgf.get_format( lbl_path )
+
+            if segformat == sgf.SegFormat.PAGE:
+                page_dict = sgf.segmentation_dict_from_page_xml( lbl_path, get_text=True ) 
+            elif segformat == sgf.SegFormat.JSON:
+                with open( lbl_path ) as jsonf:
+                    page_dict = json.load( jsonf )
+            else:
+                logger.info("Unknown segmentation label format: skipping item")
+                continue
+
+            regions = {}
+            for reg in page_dict['regions']:
+                # - crop and name image
+                reg_dict = {
+                        "metadata": {
+                            "created": datetime.now().isoformat("T", "seconds"),
+                        "   creator": "{}.PageDataset.build_page_region_data".format(str(Path(__file__).name)),
+                        }
+                }
+                img_prefix = ip.with_suffix('')
+                reg_dict['image_filename'] = re.sub(r'{}'.format(img_suffix), f"-{reg['id']}.png", str(ip))
+                reg_dict['bbox_ltrb'] = [ *reg['coords'][0], *reg['coords'][2] ]
+                reg_dict['image_width'] = reg_dict['bbox_ltrb'][2]-reg_dict['bbox_ltrb'][0]
+                reg_dict['image_height'] = reg_dict['bbox_ltrb'][3]-reg_dict['bbox_ltrb'][1] 
+                reg_dict['lines']=[]
+                regions[ reg['id'] ]=reg_dict
+            for line in sgf.line_dicts_from_segmentation_dict( page_dict ):
+                parent_reg = regions[ line['parents'][0] ]
+                polyg_array, baseline_array = np.array( line['coords'] ), np.array( line['baseline'] )
+                # shifting crop coordinates
+                line['coords'] = (polyg_array - parent_reg['bbox_ltrb'][:2] ).tolist()
+                line['baseline'] = (baseline_array - parent_reg['bbox_ltrb'][:2] ).tolist()
+                del line['parents']
+                parent_reg['lines'].append( line )
+            for r in regions.values():
+                new_lbl_path = Path(r['image_filename']).with_suffix('.json')
+                if not r['lines']: 
+                    continue
+                new_img = img.crop( r['bbox_ltrb'] )
+                new_img.save( r['image_filename'])
+                with open( new_lbl_path, 'w') as jsonf:
+                    del r['bbox_ltrb']
+                    jsonf.write( json.dumps(r, indent=4) )
+
+                data.append( (Path(r['image_filename']), new_lbl_path) )
+            open(complete_touchfile_path, 'w')
+        return data
+
+
+    def dump_lines( self, line_work_folder: Union[str,Path], overwrite_existing=True, line_as_tensor=False, resume=False, iteration=-1, dry_run=False ):
+        """
+        From the region image and metadata, save line samples in the line work folder; each line yields:
+        - line crop (as PNG, by default)
+        - polygon mask (as tensor)
+        - transcription text (text file)
+        
+        Args:
+            line_work_folder (Union[str,Path]): where to serialize the lines.
+            overwrite_existing (bool): write over existing line files.
+            line_as_tensor (bool): save line crops as tensors (compressed).
+            resume (bool): resume a dump task---work folder is checked for existing, completed pages.
+            iteration (int): integer suffix to be added to sample filename (useful when generating 
+                randomly augmented samples, with multiple calls to the functions on the same region).
+            dry_run (bool): Try and extract the line, but do write anything on disk (default: False).
+        """
+        line_work_folder_path = Path( line_work_folder )
+        dummy_line_count = 0
+        if not dry_run:
+            line_work_folder_path.mkdir( parents=True, exist_ok=True)
+        else:
+            logger.info("Line extraction (dummy run): line_work_folder_path={line_work_folder_path}")
+
+        # when this routine is called only once per region
+        if iteration==-1:
+            if not overwrite_existing and len(list(line_work_folder_path.glob('*'))):
+                logger.info("Line work folder {} is not empty: check or set 'overwrite_existing=True")
+                return
+            if not (resume or dry_run):
+                self._purge( line_work_folder_path )
+        start = 0
+        sentinel_path = line_work_folder_path.joinpath('.sentinel')
+        if sentinel_path.exists():
+            with open(sentinel_path, 'r') as sf:
+                start = int(sf.read())
+        # each region is loaded (and augmented) here
+        for region_idx in tqdm( range(len(self))):
+            if region_idx < start:
+                continue
+            img_chw, annotation = self[region_idx]
+            img_prefix = re.sub(r'{}'.format( self.config['reg_img_suffix']), '', Path(annotation['path']).name)
+            for line_idx, box in enumerate( annotation['boxes'] ):
+                l,t,r,b = [ int(elt.item()) for elt in box ]
+                line_tensor = (img_chw.cpu().numpy())[:,t:b+1, l:r+1]
+                # compressed arrays << compressed tensors
+                mask_array = (annotation['masks'][line_idx,t:b+1, l:r+1]).cpu().numpy()
+                line_text = annotation['texts'][line_idx]
+                outfile_prefix = line_work_folder_path.joinpath( f"{img_prefix}-l{line_idx}")
+                if dry_run:
+                    logger.info(f"tensor: {line_tensor.shape}, mask: {mask_array.shape}, text: {line_text[:10]}..., outfile_prefix: {outfile_prefix}")
+                    dummy_line_count += 1
+                    continue
+                if iteration >= 0:
+                    outfile_prefix = f"{outfile_prefix}-i{iteration}"
+                if not line_as_tensor:
+                    line_array = (line_tensor.transpose(1,2,0)*255).astype('uint8')
+                    ski.io.imsave( f'{outfile_prefix}.png', line_array )
+                else:
+                    with gzip.GzipFile( f'{outfile_prefix}.pt.gz', 'w') as zf:
+                        torch.save( line_tensor, zf )
+                with gzip.GzipFile( f'{outfile_prefix}.bool.npy.gz', 'w') as zf:
+                    np.save( zf, mask_array )
+                with open( f'{outfile_prefix}.gt.txt', 'w') as of:
+                    of.write( line_text )
+            if dry_run:
+                continue
+            # indicates that this region dump is complete (for resuming task)
+            with open( sentinel_path, 'w') as sf:
+                sf.write(f'{region_idx}')
+        
+        if not dry_run and sentinel_path.exists():
+            sentinel_path.unlink()
+
+        logger.info("Compiled {} lines".format( len(list(line_work_folder_path.glob('*.png'))) if not dry_run else dummy_line_count))
 
 
 class HTRLineDataset(VisionDataset):
