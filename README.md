@@ -82,7 +82,7 @@ We can compile lines out of an explicit list of charter image files through the 
 
 1. Page data can be extracted either page-wide or region-wide:
 
-   + Option 1: page-wide extraction with `PageDataset`
+   + Option 1: page-wide extraction with `PageDataset`:
 
      ```python
      from libs.charter_htr_datasets import PageDataset
@@ -110,22 +110,22 @@ We can compile lines out of an explicit list of charter image files through the 
                    Data points:	5
      ```
    
-   Note that the number of data points (i.e. 5 regions) typically exceeds the number of charter images (4 in our example). At this point, the **page work folder** (in addition the pre-existing charter-wide data) contains one image crop and one JSON label file for each region:
+     Note that the number of data points (i.e. 5 regions) typically exceeds the number of charter images (4 in our example). At this point, the **page work folder** (in addition the pre-existing charter-wide data) contains one image crop and one JSON label file for each region:
    
-   ```bash
-     140 dataset/page_ds/NA-ACK_14611216_01686_r-r1.json
-   19816 dataset/page_ds/NA-ACK_14611216_01686_r-r1.png
-       4 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.json
-     380 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.png
-     120 dataset/page_ds/NA_ACK_338_13500216_r-r1.json
-    7064 dataset/page_ds/NA_ACK_338_13500216_r-r1.png
-     120 dataset/page_ds/NA_ACK_339_13500216_r-r1.json
-    6324 dataset/page_ds/NA_ACK_339_13500216_r-r1.png
-      80 dataset/page_ds/NA-CG-L_14330730_216_r-r1.json
-    5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
-   ```
+     ```bash
+       140 dataset/page_ds/NA-ACK_14611216_01686_r-r1.json
+     19816 dataset/page_ds/NA-ACK_14611216_01686_r-r1.png
+         4 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.json
+       380 dataset/page_ds/NA-ACK_14611216_01686_r-region_1573576805990_657.png
+       120 dataset/page_ds/NA_ACK_338_13500216_r-r1.json
+      7064 dataset/page_ds/NA_ACK_338_13500216_r-r1.png
+       120 dataset/page_ds/NA_ACK_339_13500216_r-r1.json
+      6324 dataset/page_ds/NA_ACK_339_13500216_r-r1.png
+        80 dataset/page_ds/NA-CG-L_14330730_216_r-r1.json
+      5632 dataset/page_ds/NA-CG-L_14330730_216_r-r1.png
+     ```
 
-  For building datasets out of JSON metadata, look up for the relevant flag (eg. `lbl_suffix='json'`)  in the module's documentation.
+   No matter the granularity (page-wide or region-wide), the format of the source page-wide labels (JSON or Page) is automatically detected. Derived regions labels are encoded with JSON. 
    
 2. Serialize the lines:
    
