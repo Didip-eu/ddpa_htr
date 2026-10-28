@@ -18,6 +18,7 @@ import numpy as np
 # local
 sys.path.append(str(Path(__file__).parents[0]))
 import list_utils as lu
+
 import alphabet_legacy
 from pylelemmatize import LemmatizerBMP
 
@@ -254,6 +255,5 @@ class Alphabet:
         alphabet._utf2lbl = alpha_compat._utf_2_code
         alphabet._lbl2utf = alpha_compat._code_2_utf
         return alphabet
-
 
     

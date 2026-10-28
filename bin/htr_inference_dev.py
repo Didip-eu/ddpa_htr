@@ -55,10 +55,11 @@ p = {
     "output_dir": ('', 'Where the predicted transcription (a JSON file) is to be written. Default: in the parent folder of the charter image.'),
     "img_suffix": ".img.jpg",
     "msk_suffix": ".bool.npy.gz",
+    "output_suffix": '',
     "with_mask": True,
     "htr_suffix": '', 
     "output_format": FargvChoice(["stdout", "json", "tsv", "xml"], description="Output formats; 'stdout' and 'tsv' = 3-column output '<index>\t<line id>\t<prediction>', on console and file, respectively, with optional GT and scores columns (see relevant option); 'json' and 'xml' = page-wide segmentation file."),
-    "output_data": (["pred"], "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen: 'scores', 'gt', 'metadata' (see below)."),
+    "output_data": ('', "By default, the application yields only character predictions; for standard or TSV output, additional data can be chosen, separated by a ':' char. E.g. 'scores:gt:metadata' (see below)."),
     "overwrite_existing": (True, "Write over existing output file (default)."),
     "line_padding_style": FargvChoice(['median', 'noise', 'zero', 'none'], description="How to pad the bounding box around the polygons: 'median'= polygon's median value, 'noise'=random noise, 'zero'=0-padding, 'none'=no padding"),
     "line_height_factor": FargvFloat(1.0, description="Factor to be applied to the original line strip height."),
@@ -92,6 +93,8 @@ def pack_fsdb_inputs_outputs( args:dict, segmentation_suffix:str ) -> list[tuple
         segfile_path = Path( re.sub(r'{}$'.format( args.img_suffix), segmentation_suffix, str(img_path) ))
         output_dir = img_path.parent if not args.output_dir else Path(args.output_dir)
         out_file_path = f'{img_stem}.{args.appname}.pred{args.htr_suffix}.{args.output_format}'
+        if args.output_suffix:
+            out_file_path = f'{img_stem}{args.output_suffix}'
         path_triplets.append( ( img_path, segfile_path, output_dir.joinpath( out_file_path )))
     #return path_triplets
     return sorted( path_triplets, key=lambda x: str(x))
@@ -116,6 +119,7 @@ if __name__ == "__main__":
     if 'padding_style' in model.image_specs:
         padding_style = model.image_specs['padding_style']
 
+    output_data = args.output_data.split(':')
     # no pages, only line images (and optional masks)
     if args.line_scope:
         dataset = LineInferenceDataset(
@@ -149,17 +153,17 @@ if __name__ == "__main__":
             args.output_format = 'stdout'
         if args.output_format in ('tsv', 'stdout'):
             header_row = ['Index', 'Id', 'Prediction']
-            if 'gt' in args.output_data:
+            if 'gt' in output_data:
                 header_row.append( 'GT' )
-            if 'scores' in args.output_data:
+            if 'scores' in output_data:
                 header_row.append( 'Scores')
             output_rows=[ '\t'.join( header_row ) ]
             for idx, line_dict in enumerate(line_dicts):
                 logger.debug( line_dict )
                 output_row = [ str(idx), line_dict['id'], line_dict['text'] ]
-                if 'gt' in args.output_data and 'gt' in line_dict:
+                if 'gt' in output_data and 'gt' in line_dict:
                     output_row.append( line_dict['gt'] )
-                if 'scores' in args.output_data and 'scores' in line_dict:
+                if 'scores' in output_data and 'scores' in line_dict:
                     output_row.append( str(line_dict['scores']) )
 
                 output_rows.append( '\t'.join( output_row ) )
@@ -175,6 +179,7 @@ if __name__ == "__main__":
         for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
             img_path, segmentation_file_path, output_file_path = img_triplet
+            logger.info(f"{img_path} ({segmentation_file_path})" )
             if segmentation_file_path.suffix != '.json' and args.line_height_factor != 1.0:
                 logger.info("-args.line_height_factor={} not applicable to XML segmentation data: ignored.")
             logger.debug( "File path={}".format( img_triplet[0]))
@@ -205,37 +210,36 @@ if __name__ == "__main__":
                 try:
                     # strings, np.ndarray
                     predicted_string, line_scores = model.inference( sample['img'], sample['width'] )
-                    print(predicted_string)
                     # since batch is 1, flattening batch values
                     line_id = sample['id'][0] # for some reason, the transform wraps the id into an array
                     line_dict = { 'id': line_id, 'text': predicted_string[0], 'scores': lu.flatten(line_scores.tolist()) }
-                    dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in args.output_data) )
+                    dataset.update_pagedict_line( line_id, line_dict, keep_gt=('gt' in output_data) )
                 except Exception as e:
                     logger.warning("Inference failed on line {} in file {}: {}".format( line, img_path, e))
                     continue
 
             # 3. Output
-            if args.output_format in ('json', 'xml') and ('gt' in args.output_data or 'scores' in args.output_data):
-                logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(args.output_data))
+            if args.output_format in ('json', 'xml') and ('gt' in output_data or 'scores' in output_data):
+                logger.warning("Skipping output data fields ({}): choose either 'stdout' or 'tsv' to include them in the output.".format(output_data))
 
             # stdout and tsv for extra data
             if args.output_format in ('stdout', 'tsv'):
                 header_row = ['Index', 'Id', 'Prediction']
-                if 'gt' in args.output_data:
+                if 'gt' in output_data:
                     header_row.append( 'GT' )
-                if 'scores' in args.output_data:
+                if 'scores' in output_data:
                     header_row.append( 'Scores')
-                if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                if 'metadata' in output_data and 'metadata' in dataset.page_dict:
                     header_row.extend( [str.capitalize(k) for k in dataset.page_dict['metadata'].keys()] )
                 output_rows=[ '\t'.join( header_row ) ]
                 for idx, line_dict in enumerate(dataset.page_dict['lines']):
                     logger.debug( line_dict )
                     output_row = [ str(idx), line_dict['id'], line_dict['text'] if 'text' in line_dict else '-']
-                    if 'gt' in args.output_data and 'gt' in line_dict:
+                    if 'gt' in output_data and 'gt' in line_dict:
                         output_row.append( line_dict['gt'] )
-                    if 'scores' in args.output_data and 'scores' in line_dict:
+                    if 'scores' in output_data and 'scores' in line_dict:
                         output_row.append( str(line_dict['scores']) )
-                    if 'metadata' in args.output_data and 'metadata' in dataset.page_dict:
+                    if 'metadata' in output_data and 'metadata' in dataset.page_dict:
                         output_row.extend([ str(elt) for elt in dataset.page_dict['metadata'].values() ])
                     output_rows.append( '\t'.join( output_row ) )
                 if args.output_format == 'stdout':
@@ -252,11 +256,16 @@ if __name__ == "__main__":
                         del line['scores']
                     if 'gt' in line:
                         del line['gt']
-                # deleting top-level 'lines' reference
+                # at this point, top-level line reference point to distinct object - a mapping is necessary
+                line_map = { l['id']:(r_idx,l_idx) for r_idx,r in enumerate(dataset.page_dict['regions']) for l_idx,l in enumerate(r['lines'])}
+                for l in dataset.page_dict['lines']:
+                    r_idx, l_idx = line_map[l['id']]
+                    dataset.page_dict['regions'][r_idx]['lines'][l_idx]=l
                 del dataset.page_dict['lines']
-                dataset.page_dict.update({
-                    'created': str(datetime.now()), 'creator': __file__,    
+                dataset.page_dict['metadata'].update({
+                    'created': str(datetime.now()), 'creator': __file__, 
                 })
+                
                 if args.output_format == 'json':
                     with open( output_file_path, 'w') as htr_outfile:
                         htr_outfile.write(json.dumps( dataset.page_dict, indent=2))
