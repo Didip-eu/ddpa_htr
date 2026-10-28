@@ -68,7 +68,7 @@ class HTR_Model():
             self.alphabet = Alphabet( LemmatizerBMP.from_alphabet_mapping( ll.charsets.mufibmp, ll.charsets.ascii_lowercase), override_map={k:k for k in ' .'})
         # Old-style alphabet serialization
         elif type(alphabet) is list:
-            self.alphabet = Alphabet.load_old( alphabet )
+            self.alphabet = Alphabet.load_legacy( alphabet )
         else:
             # during save/resume cycles, alphabet is serialized as a str
             self.alphabet = eval( alphabet) if type(alphabet) is str else alphabet

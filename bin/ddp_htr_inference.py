@@ -106,6 +106,14 @@ if __name__ == "__main__":
     if args.decoder=='beam-search': # this overrides whatever decoding function has been used during training
         model.decoder = HTR_Model.decode_beam_search
 
+    img_height, img_width, padding_style = 128, 2048, args.line_padding_style
+    if 'img_height' in model.image_specs:
+        img_height = model.image_specs['img_height']
+    if 'img_width' in model.image_specs:
+        img_width = model.image_specs['img_width']
+    if 'padding_style' in model.image_specs:
+        padding_style = model.image_specs['padding_style']
+
     for img_idx, img_triplet in enumerate( pack_fsdb_inputs_outputs( args, args.segmentation_suffix )):
 
         img_path, segmentation_file_path, output_file_path = img_triplet
@@ -123,9 +131,9 @@ if __name__ == "__main__":
         dataset = CharterInferenceDataset( 
                                     img_path, segmentation_file_path,
                                     transform = Compose([ 
-                                        tsf.ResizeToHeight( model.image_specs['img_height'], model.image_specs['img_width'] ), 
-                                        tsf.PadToWidth( model.image_specs['img_width'] ) ]),
-                                    padding_style=model.image_specs['padding_style'],
+                                        tsf.ResizeToHeight( img_height, img_width ), 
+                                        tsf.PadToWidth( img_width ) ]),
+                                    padding_style=padding_style,
                                     line_height_factor=args.line_height_factor,)
         if not dataset.ok:
             logger.warning("Could not build a proper dataset. Aborting.")

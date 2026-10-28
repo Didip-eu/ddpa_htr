@@ -18,6 +18,7 @@ import numpy as np
 # local
 sys.path.append(str(Path(__file__).parents[0]))
 import list_utils as lu
+import alphabet_legacy
 from pylelemmatize import LemmatizerBMP
 
 
@@ -233,11 +234,12 @@ class Alphabet:
                 dest_to_start[d]=set([s])
         return { k:sorted(list(dest_to_start[k])) for k in sorted(dest_to_start.keys()) }
 
+
     @staticmethod
-    def load_old( alphabet_as_list: list[list] ):
+    def load_legacy( alphabet_as_list: list[list] ):
         """
-        DEPRECATED: Load an old-style serialization, where the alphabet is stored as a list of list.
-        (For backward compatibility only.)
+        Load an old-style serialization, where the alphabet is stored as a list of list.
+        (For backward-compatibility only.)
         """
         mapping_dict = {}
         for elt in alphabet_as_list:
@@ -245,7 +247,13 @@ class Alphabet:
                 mapping_dict[elt]=elt
             elif type(elt) is list:
                 for c in elt:
-                    mapping_dict[c] = elt[0] 
-        return Alphabet( LemmatizerBMP(mapping_dict = mapping_dict ))
+                    mapping_dict[c] = elt[0]
+        alphabet = Alphabet( LemmatizerBMP(mapping_dict = mapping_dict ))
+
+        alpha_compat = alphabet_legacy.Alphabet( alphabet_as_list )
+        alphabet._utf2lbl = alpha_compat._utf_2_code
+        alphabet._lbl2utf = alpha_compat._code_2_utf
+        return alphabet
+
 
     
