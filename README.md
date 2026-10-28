@@ -81,35 +81,34 @@ For the sake of clarity, we illustrate the workflow by skipping the downloading 
 We can compile lines out of an explicit list of charter image files through the following steps:
 
 1. Page data can be extracted either page-wide or region-wide:
-   
+
    + Option 1: page-wide extraction with `PageDataset`
 
-   ```python
-   from libs.charter_htr_datasets import PageDataset
-   ds=cds.PageDataset( from_page_files=Path('./dataset/page_ds').glob('*.jpg'), img_suffix='.img.jpg', lbl_suffix='.htr.gt.exp.json')
-   100%|███████████████████████████████████████████████| 100/100 [00:00<00:00, 6788.88it/s]
-2026-10-28 12:46:42,360 - __init__:
+     ```python
+     from libs.charter_htr_datasets import PageDataset
+     ds=cds.PageDataset( from_page_files=Path('./dataset/page_ds').glob('*.jpg'), img_suffix='.img.jpg', lbl_suffix='.htr.gt.exp.json')
+     100%|███████████████████████████████████████████████| 100/100 [00:00<00:00, 6788.88it/s]
+     2026-10-28 12:46:42,360 - __init__:
                 Root path:	data
                 Archive path:	-
                 Archive root folder:	-
                 Page_work folder:	/home/nicolas/tmp/data/transcriptions_johannes/aligned
                 Data points:	100
-   ``` 
-
+     ``` 
    + Option 2: region-wide extraction with `PageRegionDataset`:
 
-   ```python
-   from libs.charter_htr_datasets import PageRegionDataset
-   ds=PageRegionDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
-   2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
-   100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
-   2025-11-16 11:49:58,963 - __init__:
+     ```python
+     from libs.charter_htr_datasets import PageRegionDataset
+     ds=PageRegionDataset( from_page_files=Path('./dataset/page_ds').glob('*216_*r.jpg'))
+     2025-11-16 11:49:51,167 - build_page_region_data: Building region data items (this might take a while).
+     100%|===================================================================| 4/4 [00:07<00:00,  1.95s/it]
+     2025-11-16 11:49:58,963 - __init__:
                    Root path:	data
                    Archive path:	data/-
                    Archive root folder:	data/-
                    Page_work folder:	dataset/page_ds
                    Data points:	5
-   ```
+     ```
    
    Note that the number of data points (i.e. 5 regions) typically exceeds the number of charter images (4 in our example). At this point, the **page work folder** (in addition the pre-existing charter-wide data) contains one image crop and one JSON label file for each region:
    
