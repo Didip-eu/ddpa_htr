@@ -228,9 +228,12 @@ def line_binary_mask_stack_from_segmentation_dict( segmentation_dict: dict ) -> 
         segmentation_dict (dict): a dictionary, typically constructed from a JSON file.
 
     Returns:
-        Tensor: a boolean tensor with size (N,H,W)
+        Tensor: a boolean tensor with size (N,H,W), or None if the dictionary contains
+            no polygon.
     """
     polygon_boundaries = line_polygons_from_segmentation_dict( segmentation_dict )
+    if not len(polygon_boundaries):
+        return None
     # create 2D boolean matrix
     mask_size = (segmentation_dict['image_width'], segmentation_dict['image_height'])
     return torch.tensor( np.stack( [ ski.draw.polygon2mask( mask_size, polyg ).transpose(1,0) for polyg in polygon_boundaries ]))

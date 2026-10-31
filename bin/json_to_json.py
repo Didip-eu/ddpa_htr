@@ -4,34 +4,36 @@ JSON -> JSON conversion, with an emphasis on HTR.
 
 Read a JSON metadata file, with a choice of options:
 
++ expand polygon heights wr/ original x-height
 + remove transcription data
 + add a comment
 + merge with content (HTR or segmentation) of another file
 
-Legacy format (with a top-level 'lines' array) is silently converted to 
-the nested structure 
+Legacy format (with a top-level 'lines' array) is silently converted to
+the nested structure
 
     { 'regions': [
-        { 'coords': [ ... ], 
+        { 'coords': [ ... ],
           'lines': [{ ... }, ... ] }, ...
       ]
     }
 
-Note: although this script is similar to its counterpart in 'ddpa_lines_ng', 
+Note: although this script is similar to its counterpart in 'ddpa_lines_ng',
 its features are tailored to HTR tasks:
 
-+ to minimize dependencies, the '-line_height_factor' option is not included,
-  nor is the '-promote_regions' one.
-+ options to merge segmentation into htr, or conversely
++ the '--promote_regions' option is absent
++ additional options to merge segmentation into htr, or conversely
 """
 
 import sys
 import json
-from pathlib import Path
+import re
 from datetime import datetime
+from pathlib import Path
+import logging
 
 import fargv
-from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
+from fargv import FargvPositional, FargvChoice
 
 from segtformats import segtformats as sgf
 
@@ -41,60 +43,62 @@ from libs import seglib
 
 p = {
     'file_paths': FargvPositional(default=[], description="Input file (JSON)."),
-    'polygon_key': 'coords',
+    'out': FargvChoice(['','auto'], description="Set to 'auto' for output to filename <input stem>.<output_suffix>; leave empty for standard output."),
+    'line_height_factor': (1.0, "Factor to be applied to the original line strip height."),
     'input_suffix': ('.htr.pred.json', "Input file suffix."),
-    'output_suffix': ('', "Output file suffix; if empty, write on standard output"),
-    'output_file': ('', "Output file (default: standard output)."),
+    'output_suffix': '.json',
     'overwrite_existing': (False, "Overwrite an existing output file."),
-    'drop_transcription': (False, "Extract line transcription, if it exists"),
+    'drop_transcription': (False, "Drop line transcription, if it exists"),
     "comment": ('',"A text string to be added to the <Comments> elt."),
     "inject_htr_suffix": ('',"Inject HTR content of file with given suffix into the main file, while keeping the segmentation."),
     "inject_segmentation_suffix": ('',"Inject the segmentation data of file with given suffix into the main file, while keeping the HTR."),
     "force": (False, "Force injections on mismatched ids (but not on mismatched line counts)."),
+    'verbosity': FargvChoice(['2','0','1','3'], description="Verbosity levels: 0 (quiet), 1 (WARNING), 2 (INFO-default), 3 (DEBUG)"),
 }
 
+logging_format="%(asctime)s - %(levelname)s: %(filename)s: %(funcName)s - %(message)s"
+logger = logging.getLogger(__name__)
 
 if __name__ == '__main__':
 
     args, _ = fargv.parse( p )
 
-    for file_path in args.file_paths:
+    logging.basicConfig(
+            level={0: logging.ERROR, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG }[int(args.verbosity)],
+            format=logging_format,
+            force=True )
 
-        output_file_path = Path( file_path.replace( args.input_suffix, args.output_suffix )) if args.output_suffix else None
-        print(f'{file_path} → {output_file_path}')
-        if output_file_path and not args.overwrite_existing and output_file_path.exists():
-            print(f"Existing {output_file_path}: skipping." )
-            continue
+    for file_path in args.file_paths:
 
         json_path = Path( file_path )
 
         segdict = None
-        with open( args.file_path, 'r') as json_if:
+        with open( json_path, 'r') as json_if:
             segdict = json.load( json_if )
 
-            # always 
+            # always
             if 'lines' in segdict:
                 segdict = sgf.segdict_sink_lines( segdict )
 
-            lines = sgf.line_dicts_from_segmentation_dict( segdict )
+            line_dicts= sgf.line_dicts_from_segmentation_dict( segdict )
 
-            # at most one of the two suffixes must be set 
+            # at most one of the two suffixes must be set
             if bool(args.inject_htr_suffix) != bool(args.inject_segmentation_suffix):
 
                 injection_path = Path(file_path.replace(args.input_suffix, args.inject_htr_suffix)) if args.inject_htr_suffix else Path(file_path.replace( args.input_suffix, args.inject_segmentation_suffix))
                 with open( injection_path ) as injection_if:
                     injection_dict = json.load( injection_if )
-                    
+
                     # check number of regions and lines
                     if len(segdict['regions']) != len(injection_dict['regions']):
                         print("Region counts in the two files do not seem to match. Please do a manual check.")
                         sys.exit()
                     injection_lines = sgf.line_dicts_from_segmentation_dict( injection_dict )
-                    if len(lines) != len(injection_lines):
+                    if len(line_dicts) != len(injection_lines):
                         print("Line counts in the two files do not seem to match. Please do a manual check.")
                         sys.exit()
-                    # check ids 
-                    zip_lines = list(zip(lines, injection_lines))
+                    # check ids
+                    zip_lines = list(zip(line_dicts, injection_lines))
                     if not all([ l1['id']==l2['id'] for (l1, l2) in zip_lines ]):
                         if not args.force:
                             answer=input("Line ids in the two files do not match. Do you want to continue? [Yn]")
@@ -104,7 +108,7 @@ if __name__ == '__main__':
                     for l1, l2 in zip_lines:
                         if args.inject_htr:
                             if 'text' in l2:
-                                l1['text'] = l2['text'] 
+                                l1['text'] = l2['text']
                         elif args.inject_segmentation_suffix:
                             for k in ('coords', 'baseline', 'centerline'):
                                 if k in l2:
@@ -120,30 +124,47 @@ if __name__ == '__main__':
                         for r1, r2 in zip_regions:
                             if 'coords' in r2:
                                 r1['coords'] = r2['coords']
-                    
+
             # remove transcriptions
             if not args.inject_htr_suffix and args.drop_transcription:
-                for line in lines: 
+                for line in line_dicts:
                     if 'text' in line:
                         del line['text']
 
+            # expand polygons
+            if args.line_height_factor != 1.0:
+                line_polygons = seglib.line_polygons_from_segmentation_dict( segdict, factor=args.line_height_factor )
+                for polyg, line in zip( line_polygons, line_dicts ):
+                    line['coords']=polyg
+
             # insert metadata at the top
-            segdict['metadata'].update( {'created': str(datetime.now()), 'creator': __file__ })
             regions = segdict['regions']
             del segdict['regions']
+            segdict['metadata'].update( {'created': str(datetime.now().isoformat('T','seconds')), 'creator': __file__ })
+
+            if args.line_height_factor != 1.0:
+                segdict['line_height_factor']=args.line_height_factor
             if args.comment:
                 segdict['metadata']['comments']=args.comment
             segdict['regions']=regions
 
-            # output
-            if segdict is not None:
-                if args.output_file:
-                    output_path = Path( output_file )
-                    if not args.overwrite_existing and output_path.exists():
-                        print("File {} exists: abort.".format(args.output_file))
-                    else:
-                        with open( output_path,'w') as of:
-                            of.write( json.dumps( segdict, indent=2))
-                else:
-                    print( json.dumps( segdict, indent=2 ))
+            segdict_str = json.dumps( segdict, indent=2 )
+            if not args.out:
+                print( segdict_str )
+                continue
+
+            out_path = ''
+            if args.out == 'auto':
+                if not re.search( r'{}$'.format(args.input_suffix), json_path.name):
+                    logger.warning(f"Input file path '{json_path.name}' does not match input suffix '{args.input_suffix}': output aborted.")
+                    continue
+                out_path = re.sub(r'{}$'.format( args.input_suffix ), args.output_suffix, json_path )
+            logger.debug(f"Output file = {out_path}")
+
+            if not args.overwrite_existing and Path(out_path).exists():
+                logger.info("File {} exists: skipping.".format( out_path ))
+                continue
+            with open(out_path, 'w') as json_outf:
+                logger.info(f"W: {json_path.name} → {Path(out_path).name}")
+                json_outf.write( segdict_str )
 

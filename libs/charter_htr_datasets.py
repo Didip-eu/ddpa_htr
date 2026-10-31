@@ -18,11 +18,13 @@ from typing import Callable, Union, Optional
 import sys
 from datetime import datetime
 from functools import partial
+import tempfile
 
 # 3rd-party
 from tqdm import tqdm
 from PIL import Image
 import skimage as ski
+import zipfile
 import gzip
 import pandas
 import numpy as np
@@ -125,7 +127,7 @@ class PageDataset(VisionDataset):
             from_page_folder (str): if set, the samples have to be extracted from the
                 raw page data contained in the given directory. GT metadata are either
                 JSON files or PageXML.
-            from page_files (list[Path]): if set, supersedes previous options; all files must
+            from page_files (list[Path]): if set, supersedes previous options; all image files must
                 be contained in the same folder.
             transform (Callable): A v2.transform to apply to the PIL image at loading time.
             augmentation_class (Callable[tuple[Tensor,dict]]): any transform that takes a tensor as an input
@@ -289,8 +291,11 @@ class PageDataset(VisionDataset):
             tuple[Tensor,dict]: A tuple containing the image (as a tensor) and its associated target (annotations).
         """
         img_path, label_path = self._data[index]
-        img_whc, label = self._load_image_and_label(img_path, label_path)
+        img_lbl_pair = self._load_image_and_label(img_path, label_path)
+        if not img_lbl_pair:
+            return tuple()
 
+        img_whc, label = img_lbl_pair
         if self._transforms:
             img_chw, target = self._transforms( img_whc, label )
         if self.augmentation_class:
@@ -323,6 +328,11 @@ class PageDataset(VisionDataset):
                 page_dict = json.load( jsonf )
         elif input_format == sgf.SegFormat.Unknown:
                 raise ValueError("Unknown metadata format.")
+        line_masks = seglib.line_binary_mask_stack_from_segmentation_dict( page_dict )
+        # Handling pages that have no lines
+        if line_masks is None:
+            logger.warning(f'No line polygons found for image {img_path}: skipping page.')
+            return tuple()
         masks_nhw = Mask( seglib.line_binary_mask_stack_from_segmentation_dict( page_dict )) 
         bboxes_n4 = BoundingBoxes(data=torchvision.ops.masks_to_boxes(masks_nhw), format='xyxy', canvas_size=img_whc.size[::-1])
         texts = [ l['text'] for l in sgf.flatten_segmentation_dict(page_dict)['lines'] ]
@@ -396,7 +406,10 @@ class PageDataset(VisionDataset):
         for page_idx in tqdm( range(len(self))):
             if page_idx < start:
                 continue
-            img_chw, annotation = self[page_idx]
+            img_annotation_pair = self[page_idx]
+            if not img_annotation_pair:
+                continue
+            img_chw, annotation = img_annotation_pair
             img_prefix = re.sub(r'{}'.format( self.config['img_suffix']), '', Path(annotation['path']).name)
             for line_idx, box in enumerate( annotation['boxes'] ):
                 l,t,r,b = [ int(elt.item()) for elt in box ]
@@ -495,6 +508,7 @@ class PageDataset(VisionDataset):
             cnt += 1
         return cnt
 
+
     def __str__(self) -> str:
         return f"""
                 Root path:\t{self.root_path}
@@ -503,7 +517,6 @@ class PageDataset(VisionDataset):
                 Page_work folder:\t{self.page_work_folder_path}
                 Data points:\t{len(self._data)}
                 """
-
 
     def download_and_extract( self, root_path: Path, fl_meta: dict, extract=False) -> None:
         """Download the archive and extract it. If a valid archive already exists in the root location,
@@ -544,6 +557,21 @@ class PageDataset(VisionDataset):
             with zipfile.ZipFile(output_file_path, 'r' ) as archive:
                 logger.info('Extract {} ({})'.format(output_file_path, fl_meta["desc"]))
                 archive.extractall( root_path )
+        
+    def zip( self, archive_path:str ):
+        """
+        Export the dataset line images and transcriptions as a flat tree
+        of line triplets image/mask/text `(<prefix>.npy, <prefix>.png, <prefix>.txt)`.
+
+        Args:
+            archive_path (str): archive to be created.
+        """
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            self.dump_lines( tmpdirname )
+            with zipfile.ZipFile( archive_path, 'w') as archive:
+                logger.info(f'Creating archive {archive_path}...')
+                for line_item in Path(tmpdirname).glob('*'):
+                    archive.write( line_item )
 
 
 class PageRegionDataset(PageDataset):
