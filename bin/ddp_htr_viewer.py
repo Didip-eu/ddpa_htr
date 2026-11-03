@@ -16,6 +16,7 @@ import logging
 # 3rd party
 from PIL import Image
 import fargv
+fargv.util.verbosity=1 # for --help to display option descriptions
 from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 # local
