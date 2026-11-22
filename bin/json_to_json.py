@@ -101,12 +101,12 @@ if __name__ == '__main__':
                     zip_lines = list(zip(line_dicts, injection_lines))
                     if not all([ l1['id']==l2['id'] for (l1, l2) in zip_lines ]):
                         if not args.force:
-                            answer=input("Line ids in the two files do not match. Do you want to continue? [Yn]")
-                            if answer!='' or answer!='y' or answer!='Y':
+                            answer=input("Line ids in the two files do not match. Do you want to continue? [yN] ")
+                            if answer!='' and (answer!='y' and answer!='yes'):
                                 sys.exit()
                     # inject line data
                     for l1, l2 in zip_lines:
-                        if args.inject_htr:
+                        if args.inject_htr_suffix:
                             if 'text' in l2:
                                 l1['text'] = l2['text']
                         elif args.inject_segmentation_suffix:
@@ -118,8 +118,8 @@ if __name__ == '__main__':
                         zip_regions = list(zip(segdict['regions'], injection_dict['regions']))
                         if not all([ r1['id']==r2['id'] for (r1, r2) in zip_regions ]):
                             if not args.force:
-                                answer=input("Regions ids in the two files do not match. Do you want to continue? [Yn]")
-                                if answer!='' or answer!='y' or answer!='Y':
+                                answer=input("Regions ids in the two files do not match. Do you want to continue? [yN] ")
+                                if answer!='' and (answer!='y' and answer!='yes'):
                                     sys.exit()
                         for r1, r2 in zip_regions:
                             if 'coords' in r2:
