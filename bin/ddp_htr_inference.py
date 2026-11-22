@@ -27,6 +27,7 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import ToTensor, Compose
 from torchvision.datasets import VisionDataset
 import fargv
+fargv.util.verbosity=1 # for --help to display option descriptions
 from fargv import FargvChoice, FargvFloat, FargvPositional
 from segtformats import segtformats as sgf
 

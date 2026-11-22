@@ -26,6 +26,7 @@ import torch
 sys.path.append( str(Path(__file__).parents[1] ))
 
 import fargv
+fargv.util.verbosity=1 # for --help to display option descriptions
 from fargv import FargvChoice, FargvInt, FargvFloat, FargvPositional, FargvTuple
 
 from libs import charter_htr_datasets as pds
